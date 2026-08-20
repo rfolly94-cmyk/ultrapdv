@@ -1,0 +1,36 @@
+UltraPDV — NF-e modelo 55 por venda — HOMOLOGAÇÃO
+
+Copie toda a estrutura por cima de D:\ultrapdv.
+
+Arquivos:
+- lib/fiscal/geranet/montar-payload-nfe.ts
+- app/api/fiscal/geranet/nfe-emitir-venda/route.ts
+- components/vendas/emitir-nfe-venda-button.tsx
+- app/vendas/[id]/nfe/page.tsx
+- app/vendas/[id]/page.tsx
+
+Fluxo:
+Vendas -> Abrir -> Preparar NF-e -> Conferir -> Emitir NF-e
+
+Regras desta primeira etapa:
+- somente homologação (ambiente 2);
+- venda precisa estar finalizada;
+- cliente é obrigatório;
+- CPF/CNPJ e endereço fiscal do cliente são validados;
+- contribuinte ICMS exige IE;
+- operação interna/interestadual é escolhida pela UF do cliente;
+- CFOP vem do Grupo Fiscal conforme operação;
+- múltiplos itens e pagamentos;
+- modFrete = 9;
+- valor de frete e acréscimos ainda são bloqueados;
+- utiliza reserva atômica e fiscal_emissoes;
+- NF-e usa chave de idempotência determinística própria do modelo 55,
+  diferente da tentativa NFC-e da mesma venda.
+
+Não há migration.
+Não rode supabase db push.
+
+Observação:
+Enquanto a IE do emitente continuar rejeitada na SEFAZ-MT, a NF-e também pode
+chegar à SEFAZ e retornar rejeição relacionada à IE. Isso não impede validar o fluxo
+UltraPDV -> Geranet -> SEFAZ em homologação.

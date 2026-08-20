@@ -1,0 +1,27 @@
+UltraPDV — Emissão NFC-e real por venda (HOMOLOGAÇÃO)
+
+Copie a estrutura por cima de D:\ultrapdv.
+
+Principais arquivos novos/alterados:
+- app/api/fiscal/geranet/nfce-emitir-venda/route.ts
+- components/vendas/emitir-nfce-venda-button.tsx
+- app/vendas/[id]/nfce/page.tsx
+
+Comportamento:
+- lê a venda, todos os itens e todos os pagamentos;
+- usa venda.id como Idempotency-Key;
+- reserva fiscal com origem_tipo='venda' e origem_id=venda.id;
+- monta cada item com o motor Geranet existente;
+- usa preço/quantidade/desconto e snapshots fiscais da venda;
+- expande o payload para múltiplos itens e múltiplos pagamentos;
+- transmite somente em ambiente 2 (homologação);
+- persiste autorizada/rejeitada/aguardando_reconciliacao em fiscal_emissoes;
+- nunca cria nova chave para retry da mesma venda;
+- bloqueia venda com frete/acréscimo nesta etapa.
+
+Não há migration.
+Não rode supabase db push.
+
+IMPORTANTE:
+A rejeição anterior de IE do emitente pode continuar ocorrendo, pois esta etapa liga
+a venda real ao fluxo fiscal; ela não altera o cadastro estadual da SEFAZ.

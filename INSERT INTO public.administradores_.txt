@@ -1,0 +1,7 @@
+INSERT INTO public.administradores_plataforma (usuario_id, ativo)
+
+VALUES ('3a4774cd-6b9c-4ca2-a93e-36d73bec2f6b', true)
+
+ON CONFLICT (usuario_id)
+
+DO UPDATE SET ativo = true;

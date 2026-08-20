@@ -1,0 +1,34 @@
+UltraPDV — Cancelamento comercial da venda
+
+Este pacote CONTÉM também o cancelamento fiscal anterior e o pós-emissão.
+
+Arquivos novos principais:
+- supabase/migrations/20260813163000_cancelamento_comercial_venda.sql
+- app/api/vendas/[id]/cancelar/route.ts
+- components/vendas/cancelar-venda-comercial.tsx
+- app/vendas/[id]/page.tsx
+
+PASSOS:
+1. Copie toda a estrutura por cima de D:\ultrapdv
+2. Rode:
+   npx supabase db push
+3. Abra uma venda finalizada.
+4. Se existir NF-e/NFC-e autorizada, cancele o documento fiscal primeiro.
+5. Depois clique "Cancelar venda".
+
+A RPC:
+- trava a venda na transação;
+- bloqueia se houver fiscal ainda autorizado;
+- estorna estoque pelos movimentos VENDA/SAIDA ligados à venda;
+- estorna o saldo FIADO ainda ligado à venda;
+- se caixas_movimentacoes existir e houver movimentos com
+  idempotency_key venda:<venda_id>:% cria os movimentos inversos;
+- marca pagamentos confirmados como cancelados;
+- marca vendas.status='cancelada', cancelada_at, cancelada_por e motivo.
+
+IMPORTANTE:
+Se a venda fiado já teve recebimentos posteriores que tornem impossível
+retirar o débito original com segurança, o cancelamento é bloqueado para
+revisão da carteira.
+
+Migration necessária.

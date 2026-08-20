@@ -1,0 +1,26 @@
+UltraPDV — Cancelamento fiscal NF-e/NFC-e
+
+Arquivos principais:
+- supabase/migrations/20260813160000_fiscal_eventos_cancelamento.sql
+- app/api/fiscal/emissoes/[id]/cancelar/route.ts
+- app/api/fiscal/eventos/[id]/arquivo/route.ts
+- components/vendas/cancelar-documento-fiscal.tsx
+- app/vendas/[id]/page.tsx
+
+Também mantém os arquivos do pacote anterior de pós-emissão.
+
+PASSOS:
+1. Copie toda a estrutura por cima de D:\ultrapdv
+2. Rode:
+   npx supabase db push
+3. Reinicie/atualize o Next.js se necessário.
+4. Abra Vendas -> venda com NF-e/NFC-e autorizada.
+5. Use "Cancelar NF-e" ou "Cancelar NFC-e".
+6. Informe justificativa com pelo menos 15 caracteres.
+
+IMPORTANTE:
+- Este fluxo cancela SOMENTE o documento fiscal.
+- Não estorna venda, estoque, caixa ou carteira automaticamente.
+- O estorno comercial deve ser feito depois, em fluxo próprio.
+- Se houver timeout/erro de comunicação após envio, o evento fica
+  aguardando_reconciliacao e o sistema bloqueia reenvio automático.

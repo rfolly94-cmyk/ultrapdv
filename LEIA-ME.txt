@@ -1,0 +1,116 @@
+UltraPDV — Cadastro de nova empresa
+===================================
+
+NOVO FLUXO
+----------
+Novo proprietário:
+  /cadastro
+      ↓
+  Supabase Auth cria o login
+      ↓
+  /onboarding
+      ↓
+  cria empresa
+  cria/atualiza public.usuarios
+  cria usuarios_empresas como administrador/principal/ativo
+      ↓
+  /painel
+
+Funcionários continuam sendo criados em:
+  Configurações → Usuários
+
+SEGURANÇA
+---------
+/cadastro usa o Supabase Auth normal no navegador.
+Nenhuma chave service role vai para o browser.
+
+A criação da empresa acontece somente depois que o usuário está
+autenticado.
+
+A API /api/onboarding/empresa valida a sessão e chama, com service role,
+a RPC:
+  rpc_criar_empresa_onboarding
+
+A RPC só é executável por service_role e faz tudo na mesma transação.
+
+ISOLAMENTO
+----------
+O proprietário recebe:
+  perfil = administrador
+  principal = true
+  ativo = true
+
+em usuarios_empresas para a empresa recém-criada.
+
+CNPJ duplicado NÃO é vinculado automaticamente a outro login.
+O sistema bloqueia e informa que o CNPJ já existe.
+
+FORMAS DE PAGAMENTO
+-------------------
+Não são criadas manualmente por este módulo.
+
+O banco já possui a migration:
+  20260813011000_formas_pagamento_padrao.sql
+
+Ela contém um trigger AFTER INSERT em empresas e cria automaticamente:
+- Dinheiro
+- PIX Dinâmico
+- PIX Estático
+- Cartão de Débito
+- Cartão de Crédito
+- Fiado / Crédito Loja
+
+FISCAL
+------
+A nova empresa NÃO recebe certificado, CSC ou numeração fictícia.
+
+Depois do primeiro acesso, o administrador configura:
+  Configurações → Configurações fiscais
+
+INSTALAÇÃO
+----------
+Copie o conteúdo deste ZIP sobre:
+
+D:\ultrapdv
+
+Depois rode:
+
+cd D:\ultrapdv
+npx supabase db push
+
+Como a migration deste pacote usa timestamp 20260814230000, ela foi
+posicionada depois das migrations conhecidas deste projeto.
+
+Depois mantenha/rode:
+npm run dev
+
+TESTE
+-----
+1. Faça logout do usuário atual.
+2. Abra:
+   http://localhost:3000/cadastro
+3. Crie um NOVO e-mail de teste.
+4. Se o Supabase exigir confirmação por e-mail, confirme e entre por /login.
+5. O sistema deve abrir /onboarding.
+6. Informe CNPJ válido, razão social e nome fantasia.
+7. Clique "Criar empresa e entrar".
+8. Deve abrir /painel.
+9. Confira Configurações → Usuários:
+   o proprietário deve aparecer como Administrador.
+10. Abra /pdv:
+   as formas de pagamento padrão já devem existir.
+
+ARQUIVOS
+--------
+app/cadastro/page.tsx
+app/onboarding/page.tsx
+app/api/onboarding/empresa/route.ts
+components/cadastro/cadastro-proprietario-form.tsx
+components/onboarding/onboarding-empresa-form.tsx
+components/app-shell.tsx
+supabase/migrations/20260814230000_onboarding_nova_empresa.sql
+
+OBSERVAÇÃO
+----------
+O app-shell deste pacote apenas acrescenta /cadastro às rotas sem
+sidebar/chrome. Mantém o botão Sair e os menus do hotfix anterior.

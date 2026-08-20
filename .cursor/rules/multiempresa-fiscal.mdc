@@ -1,0 +1,35 @@
+---
+description: Isolamento multiempresa obrigatório — nunca compartilhar dados fiscais ou cadastrais entre empresas
+alwaysApply: true
+---
+
+# Multiempresa — empresa ativa
+
+Toda leitura, gravação, RPC, Server Action, API Route, RLS, índice e constraint deve respeitar a **empresa ativa** (`usuarios_empresas.principal = true` e `ativo = true`).
+
+Antes de usar qualquer registro de negócio/fiscal, validar `registro.empresa_id === empresaIdAtiva`. Sem match: bloquear. Não inferir empresa pelo id do documento.
+
+## Obrigatório
+
+- Filtrar por `empresa_id` da empresa ativa em todo `select`/`update`/`delete`.
+- Em insert, `empresa_id` vem da sessão ativa — nunca do body/form/query.
+- Unique, FK e índices de cadastro fiscal incluem `empresa_id` (ou validam a mesma empresa via trigger).
+- RLS por empresa do usuário; escrita privilegiada (`service_role`) ainda filtra `empresa_id`.
+- Natureza, CFOP, numeração, emissão, certificado e regras tributárias são **por empresa**.
+
+## Proibido
+
+```ts
+// ❌ natureza/CFOP/numeração globais
+const natureza = await db.from("fiscal_naturezas_operacao").select("*").eq("id", id).single();
+
+// ✅
+const natureza = await db.from("fiscal_naturezas_operacao")
+  .select("*")
+  .eq("id", id)
+  .eq("empresa_id", empresaIdAtiva)
+  .maybeSingle();
+if (natureza?.empresa_id !== empresaIdAtiva) bloquear();
+```
+
+Catálogos de código (`fiscal_tipos_operacao`, CSOSN, NCM) podem ser globais. Cadastro e configuração fiscal não.

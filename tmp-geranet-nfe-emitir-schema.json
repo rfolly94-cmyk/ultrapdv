@@ -1,0 +1,564 @@
+{
+  "schema": {
+    "type": "object",
+    "description": "Payload de emissão. Os campos de IBS/CBS da NFe/NFCe ficam em cada item de nfe.itens. Para cobrança/pagamento a prazo, envie nfe.pagamento.detalhamento[].tipo, valor e indicadorPagamento, junto com nfe.fatura.numero, valor, desconto, valorLiquido e nfe.fatura.duplicatas[] com numero, dataVencimento, valor e, se desejar, codigoPagamento. No TEF, o detalhamento aceita cnpjCredenciadora, tipoBandeira, autorizacao, tipoIntegracao, cnpjPag, ufPag e cnpjReceb; os três últimos são opcionais e permanecem ausentes do XML quando não informados. Notas de crédito e débito são NFe modelo 55 e usam finalidade 5 ou 6. Em casos especiais, consulte x-detalhesCasosEspeciais para NFC-e offline.",
+    "properties": {
+      "nfe": {
+        "type": "object",
+        "properties": {
+          "contingencia": {
+            "type": "string",
+            "enum": [
+              "nao",
+              "sim"
+            ],
+            "description": "Modo da NFC-e. Omita ou use nao para emissão normal; use sim somente para gerar NFC-e offline em contingência. Disponível para modelo 65.",
+            "example": "nao"
+          },
+          "justificativaContingencia": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Justificativa obrigatória quando nfe.contingencia = sim.",
+            "example": "Indisponibilidade temporária de comunicação com a SEFAZ."
+          },
+          "finalidade": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6"
+            ],
+            "description": "Finalidade da NFe: 1 normal, 2 complementar, 3 ajuste, 4 devolução, 5 nota de crédito e 6 nota de débito.",
+            "example": "1"
+          },
+          "tipoNotaCredito": {
+            "type": "string",
+            "enum": [
+              "01",
+              "02",
+              "03",
+              "04",
+              "05",
+              "06"
+            ],
+            "description": "Obrigatório quando finalidade=5. 01 multa/juros; 02 crédito presumido; 03 retorno por recusa ou não localização; 04 redução de valores; 05 transferência por sucessão; 06 retorno por recusa parcial.",
+            "example": "04"
+          },
+          "tipoNotaDebito": {
+            "type": "string",
+            "enum": [
+              "01",
+              "02",
+              "03",
+              "04",
+              "05",
+              "06",
+              "07",
+              "08"
+            ],
+            "description": "Obrigatório quando finalidade=6. 01 transferência de crédito de cooperativas; 02 anulação; 03 débitos não processados; 04 multa/juros; 05 transferência por sucessão; 06 pagamento antecipado; 07 perda em estoque; 08 desenquadramento do Simples Nacional.",
+            "example": "06"
+          },
+          "indicadorPresenca": {
+            "type": "string",
+            "enum": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "9"
+            ],
+            "description": "Indicador de presença da operação: 0 não se aplica; 1 presencial; 2 internet; 3 teleatendimento; 4 entrega; 5 fora do estabelecimento; 9 outros.",
+            "example": "1"
+          },
+          "indicativoIntermediador": {
+            "type": "string",
+            "enum": [
+              "0",
+              "1"
+            ],
+            "description": "Indicativo de intermediador: 0 sem intermediador; 1 com marketplace ou outro intermediador da operação.",
+            "example": "0"
+          },
+          "notaFiscalReferencia": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$",
+            "description": "Chave de acesso da NFe referenciada, com 44 dígitos.",
+            "example": "35260700000000000191550010000000011000000010"
+          },
+          "notasFiscaisPagamentoAntecipado": {
+            "type": "array",
+            "description": "Chaves de NFe relacionadas ao pagamento antecipado. Use em nota de débito.",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{44}$"
+            }
+          },
+          "pagamento": {
+            "type": "object",
+            "description": "Dados de pagamento. Os campos cnpjPag, ufPag e cnpjReceb são opcionais e não geram conteúdo no XML quando omitidos.",
+            "properties": {
+              "troco": {
+                "type": "number",
+                "description": "Valor do troco."
+              },
+              "detalhamento": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tipo": {
+                      "type": "string",
+                      "description": "Forma de pagamento, como 03 cartão de crédito ou 04 cartão de débito.",
+                      "example": "03"
+                    },
+                    "valor": {
+                      "type": "number",
+                      "description": "Valor pago.",
+                      "example": 100
+                    },
+                    "indicadorPagamento": {
+                      "type": "string",
+                      "enum": [
+                        "0",
+                        "1"
+                      ],
+                      "description": "0 à vista; 1 a prazo.",
+                      "example": "0"
+                    },
+                    "cnpjCredenciadora": {
+                      "type": "string",
+                      "description": "Opcional: CNPJ da credenciadora/adquirente do cartão.",
+                      "example": "12345678000190"
+                    },
+                    "tipoBandeira": {
+                      "type": "string",
+                      "description": "Opcional: código da bandeira do cartão, como 01 Visa, 02 Mastercard, 06 Elo ou 99 outros.",
+                      "example": "06"
+                    },
+                    "autorizacao": {
+                      "type": "string",
+                      "description": "Opcional: código de autorização da operação de cartão/TEF.",
+                      "example": "123456"
+                    },
+                    "tipoIntegracao": {
+                      "type": "string",
+                      "enum": [
+                        "1",
+                        "2"
+                      ],
+                      "description": "Opcional: 1 pagamento integrado; 2 não integrado.",
+                      "example": "1"
+                    },
+                    "cnpjPag": {
+                      "type": "string",
+                      "description": "Opcional: CNPJ do pagador, quando aplicável."
+                    },
+                    "ufPag": {
+                      "type": "string",
+                      "description": "Opcional: UF do pagador, quando aplicável.",
+                      "example": "TO"
+                    },
+                    "cnpjReceb": {
+                      "type": "string",
+                      "description": "Opcional: CNPJ do recebedor do pagamento, quando aplicável."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true
+          },
+          "itens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cstIbscbs": {
+                  "type": "string",
+                  "description": "CST do IBS/CBS.",
+                  "example": "000"
+                },
+                "cClassTribIbscbs": {
+                  "type": "string",
+                  "description": "Código de classificação tributária do IBS/CBS.",
+                  "example": "000001"
+                },
+                "aliquotaIbsUf": {
+                  "type": "string",
+                  "description": "Alíquota do IBS estadual/UF.",
+                  "example": "0.1000"
+                },
+                "aliquotaIbsMun": {
+                  "type": "string",
+                  "description": "Alíquota do IBS municipal.",
+                  "example": "0.0000"
+                },
+                "aliquotaCbs": {
+                  "type": "string",
+                  "description": "Alíquota da CBS federal.",
+                  "example": "0.9000"
+                },
+                "percentualReducaoIbsUf": {
+                  "type": "string",
+                  "description": "Percentual de redução da alíquota do IBS estadual/UF, de 0 a 100. Quando maior que zero, gera gRed.pRedAliq e calcula pAliqEfet.",
+                  "example": "0.00"
+                },
+                "percentualReducaoIbsMun": {
+                  "type": "string",
+                  "description": "Percentual de redução da alíquota do IBS municipal, de 0 a 100. Quando maior que zero, gera gRed.pRedAliq e calcula pAliqEfet.",
+                  "example": "0.00"
+                },
+                "percentualReducaoCbs": {
+                  "type": "string",
+                  "description": "Percentual de redução da alíquota da CBS, de 0 a 100. Quando maior que zero, gera gRed.pRedAliq e calcula pAliqEfet.",
+                  "example": "0.00"
+                },
+                "baseCalculoIbscbs": {
+                  "type": "string",
+                  "description": "Base de cálculo do IBS/CBS no item. Quando omitida, é usado o valor total do produto.",
+                  "example": "20.00"
+                },
+                "valorIbsUf": {
+                  "type": "string",
+                  "description": "Valor do IBS estadual/UF. Quando omitido, é calculado pela base e aliquotaIbsUf.",
+                  "example": "0.02"
+                },
+                "valorIbsMun": {
+                  "type": "string",
+                  "description": "Valor do IBS municipal. Quando omitido, é calculado pela base e aliquotaIbsMun.",
+                  "example": "0.00"
+                },
+                "valorCbs": {
+                  "type": "string",
+                  "description": "Valor da CBS. Quando omitido, é calculado pela base e aliquotaCbs.",
+                  "example": "0.18"
+                },
+                "ibscbsManual": {
+                  "type": "string",
+                  "description": "Use \"1\" para informar manualmente os campos de IBS/CBS do item; use \"0\" para seguir o cálculo/regra padrão do emissor.",
+                  "example": "0"
+                },
+                "documentoFiscalReferenciado": {
+                  "type": "object",
+                  "description": "Documento fiscal vinculado especificamente ao item.",
+                  "properties": {
+                    "chaveAcesso": {
+                      "type": "string",
+                      "pattern": "^[0-9]{44}$",
+                      "description": "Chave de acesso do documento fiscal, com 44 dígitos."
+                    },
+                    "numeroItem": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Número do item referenciado no documento fiscal."
+                    }
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    },
+    "additionalProperties": true
+  },
+  "examples": {
+    "nfeSimples": {
+      "summary": "Exemplo simples de NFe",
+      "value": {
+        "acao": "emitir",
+        "modeloDocumento": "nfe",
+        "certificadoDigital": "conteudo_do_certificado_a1_em_hexadecimal",
+        "senhaCertificadoDigital": "sua_senha",
+        "ambiente": "2",
+        "modelo": "55",
+        "ufEmitente": "TO",
+        "nfe": {
+          "contingencia": "nao",
+          "empresa": {
+            "cnpj": "00000000000191",
+            "inscricaoEstadual": "123456789",
+            "razaoSocial": "COMERCIAL EXEMPLO LTDA",
+            "nomeFantasia": "COMERCIAL EXEMPLO",
+            "telefone": "63900000000",
+            "email": "financeiro@exemplo.com.br",
+            "logradouro": "Rua das Flores",
+            "numero": "100",
+            "complemento": "",
+            "bairro": "Centro",
+            "municipio": "ARAGUAINA - TO",
+            "codigoMunicipio": "170210",
+            "uf": "TO",
+            "cep": "77800000",
+            "codigoRegimeTributario": "1",
+            "tipoAtividade": "3",
+            "serie": "2",
+            "idCodigoSegurancaContribuinte": "",
+            "codigoSegurancaContribuinte": "",
+            "informacaoComplementar": ""
+          },
+          "cliente": {
+            "cnpj": "",
+            "cpf": "12345678909",
+            "inscricaoEstadual": "",
+            "razaoSocial": "João da Silva",
+            "nomeFantasia": "",
+            "consumidorFinal": "1",
+            "indicadorIEdestinatario": "9",
+            "telefone": "11900000000",
+            "email": "cliente@exemplo.com.br",
+            "logradouro": "Av. Brasil",
+            "numero": "500",
+            "complemento": "",
+            "bairro": "Vila Nova",
+            "municipio": "ARAGUAINA - TO",
+            "codigoMunicipio": "170210",
+            "codigoPais": "1058",
+            "nomePais": "Brasil",
+            "uf": "TO",
+            "cep": "77800001"
+          },
+          "indicadorPresenca": "1",
+          "indicativoIntermediador": "0",
+          "numeroNotaEmitir": "55",
+          "codigoNumerico": "68158475",
+          "dataSaida": "2026-03-27 12:00:00",
+          "dataEmissao": "2026-03-27 12:00:00",
+          "modelo": "55",
+          "ambiente": "2",
+          "tipo": "1",
+          "frete": "9",
+          "finalidade": "1",
+          "informacaoAdicionalFisco": "",
+          "informacaoComplementar": "Texto exibido nas informacoes complementares/dados adicionais da nota.",
+          "notaFiscalReferencia": "",
+          "naturezaOperacao": "Venda de Produtos ou Servicos",
+          "numeroVenda": "",
+          "fatura": {
+            "numero": "1",
+            "valor": "20.00",
+            "desconto": "0.00",
+            "valorLiquido": "20.00",
+            "duplicatas": [
+              {
+                "numero": "001",
+                "dataVencimento": "2026-04-10",
+                "valor": "20.00",
+                "codigoPagamento": "15"
+              }
+            ]
+          },
+          "pagamento": {
+            "troco": 0,
+            "detalhamento": [
+              {
+                "tipo": "15",
+                "valor": 20,
+                "indicadorPagamento": "1"
+              }
+            ]
+          },
+          "responsavelTecnico": {
+            "cnpj": "",
+            "contato": "",
+            "email": "",
+            "fone": "",
+            "idCSRT": "",
+            "CSRT": ""
+          },
+          "itens": [
+            {
+              "numeroPedido": null,
+              "numeroItemPedido": null,
+              "desconto": "0.00000000",
+              "frete": "0.00000000",
+              "seguro": "0.00000000",
+              "outro": "0.00000000",
+              "quantidade": "1.00000000",
+              "valorUnitario": "20.00000000",
+              "valorTotal": "20.00",
+              "informacaoAdicional": "",
+              "ncmProduto": "07099911",
+              "cest": "",
+              "tipoItem": "00",
+              "eanProduto": "2005965311527",
+              "codigoProduto": "1",
+              "nomeProduto": "Produto",
+              "cfop": "5102",
+              "unidadeMedidaProduto": "UNID",
+              "origemProduto": "0",
+              "icmsCsosn": "102",
+              "pisCst": "8",
+              "pisAliquota": "0.65",
+              "cofinsCst": "8",
+              "cofinsAliquota": "3.0",
+              "cstIbscbs": "000",
+              "cClassTribIbscbs": "000001",
+              "aliquotaIbsUf": "0.1000",
+              "percentualReducaoIbsUf": "0.00",
+              "percentualReducaoIbsMun": "0.00",
+              "percentualReducaoCbs": "0.00",
+              "aliquotaIbsMun": "0.0000",
+              "aliquotaCbs": "0.9000",
+              "baseCalculoIbscbs": "20.00",
+              "valorIbsUf": "0.02",
+              "valorIbsMun": "0.00",
+              "valorCbs": "0.18",
+              "ibscbsManual": "0",
+              "federaisRetido": "nao",
+              "aliquotaInss": "0.0000",
+              "aliquotaIrrf": "0.0000",
+              "aliquotaCsll": "0.0000",
+              "codigoAnp": "",
+              "pGLP": "0.0000",
+              "pGNn": "0.0000",
+              "pGNi": "0.0000",
+              "vPart": "0.00",
+              "ufAnp": "",
+              "indicadorImportacaoOrigemCombustivel": "",
+              "codigoUfOrigemCombustivel": "",
+              "percentualOrigemCombustivel": "0.0000"
+            }
+          ]
+        }
+      }
+    },
+    "nfceSimples": {
+      "summary": "Exemplo simples de NFCe",
+      "value": {
+        "acao": "emitir",
+        "modeloDocumento": "nfe",
+        "certificadoDigital": "conteudo_do_certificado_a1_em_hexadecimal",
+        "senhaCertificadoDigital": "sua_senha",
+        "ambiente": "2",
+        "modelo": "65",
+        "ufEmitente": "TO",
+        "idCsc": "1",
+        "csc": "SEU_CODIGO_DE_SEGURANCA_DO_CONTRIBUINTE",
+        "nfe": {
+          "contingencia": "nao",
+          "empresa": {
+            "cnpj": "00000000000191",
+            "inscricaoEstadual": "123456789",
+            "telefone": "63900000000",
+            "email": "financeiro@exemplo.com.br",
+            "municipio": "ARAGUAINA - TO",
+            "codigoMunicipio": "170210",
+            "uf": "TO",
+            "tipoAtividade": "3",
+            "serie": "2",
+            "idCodigoSegurancaContribuinte": "00001",
+            "codigoSegurancaContribuinte": "234134234124123423412344123",
+            "razaoSocial": "COMERCIAL EXEMPLO LTDA",
+            "nomeFantasia": "COMERCIAL EXEMPLO",
+            "logradouro": "Rua das Flores",
+            "numero": "100",
+            "complemento": "",
+            "bairro": "Centro",
+            "cep": "77800000",
+            "codigoRegimeTributario": "1",
+            "informacaoComplementar": "",
+            "logomarca": "imagem_jpeg_ou_png_em_hexadecimal"
+          },
+          "cliente": {
+            "cnpj": "",
+            "cpf": "12345678909",
+            "inscricaoEstadual": "",
+            "consumidorFinal": "1",
+            "indicadorIEdestinatario": "9",
+            "telefone": "11900000000",
+            "email": "cliente@exemplo.com.br",
+            "logradouro": "Av. Brasil",
+            "numero": "500",
+            "complemento": "",
+            "bairro": "Vila Nova",
+            "codigoMunicipio": "170210",
+            "municipio": "ARAGUAINA - TO",
+            "codigoPais": "1058",
+            "nomePais": "Brasil",
+            "uf": "TO",
+            "razaoSocial": "João da Silva",
+            "nomeFantasia": "",
+            "cep": "77800001"
+          },
+          "indicadorPresenca": "1",
+          "indicativoIntermediador": "0",
+          "numeroNotaEmitir": "55",
+          "codigoNumerico": "68158475",
+          "dataSaida": "2026-03-27 12:00:00",
+          "dataEmissao": "2026-03-27 12:00:00",
+          "modelo": "65",
+          "ambiente": "2",
+          "tipo": "1",
+          "frete": "9",
+          "finalidade": "1",
+          "informacaoAdicionalFisco": "",
+          "informacaoComplementar": "Texto exibido nas informacoes complementares/dados adicionais da nota.",
+          "notaFiscalReferencia": "",
+          "naturezaOperacao": "Venda de Produtos ou Servicos",
+          "numeroVenda": "",
+          "responsavelTecnico": {
+            "cnpj": "",
+            "contato": "",
+            "email": "",
+            "fone": "",
+            "idCSRT": "",
+            "CSRT": ""
+          },
+          "itens": [
+            {
+              "numeroPedido": null,
+              "numeroItemPedido": null,
+              "desconto": "0.00000000",
+              "frete": "0.00000000",
+              "outro": "0.00000000",
+              "quantidade": "1.00000000",
+              "valorUnitario": "20.00000000",
+              "valorTotal": "20.00",
+              "informacaoAdicional": "",
+              "ncmProduto": "07099911",
+              "cest": "",
+              "tipoItem": "00",
+              "eanProduto": "2005965311527",
+              "codigoProduto": "1",
+              "nomeProduto": "Produto",
+              "cfop": "5102",
+              "unidadeMedidaProduto": "UNID",
+              "origemProduto": "0",
+              "icmsCsosn": "102",
+              "pisCst": "8",
+              "pisAliquota": "0.65",
+              "cofinsCst": "8",
+              "cofinsAliquota": "3.0",
+              "cstIbscbs": "000",
+              "cClassTribIbscbs": "000001",
+              "aliquotaIbsUf": "0.1000",
+              "percentualReducaoIbsUf": "0.00",
+              "percentualReducaoIbsMun": "0.00",
+              "percentualReducaoCbs": "0.00",
+              "aliquotaIbsMun": "0.0000",
+              "aliquotaCbs": "0.9000",
+              "baseCalculoIbscbs": "20.00",
+              "valorIbsUf": "0.02",
+              "valorIbsMun": "0.00",
+              "valorCbs": "0.18",
+              "ibscbsManual": "0",
+              "federaisRetido": "nao",
+              "aliquotaInss": "0.0000",
+              "aliquotaIrrf": "0.0000",
+              "aliquotaCsll": "0.0000"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

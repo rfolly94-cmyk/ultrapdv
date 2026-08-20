@@ -1,0 +1,25 @@
+UltraPDV — Próxima etapa: Conferência NFC-e por venda
+
+Copie por cima de D:\ultrapdv:
+
+- app/vendas/[id]/page.tsx
+- app/vendas/[id]/nfce/page.tsx
+
+O que muda:
+1. Venda finalizada ganha botão "Preparar NFC-e".
+2. /vendas/[id]/nfce confere:
+   - venda finalizada/modelo;
+   - todos os itens e snapshots fiscais;
+   - NCM, CFOP, origem, ICMS/CSOSN, PIS e COFINS;
+   - pagamentos e codigo_fiscal/tPag;
+   - soma dos pagamentos x total da venda;
+   - empresa_fiscal;
+   - CSC/ID CSC;
+   - numeração NFC-e;
+   - emissões anteriores ligadas à venda.
+3. NÃO transmite à Geranet e NÃO reserva número.
+4. NÃO exige migration.
+
+O botão "Emitir NFC-e" fica desabilitado propositalmente nesta etapa.
+A transmissão real será ligada depois usando fiscal_emissoes.origem_tipo='venda'
+e origem_id=venda.id, evitando retransmissão acidental.
