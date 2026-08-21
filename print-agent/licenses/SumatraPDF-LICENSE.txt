@@ -1,0 +1,21 @@
+SumatraPDF — aviso de licença (terceiro)
+
+Componente: SumatraPDF (versão portable empacotada no UltraPDV Connector)
+Projeto original: SumatraPDF
+Site: https://www.sumatrapdfreader.org
+Código-fonte: https://github.com/sumatrapdfreader/sumatrapdf
+Download oficial: https://www.sumatrapdfreader.org/download-free-pdf-viewer
+
+Licença: GNU Affero General Public License version 3 (AGPLv3)
+
+O UltraPDV Connector redistribui o executável portable oficial do SumatraPDF
+SEM ALTERAÇÕES. O SumatraPDF não é código proprietário da UltraPDV.
+
+A licença completa está em:
+  licenses/AGPL-3.0.txt
+
+Você pode obter o código-fonte correspondente do SumatraPDF no repositório
+oficial acima. A UltraPDV não modifica este executável.
+
+A versão exata do binário empacotado é a do arquivo SumatraPDF.exe incluído
+em print-engine (veja as propriedades de versão do arquivo no Windows).

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useMemo,
   useState,
@@ -14,8 +15,12 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { CancelarVendaComercial } from "@/components/vendas/cancelar-venda-comercial";
 import { DocumentoFiscalBotoes } from "@/components/vendas/documento-fiscal-botoes";
 import { VendasModuleTabs } from "@/components/vendas/vendas-module-tabs";
+import { VendasPeriodoFiltro } from "@/components/vendas/vendas-periodo-filtro";
 import {
-  resolverOrigemVendaComercial,
+  montarHrefListaVendas,
+  type FiltrosListaVendas,
+} from "@/lib/vendas/periodo-lista";
+import {
   resolverRotaEdicaoVenda,
   resolverRotaEmissaoListaVenda,
   rotuloOrigemVendaComercial,
@@ -85,6 +90,8 @@ export type VendaListaItem = {
 type Props = {
   vendas: VendaListaItem[];
   pedidosNovos?: number;
+  filtros: FiltrosListaVendas;
+  dataHojeIso: string;
 };
 
 const moeda =
@@ -211,21 +218,17 @@ function fiscalResumo(
 export function VendasLista({
   vendas,
   pedidosNovos = 0,
+  filtros,
+  dataHojeIso,
 }: Props) {
+  const router = useRouter();
   const [
     busca,
     setBusca,
-  ] = useState("");
+  ] = useState(filtros.q);
 
-  const [
-    status,
-    setStatus,
-  ] = useState("todos");
-
-  const [
-    modelo,
-    setModelo,
-  ] = useState("todos");
+  const status = filtros.status;
+  const modelo = filtros.modelo;
 
   const [
     vendaExcluir,
@@ -234,6 +237,18 @@ export function VendasLista({
     id: string;
     numero: number | string | null;
   } | null>(null);
+
+  function ir(
+    patch: Partial<FiltrosListaVendas>
+  ) {
+    router.push(
+      montarHrefListaVendas({
+        ...filtros,
+        q: busca.trim(),
+        ...patch,
+      })
+    );
+  }
 
   const vendasFiltradas =
     useMemo(() => {
@@ -303,16 +318,25 @@ export function VendasLista({
 
   const statusOpcoes =
     useMemo(
-      () =>
-        Array.from(
-          new Set(
-            vendas.map(
-              (venda) =>
-                venda.status
-            )
+      () => {
+        const opcoes = new Set(
+          vendas.map(
+            (venda) =>
+              venda.status
           )
-        ).sort(),
-      [vendas]
+        );
+
+        if (
+          status !== "todos"
+        ) {
+          opcoes.add(status);
+        }
+
+        return Array.from(
+          opcoes
+        ).sort();
+      },
+      [vendas, status]
     );
 
   const totalFiltrado =
@@ -367,7 +391,11 @@ export function VendasLista({
           <>
             <select
               value={status}
-              onChange={(event) => setStatus(event.target.value)}
+              onChange={(event) =>
+                ir({
+                  status: event.target.value,
+                })
+              }
               className="updv-select w-[160px]"
             >
               <option value="todos">Todos os status</option>
@@ -379,7 +407,11 @@ export function VendasLista({
             </select>
             <select
               value={modelo}
-              onChange={(event) => setModelo(event.target.value)}
+              onChange={(event) =>
+                ir({
+                  modelo: event.target.value,
+                })
+              }
               className="updv-select w-[140px]"
             >
               <option value="todos">Todos os modelos</option>
@@ -387,6 +419,13 @@ export function VendasLista({
               <option value="55">NF-e</option>
               <option value="sem_modelo">Sem modelo</option>
             </select>
+            <VendasPeriodoFiltro
+              filtros={{
+                ...filtros,
+                q: busca.trim(),
+              }}
+              dataHojeIso={dataHojeIso}
+            />
           </>
         }
       />

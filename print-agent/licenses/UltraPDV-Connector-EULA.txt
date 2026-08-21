@@ -1,0 +1,28 @@
+UltraPDV Connector
+Licença de uso do software instalado neste computador
+
+O UltraPDV Connector é um componente local da UltraPDV. Ele permite que o
+UltraPDV online utilize periféricos deste computador, inicialmente impressão.
+
+Este software é licenciado para uso com o serviço UltraPDV. Você não adquire
+a propriedade do código. É permitido instalar e usar o Connector no(s)
+computador(es) autorizado(s) pela sua conta UltraPDV.
+
+O Connector:
+- escuta somente em 127.0.0.1;
+- não armazena certificado fiscal, senhas, tokens Geranet nem chaves Supabase;
+- não substitui o UltraPDV online.
+
+O software é fornecido "como está", sem garantia de funcionamento ininterrupto.
+
+Componentes de terceiros
+------------------------
+Este produto redistribui software de terceiros, com as respectivas licenças
+em THIRD-PARTY-NOTICES.txt e na pasta licenses:
+
+- Node.js (licença MIT e licenças de dependências empacotadas)
+- SumatraPDF (GNU Affero General Public License v3)
+
+O SumatraPDF NÃO é software proprietário da UltraPDV. É um leitor PDF livre.
+O executável é redistribuído sem modificações. O código-fonte correspondente
+está disponível em https://github.com/sumatrapdfreader/sumatrapdf

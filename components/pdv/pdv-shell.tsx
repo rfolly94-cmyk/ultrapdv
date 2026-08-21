@@ -25,6 +25,16 @@ import {
 
 import { finalizarVendaPdv } from "../../app/pdv/actions";
 import {
+  buscarConfiguracoesImpressaoAction,
+} from "@/app/configuracoes/impressao/actions";
+import { obterDispositivoId } from "@/lib/impressao/dispositivo";
+import { executarDestinoImpressao } from "@/lib/impressao/executar-cliente";
+import { decidirDestinoImpressaoAutomatica } from "@/lib/impressao/regras";
+import type {
+  ConfiguracaoImpressao,
+  DestinoImpressaoAutomatica,
+} from "@/lib/impressao/tipos";
+import {
   chamarEmissaoNfceVenda,
   type ResultadoEmissaoNfceVenda,
 } from "@/lib/fiscal/nfce/chamar-emissao-nfce-venda";
@@ -517,6 +527,24 @@ export function PdvShell({
   } | null>(null);
 
   const [
+    configsImpressao,
+    setConfigsImpressao,
+  ] = useState<ConfiguracaoImpressao[]>([]);
+
+  const [
+    impressaoPos,
+    setImpressaoPos,
+  ] = useState<{
+    status: "idle" | "imprimindo" | "ok" | "falha";
+    erro: string | null;
+    destino: DestinoImpressaoAutomatica;
+  }>({
+    status: "idle",
+    erro: null,
+    destino: { tipo: "nenhum" },
+  });
+
+  const [
     isPending,
     startTransition,
   ] = useTransition();
@@ -534,6 +562,70 @@ export function PdvShell({
   useEffect(() => {
     buscaRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    const id = obterDispositivoId();
+    if (!id) {
+      return;
+    }
+    void buscarConfiguracoesImpressaoAction(id).then((resultado) => {
+      if (resultado.ok) {
+        setConfigsImpressao(resultado.configs);
+      }
+    });
+  }, []);
+
+  async function tentarImpressaoPosVenda(
+    vendaId: string,
+    fiscal: FiscalUltimaVenda | null
+  ) {
+    const destino = decidirDestinoImpressaoAutomatica({
+      configs: configsImpressao,
+      vendaId,
+      fiscal,
+    });
+    if (destino.tipo === "nenhum") {
+      return false;
+    }
+
+    setImpressaoPos({
+      status: "imprimindo",
+      erro: null,
+      destino,
+    });
+
+    try {
+      const resultado = await executarDestinoImpressao({
+        destino,
+        configs: configsImpressao,
+      });
+      if (resultado.ok) {
+        setImpressaoPos({
+          status: "ok",
+          erro: null,
+          destino,
+        });
+        return true;
+      }
+      setImpressaoPos({
+        status: "falha",
+        erro:
+          "erro" in resultado
+            ? resultado.erro
+            : "Venda concluída, mas não foi possível imprimir automaticamente.",
+        destino,
+      });
+      return false;
+    } catch {
+      setImpressaoPos({
+        status: "falha",
+        erro:
+          "Venda concluída, mas não foi possível imprimir automaticamente.",
+        destino,
+      });
+      return false;
+    }
+  }
 
   useEffect(() => {
     if (!toastPdv) {
@@ -1522,6 +1614,11 @@ export function PdvShell({
               }
             : null,
         });
+        setImpressaoPos({
+          status: "idle",
+          erro: null,
+          destino: { tipo: "nenhum" },
+        });
 
         setCarrinho([]);
         setCatalogoPedidoId(null);
@@ -1545,10 +1642,21 @@ export function PdvShell({
         );
 
         if (!emitirNfceAutomaticoPdv && imprimirApos) {
-          window.open(
-            `/pdv/imprimir/recibo/${resultado.vendaId}?auto=1`,
-            "_blank",
-            "noopener,noreferrer"
+          const imprimiuAgente = await tentarImpressaoPosVenda(
+            resultado.vendaId,
+            null
+          );
+          if (!imprimiuAgente) {
+            window.open(
+              `/pdv/imprimir/recibo/${resultado.vendaId}?auto=1`,
+              "_blank",
+              "noopener,noreferrer"
+            );
+          }
+        } else if (!emitirNfceAutomaticoPdv) {
+          await tentarImpressaoPosVenda(
+            resultado.vendaId,
+            null
           );
         }
         idempotencyRef.current =
@@ -1583,7 +1691,15 @@ export function PdvShell({
             imprimirApos,
             fiscal: fiscalAtualizado,
           });
-          if (acoes.autoAbrir === "danfe" && acoes.hrefDanfe) {
+          const imprimiuAgente = await tentarImpressaoPosVenda(
+            resultado.vendaId,
+            fiscalAtualizado
+          );
+          if (
+            !imprimiuAgente &&
+            acoes.autoAbrir === "danfe" &&
+            acoes.hrefDanfe
+          ) {
             window.open(acoes.hrefDanfe, "_blank", "noopener,noreferrer");
           }
         }
@@ -1751,6 +1867,38 @@ export function PdvShell({
               )}
             </p>
 
+            {impressaoPos.status === "imprimindo" ? (
+              <p className="mt-3 text-sm text-zinc-500">Imprimindo...</p>
+            ) : null}
+            {impressaoPos.status === "ok" ? (
+              <p className="mt-3 text-sm text-emerald-700">
+                Impresso com sucesso
+              </p>
+            ) : null}
+            {impressaoPos.status === "falha" ? (
+              <div className="mt-3 space-y-2">
+                <p className="text-sm text-amber-800">
+                  {impressaoPos.erro ||
+                    "Venda concluída, mas não foi possível imprimir automaticamente."}
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-100"
+                  onClick={() => {
+                    if (!ultimaVenda) {
+                      return;
+                    }
+                    void tentarImpressaoPosVenda(
+                      ultimaVenda.vendaId,
+                      ultimaVenda.fiscal
+                    );
+                  }}
+                >
+                  Tentar imprimir novamente
+                </button>
+              </div>
+            ) : null}
+
             {acoesPosVenda?.mostrarStatusFiscal ? (
               <div
                 className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
@@ -1806,6 +1954,11 @@ export function PdvShell({
                 type="button"
                 onClick={() => {
                   setUltimaVenda(null);
+                  setImpressaoPos({
+                    status: "idle",
+                    erro: null,
+                    destino: { tipo: "nenhum" },
+                  });
                   setBusca("");
 
                   requestAnimationFrame(

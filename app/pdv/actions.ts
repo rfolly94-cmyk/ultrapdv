@@ -7,6 +7,8 @@ import { avaliarTetoPagamentosNoServidor } from "@/lib/pdv/validar-teto-servidor
 import { createClient } from "@/lib/supabase/server";
 import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacional";
 import { exigirEmpresaOperacional } from "@/lib/assinatura/exigir-empresa-operacional";
+import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import { ErroPermissao } from "@/lib/permissoes/erro";
 
 type FinalizarVendaPdvInput = {
   idempotencyKey: string;

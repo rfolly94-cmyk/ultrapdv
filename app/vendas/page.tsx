@@ -4,11 +4,33 @@ import {
   VendasLista,
   type VendaListaItem,
 } from "@/components/vendas/vendas-lista";
+import {
+  filtrarRegistrosDaEmpresaAtiva,
+} from "@/lib/empresa/assert-registro-empresa-ativa";
+import { carregarFusoHorarioFiscal } from "@/lib/fiscal/fuso-horario-empresa";
 import { createClient } from "@/lib/supabase/server";
 import { pagamentoFinanceiramenteValido } from "@/lib/vendas/pagamentos-financeiros";
+import {
+  dataColunaListaVenda,
+  filtroCoalesceDataVenda,
+  parseFiltrosListaVendas,
+  resolverPeriodoListaVendas,
+  vendaNoPeriodoLista,
+} from "@/lib/vendas/periodo-lista";
 import { resolverOrigemVendaComercial } from "@/lib/vendas/resolver-rota-edicao-venda";
 
 export const dynamic = "force-dynamic";
+
+type PageProps = {
+  searchParams: Promise<{
+    periodo?: string;
+    inicio?: string;
+    fim?: string;
+    status?: string;
+    modelo?: string;
+    q?: string;
+  }>;
+};
 
 function idsUnicos(
   valores: Array<string | null | undefined>
@@ -24,7 +46,11 @@ function idsUnicos(
   );
 }
 
-export default async function VendasPage() {
+export default async function VendasPage({
+  searchParams,
+}: PageProps) {
+  const params = await searchParams;
+  const filtros = parseFiltrosListaVendas(params);
   const supabase = await createClient();
 
   const {
@@ -55,6 +81,25 @@ export default async function VendasPage() {
     redirect("/onboarding");
   }
 
+  const { data: fiscalEmpresa } = await supabase
+    .from("empresas_fiscal")
+    .select("empresa_id, fuso_horario")
+    .eq("empresa_id", vinculo.empresa_id)
+    .maybeSingle();
+
+  const fusoHorario =
+    carregarFusoHorarioFiscal(
+      fiscalEmpresa,
+      vinculo.empresa_id
+    ) || "America/Sao_Paulo";
+
+  const janela = resolverPeriodoListaVendas(
+    filtros.periodo,
+    filtros.inicio,
+    filtros.fim,
+    fusoHorario
+  );
+
   const pedidosNovosResult = await supabase
     .from("catalogo_pedidos")
     .select("id", { count: "exact", head: true })
@@ -72,6 +117,7 @@ export default async function VendasPage() {
     .from("vendas")
     .select(`
       id,
+      empresa_id,
       numero,
       cliente_id,
       usuario_id,
@@ -92,6 +138,12 @@ export default async function VendasPage() {
       "empresa_id",
       vinculo.empresa_id
     )
+    .or(
+      filtroCoalesceDataVenda(
+        janela.inicio,
+        janela.fim
+      )
+    )
     .order(
       "created_at",
       { ascending: false }
@@ -105,7 +157,16 @@ export default async function VendasPage() {
   }
 
   const vendasSeguras =
-    vendas ?? [];
+    filtrarRegistrosDaEmpresaAtiva(
+      vendas ?? [],
+      vinculo.empresa_id
+    ).filter((venda) =>
+      vendaNoPeriodoLista(
+        dataColunaListaVenda(venda),
+        janela.inicio,
+        janela.fim
+      )
+    );
 
   const clienteIds =
     idsUnicos(
@@ -506,8 +567,9 @@ export default async function VendasPage() {
             venda.troco ?? 0
           ),
         dataVenda:
-          venda.finalizada_at ??
-          venda.created_at,
+          dataColunaListaVenda(
+            venda
+          ),
         pagamentos:
           pagamentosPorVenda.get(
             venda.id
@@ -558,8 +620,18 @@ export default async function VendasPage() {
 
   return (
     <VendasLista
+      key={[
+        filtros.periodo,
+        filtros.inicio,
+        filtros.fim,
+        filtros.status,
+        filtros.modelo,
+        filtros.q,
+      ].join("|")}
       vendas={itens}
       pedidosNovos={pedidosNovos ?? 0}
+      filtros={filtros}
+      dataHojeIso={janela.hojeIso}
     />
   );
 }

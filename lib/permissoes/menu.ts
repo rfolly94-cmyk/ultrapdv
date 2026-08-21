@@ -68,4 +68,10 @@ export const ABAS_CONFIGURACOES_PERMISSAO = [
     modulo: "importacao_dados" as const,
     acao: "acessar" as const,
   },
+  {
+    label: "Impressão",
+    href: "/configuracoes/impressao",
+    modulo: "configuracoes" as const,
+    acao: "acessar" as const,
+  },
 ];

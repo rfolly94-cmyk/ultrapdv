@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UltraPDV Conector</title>
+    <style>
+      :root {
+        --bg: #f4f4f5;
+        --card: #fff;
+        --text: #18181b;
+        --muted: #52525b;
+        --line: #e4e4e7;
+        --ok: #059669;
+        --warn: #d97706;
+        --err: #dc2626;
+        --btn: #18181b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        margin: 0;
+        padding: 32px 16px;
+      }
+      main {
+        max-width: 440px;
+        margin: 0 auto;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 24px;
+      }
+      h1 { font-size: 22px; margin: 0 0 18px; }
+      .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; }
+      label.campo { display: block; font-size: 14px; margin-top: 12px; }
+      label.campo span { display: block; color: var(--muted); margin-bottom: 4px; }
+      .muted { color: var(--muted); }
+      .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+      .dot.ok { background: var(--ok); }
+      .dot.warn { background: var(--warn); }
+      .dot.err { background: var(--err); }
+      .acoes { display: grid; gap: 8px; margin-top: 20px; }
+      button, .btn {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px 12px;
+        font: inherit;
+        cursor: pointer;
+        text-align: center;
+      }
+      button.primario { background: var(--btn); color: #fff; border-color: var(--btn); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .msg { margin-top: 14px; font-size: 13px; color: var(--muted); min-height: 1.3em; }
+      dialog { border: 1px solid var(--line); border-radius: 12px; padding: 18px; width: min(360px, 92vw); }
+      input[type="number"], select {
+        width: 100%;
+        margin: 8px 0 14px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>UltraPDV Conector</h1>
+      <div class="row">
+        <span class="muted">Status</span>
+        <span id="status"><span class="dot warn"></span>Carregando</span>
+      </div>
+      <div class="row">
+        <span class="muted">Porta</span>
+        <span id="porta">—</span>
+      </div>
+      <div class="row">
+        <span class="muted">Versão</span>
+        <span id="versao">—</span>
+      </div>
+      <label class="campo">
+        <span>Impressora</span>
+        <select id="selImpressora"></select>
+      </label>
+      <label class="campo">
+        <span>Papel</span>
+        <select id="selPapel">
+          <option value="80mm">80 mm</option>
+          <option value="58mm">58 mm</option>
+          <option value="a4">A4</option>
+        </select>
+      </label>
+      <div class="acoes">
+        <button type="button" class="primario" id="btnSalvar">Salvar configuração</button>
+        <button type="button" id="btnTeste">Testar impressão</button>
+        <button type="button" id="btnPorta">Alterar porta</button>
+        <button type="button" id="btnReiniciar">Reiniciar conector</button>
+        <button type="button" id="btnSair">Sair</button>
+      </div>
+      <p class="msg" id="msg"></p>
+    </main>
+
+    <dialog id="dlgPorta">
+      <form method="dialog">
+        <p>Porta atual: <strong id="portaAtual">—</strong></p>
+        <label>
+          Nova porta (18181–18190)
+          <input id="inputPorta" type="number" min="18181" max="18190" required />
+        </label>
+        <div class="acoes">
+          <button value="ok" class="primario">Salvar</button>
+          <button value="proxima" id="btnProxima">Usar próxima porta disponível</button>
+          <button value="cancel">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script>
+      const msg = document.getElementById("msg");
+      const dlg = document.getElementById("dlgPorta");
+      const selImpressora = document.getElementById("selImpressora");
+      const selPapel = document.getElementById("selPapel");
+      let impressorasCarregadas = false;
+
+      function pintarStatus(texto, tipo) {
+        document.getElementById("status").innerHTML =
+          '<span class="dot ' + tipo + '"></span>' + texto;
+      }
+
+      async function api(path, opcoes) {
+        const res = await fetch(path, opcoes);
+        const data = await res.json().catch(() => ({}));
+        return { res, data };
+      }
+
+      function escolherImpressoraPainel(impressoras, lastPrinter) {
+        const lista = Array.isArray(impressoras) ? impressoras : [];
+        if (lastPrinter && lista.some(function (item) { return item.nome === lastPrinter; })) {
+          return lastPrinter;
+        }
+        const padrao = lista.filter(function (item) { return item.padrao; })[0];
+        return padrao ? padrao.nome : "";
+      }
+
+      function preencherImpressoras(impressoras, lastPrinter) {
+        const lista = Array.isArray(impressoras) ? impressoras : [];
+        const atual = escolherImpressoraPainel(lista, lastPrinter);
+        selImpressora.innerHTML = "";
+        lista.forEach(function (item) {
+          const opt = document.createElement("option");
+          opt.value = item.nome;
+          opt.textContent = item.nome;
+          selImpressora.appendChild(opt);
+        });
+        if (atual) {
+          selImpressora.value = atual;
+        } else {
+          selImpressora.selectedIndex = -1;
+        }
+      }
+
+      async function atualizar(forcarImpressoras) {
+        try {
+          const { res, data } = await api("/health");
+          if (!res.ok || !data.ok) {
+            pintarStatus("Erro", "err");
+            return;
+          }
+          document.getElementById("porta").textContent = data.port ?? "—";
+          document.getElementById("versao").textContent = data.version || data.versao || "—";
+          document.getElementById("portaAtual").textContent = data.port ?? "—";
+          document.getElementById("inputPorta").value = data.port ?? 18181;
+          pintarStatus("Conectado", "ok");
+          if (!impressorasCarregadas || forcarImpressoras) {
+            const printers = await api("/printers");
+            preencherImpressoras(printers.data.impressoras, data.lastPrinter);
+            selPapel.value = data.lastPaper || "80mm";
+            impressorasCarregadas = true;
+          }
+        } catch {
+          pintarStatus("Erro", "err");
+        }
+      }
+
+      document.getElementById("btnPorta").onclick = () => dlg.showModal();
+
+      dlg.querySelector("form").addEventListener("submit", async (ev) => {
+        const submitter = ev.submitter;
+        if (!submitter || submitter.value === "cancel") return;
+        ev.preventDefault();
+        const usarProxima = submitter.value === "proxima";
+        const porta = Number(document.getElementById("inputPorta").value);
+        if (!usarProxima && (!Number.isInteger(porta) || porta < 18181 || porta > 18190)) {
+          msg.textContent = "O UltraPDV Conector utiliza portas entre 18181 e 18190.";
+          return;
+        }
+        const { res, data } = await api("/config/port", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(usarProxima ? { usarProxima: true } : { porta }),
+        });
+        if (res.status === 409) {
+          msg.textContent = data.erro || "Porta em uso.";
+          return;
+        }
+        if (!data.ok) {
+          msg.textContent = data.erro || "Não foi possível alterar a porta.";
+          return;
+        }
+        dlg.close();
+        if (data.url && data.port && data.port !== Number(location.port)) {
+          location.replace(data.url);
+          return;
+        }
+        msg.textContent = "Porta atualizada.";
+        atualizar();
+      });
+
+      document.getElementById("btnSalvar").onclick = async () => {
+        const impressora = selImpressora.value;
+        if (!impressora) {
+          msg.textContent = "Selecione uma impressora instalada neste computador.";
+          return;
+        }
+        const { data } = await api("/config/printer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ impressora, papel: selPapel.value }),
+        });
+        msg.textContent = data.ok ? "Configuração salva." : (data.erro || "Não foi possível salvar.");
+        if (data.ok) {
+          atualizar(true);
+        }
+      };
+
+      document.getElementById("btnTeste").onclick = async () => {
+        const impressora = selImpressora.value;
+        if (!impressora) {
+          msg.textContent = "Selecione uma impressora instalada neste computador.";
+          return;
+        }
+        msg.textContent = "Enviando teste…";
+        const { data } = await api("/print/teste", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ impressora, papel: selPapel.value }),
+        });
+        msg.textContent = data.ok ? "Teste enviado à impressora." : (data.erro || "Falha no teste.");
+      };
+
+      document.getElementById("btnReiniciar").onclick = async () => {
+        pintarStatus("Reiniciando", "warn");
+        msg.textContent = "Reiniciando…";
+        await api("/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        setTimeout(function () { atualizar(true); }, 700);
+      };
+
+      document.getElementById("btnSair").onclick = async () => {
+        await api("/shutdown", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        pintarStatus("Erro", "err");
+        msg.textContent = "Conector encerrado.";
+      };
+
+      atualizar(true);
+      setInterval(function () { atualizar(); }, 8000);
+    </script>
+  </body>
+</html>

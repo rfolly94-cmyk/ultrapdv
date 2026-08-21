@@ -8,6 +8,17 @@ import {
   useRouter,
 } from "next/navigation";
 
+import {
+  buscarConfiguracoesImpressaoAction,
+  buscarEmissaoAutorizadaVendaAction,
+} from "@/app/configuracoes/impressao/actions";
+import { obterDispositivoId } from "@/lib/impressao/dispositivo";
+import { executarDestinoImpressao } from "@/lib/impressao/executar-cliente";
+import {
+  configDoTipo,
+  podeImprimirAutomaticamente,
+} from "@/lib/impressao/regras";
+
 type Props = {
   vendaId: string;
   serie?: number;
@@ -135,6 +146,39 @@ export function EmitirNfeVendaButton({
           : data.mensagem ??
             "Emissão processada."
       );
+
+      if (data.autorizada) {
+        try {
+          const configs = await buscarConfiguracoesImpressaoAction(
+            obterDispositivoId()
+          );
+          if (configs.ok) {
+            const configNfe = configDoTipo(configs.configs, "danfe_nfe");
+            if (podeImprimirAutomaticamente(configNfe)) {
+              const emissao = await buscarEmissaoAutorizadaVendaAction(
+                vendaId,
+                "55"
+              );
+              if (emissao.ok && emissao.emissaoId) {
+                const impressao = await executarDestinoImpressao({
+                  destino: {
+                    tipo: "danfe_nfe",
+                    emissaoId: emissao.emissaoId,
+                  },
+                  configs: configs.configs,
+                });
+                if (!impressao.ok) {
+                  setMensagem(
+                    `${data.autorizada ? "NF-e autorizada." : ""} Não foi possível imprimir automaticamente.`
+                  );
+                }
+              }
+            }
+          }
+        } catch {
+          // Impressão é posterior: falha não altera a emissão.
+        }
+      }
 
       router.refresh();
     } catch (

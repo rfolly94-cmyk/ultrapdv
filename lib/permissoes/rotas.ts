@@ -144,6 +144,13 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "importacao_dados", acao: "acessar" };
   }
 
+  if (
+    pathname.startsWith("/configuracoes/impressao") ||
+    pathname.startsWith("/api/impressao")
+  ) {
+    return { tipo: "permissao", modulo: "configuracoes", acao: "acessar" };
+  }
+
   if (pathname.startsWith("/configuracoes/empresa")) {
     return { tipo: "permissao", modulo: "configuracoes", acao: "editar_empresa" };
   }

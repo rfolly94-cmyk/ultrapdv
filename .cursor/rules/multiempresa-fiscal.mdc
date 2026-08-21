@@ -1,35 +1,99 @@
 ---
-description: Isolamento multiempresa obrigatório — nunca compartilhar dados fiscais ou cadastrais entre empresas
+description: Regras permanentes de arquitetura do UltraPDV
 alwaysApply: true
 ---
 
-# Multiempresa — empresa ativa
+# UltraPDV — Regras permanentes
 
-Toda leitura, gravação, RPC, Server Action, API Route, RLS, índice e constraint deve respeitar a **empresa ativa** (`usuarios_empresas.principal = true` e `ativo = true`).
+O UltraPDV é um SaaS WEB, ONLINE e MULTIEMPRESA.
 
-Antes de usar qualquer registro de negócio/fiscal, validar `registro.empresa_id === empresaIdAtiva`. Sem match: bloquear. Não inferir empresa pelo id do documento.
+Não audite o projeto inteiro para confirmar estas regras. Considere-as premissas conhecidas e examine somente os arquivos diretamente necessários para a tarefa.
 
-## Obrigatório
+## Multiempresa
 
-- Filtrar por `empresa_id` da empresa ativa em todo `select`/`update`/`delete`.
-- Em insert, `empresa_id` vem da sessão ativa — nunca do body/form/query.
-- Unique, FK e índices de cadastro fiscal incluem `empresa_id` (ou validam a mesma empresa via trigger).
-- RLS por empresa do usuário; escrita privilegiada (`service_role`) ainda filtra `empresa_id`.
-- Natureza, CFOP, numeração, emissão, certificado e regras tributárias são **por empresa**.
+Toda funcionalidade empresarial deve respeitar:
+- empresa ativa;
+- `empresa_id`;
+- vínculo em `usuarios_empresas`;
+- `principal = true`;
+- `ativo = true`;
+- RLS e isolamento entre empresas.
 
-## Proibido
+Nunca confiar em `empresa_id` vindo do frontend como fonte de verdade.
+Resolver/validar empresa no servidor.
+Nunca permitir leitura/escrita cruzada entre empresas.
 
-```ts
-// ❌ natureza/CFOP/numeração globais
-const natureza = await db.from("fiscal_naturezas_operacao").select("*").eq("id", id).single();
+## Banco
 
-// ✅
-const natureza = await db.from("fiscal_naturezas_operacao")
-  .select("*")
-  .eq("id", id)
-  .eq("empresa_id", empresaIdAtiva)
-  .maybeSingle();
-if (natureza?.empresa_id !== empresaIdAtiva) bloquear();
-```
+Dados empresariais devem possuir `empresa_id`, salvo estruturas realmente globais da plataforma.
 
-Catálogos de código (`fiscal_tipos_operacao`, CSOSN, NCM) podem ser globais. Cadastro e configuração fiscal não.
+Não alterar migrations antigas aplicadas.
+Nunca executar `supabase db reset`.
+Criar nova migration quando necessário.
+
+## Fiscal
+
+Certificado, CSC, série, numeração, natureza, regras tributárias, emissões e integrações fiscais são sempre por empresa.
+
+Preservar as regras atuais de segurança fiscal e reconciliação.
+Não retransmitir documento fiscal ambíguo automaticamente.
+
+## SaaS e planos
+
+Toda funcionalidade nova deve nascer preparada para:
+EMPRESA + PLANO/RECURSO + PERMISSÃO DO USUÁRIO.
+
+Plano pertence à empresa.
+
+Não hardcode:
+`plano === "premium"` ou nomes comerciais equivalentes.
+
+Preferir recursos/capacidades centralizados, permitindo mover funcionalidades entre planos sem reescrever módulos.
+
+Preservar e reutilizar:
+- `planos`
+- `assinaturas_empresas`
+
+## Permissões
+
+Plano e permissão são diferentes:
+
+Plano = a empresa possui o recurso?
+Permissão = o usuário pode executar a ação?
+
+Preparar novas funcionalidades para permissões por módulo/ação.
+
+Preservar `usuarios_empresas.perfil`.
+
+A matriz granular completa continua em standby. Não implementá-la nem refatorá-la sem solicitação específica.
+
+## Master
+
+Administração da plataforma permanece separada das empresas.
+Não usar `usuarios_empresas.perfil = "master"`.
+
+## Produção
+
+O UltraPDV principal roda online no servidor/cloud.
+
+O cliente acessa pelo navegador.
+
+UltraPDV Connector é apenas ponte local para periféricos e não deve armazenar credenciais, dados fiscais ou regras empresariais.
+
+## Escopo
+
+Não refatorar módulos não relacionados à tarefa.
+Reutilizar helpers e estruturas existentes antes de criar novas.
+
+Não executar `git commit` ou `git push` automaticamente.
+
+## Regra final
+
+Toda feature nova deve considerar:
+
+MULTIEMPRESA
++ PLANOS/RECURSOS
++ PERMISSÕES
++ SEGURANÇA
+
+Sem fazer auditoria geral do sistema a cada tarefa.

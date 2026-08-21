@@ -36,6 +36,18 @@ yarn-error.log*
 # vercel
 .vercel
 
+# print agent / connector local
+/print-agent/node_modules
+/print-agent/data
+/print-agent/dist/
+/print-agent/runtime/node.exe
+/print-agent/runtime/LICENSE
+/print-agent/bin/*.exe
+/print-agent/bin/*.dll
+/print-agent/print-engine/
+/print-agent/installer/staging/
+/print-agent/installer/generated/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -1,0 +1,30 @@
+Third-Party Notices — UltraPDV Connector
+
+Este produto contém software de terceiros. As licenças completas estão na
+pasta licenses do instalador e em C:\Program Files\UltraPDV Connector\licenses.
+
+1) Node.js
+   Uso: runtime privado (runtime\node.exe), não adicionado ao PATH.
+   Licença: MIT (e licenças das bibliotecas empacotadas no Node)
+   Site: https://nodejs.org
+   Código-fonte: https://github.com/nodejs/node
+   Arquivo: licenses\NODE-LICENSE.txt (e runtime\LICENSE quando copiado do zip oficial)
+
+2) SumatraPDF
+   Uso: motor de impressão PDF silenciosa (print-engine\SumatraPDF.exe + libmupdf.dll)
+   Licença: GNU Affero General Public License v3
+   Site: https://www.sumatrapdfreader.org
+   Código-fonte: https://github.com/sumatrapdfreader/sumatrapdf
+   Arquivo: licenses\SumatraPDF-LICENSE.txt e licenses\AGPL-3.0.txt
+   O executável é redistribuído sem modificações e não é software
+   proprietário da UltraPDV.
+
+O instalador é gerado com NSIS (https://nsis.sourceforge.io), licenciado
+sob a zlib/libpng license. O NSIS não é necessário no computador do cliente.
+
+O UltraPDV Connector em si não inclui:
+- SUPABASE_SECRET_KEY
+- certificado A1
+- senhas
+- tokens Geranet
+- arquivos .env
