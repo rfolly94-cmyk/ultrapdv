@@ -5,6 +5,7 @@ import {
   MENSAGEM_BLOQUEIO_AGUARDANDO_RECONCILIACAO,
   MENSAGEM_BLOQUEIO_RETRANSMISSAO,
 } from "@/lib/fiscal/geranet/classificar-emissao";
+import { ehDuplicidadeChaveAcesso } from "@/lib/fiscal/geranet/cstat";
 import { montarDiagnosticoRespostaGeranet } from "@/lib/fiscal/geranet/cliente-geranet";
 import { hexDocumentoFiscalPersistivel } from "@/lib/fiscal/documento-fiscal";
 import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
@@ -555,7 +556,37 @@ export async function registrarRespostaTentativaFiscal({
   }
 }
 
-export function rotuloClassificacaoTentativa(valor: string | null | undefined) {
+export function ultimaTentativaFiscal<
+  T extends { emissao_id?: string | null; tentativa?: number | null },
+>(tentativas: T[] | null | undefined, emissaoId: string) {
+  const id = texto(emissaoId);
+  if (!id) {
+    return null;
+  }
+
+  return (
+    (tentativas ?? [])
+      .filter((item) => texto(item.emissao_id) === id)
+      .sort(
+        (a, b) => Number(b.tentativa ?? 0) - Number(a.tentativa ?? 0)
+      )[0] ?? null
+  );
+}
+
+export function rotuloClassificacaoTentativa(
+  valor: string | null | undefined,
+  evidencia?: { cstat?: string | null; motivo?: string | null }
+) {
+  if (
+    evidencia &&
+    ehDuplicidadeChaveAcesso({
+      cstat: evidencia.cstat,
+      mensagem: evidencia.motivo,
+    })
+  ) {
+    return "Rejeição 539";
+  }
+
   const chave = texto(valor);
 
   if (chave === "autorizada") {

@@ -1,4 +1,8 @@
 import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import {
+  cstatNormalizado,
+  ehDuplicidadeChaveAcesso,
+} from "@/lib/fiscal/geranet/cstat";
 
 export type EvidenciaClassificacaoEmissao = {
   httpOk?: boolean | null;
@@ -67,14 +71,18 @@ export function textoEmissao(valor: unknown) {
   return String(valor ?? "").trim();
 }
 
-export function cstatFiscal(valor: unknown) {
-  return textoEmissao(valor);
+export function cstatFiscal(valor: unknown, mensagem?: unknown) {
+  return cstatNormalizado(valor, mensagem) || textoEmissao(valor);
 }
 
 export function ehRejeicaoFiscalReal(
   evidencia: EvidenciaClassificacaoEmissao
 ) {
-  const codigo = cstatFiscal(evidencia.cstat);
+  if (ehDuplicidadeChaveAcesso(evidencia)) {
+    return true;
+  }
+
+  const codigo = cstatFiscal(evidencia.cstat, evidencia.mensagem);
 
   if (!codigo || !/^\d{3}$/.test(codigo)) {
     return false;
@@ -98,12 +106,12 @@ export function ehRejeicaoFiscalConclusiva(
     return false;
   }
 
-  const codigo = cstatFiscal(evidencia.cstat);
+  const codigo = cstatFiscal(evidencia.cstat, evidencia.mensagem);
   if (codigo === "204") {
     return false;
   }
 
-  if (ehRejeicaoFiscalReal(evidencia)) {
+  if (ehDuplicidadeChaveAcesso(evidencia) || ehRejeicaoFiscalReal(evidencia)) {
     return true;
   }
 
@@ -113,7 +121,7 @@ export function ehRejeicaoFiscalConclusiva(
 export function ehErroTecnicoAmbiguo(
   evidencia: EvidenciaClassificacaoEmissao
 ) {
-  if (ehRejeicaoFiscalReal(evidencia)) {
+  if (ehRejeicaoFiscalReal(evidencia) || ehDuplicidadeChaveAcesso(evidencia)) {
     return false;
   }
 
@@ -297,7 +305,7 @@ export function classificarRespostaEmitir(
   const protocolo = textoEmissao(evidencia.protocolo);
   const situacao = textoEmissao(evidencia.situacao).toLowerCase();
   const httpOk = Boolean(evidencia.httpOk);
-  const codigo = cstatFiscal(evidencia.cstat);
+  const codigo = cstatFiscal(evidencia.cstat, evidencia.mensagem);
 
   if (
     httpOk &&
@@ -312,7 +320,7 @@ export function classificarRespostaEmitir(
     return "autorizada";
   }
 
-  if (ehRejeicaoFiscalReal(evidencia)) {
+  if (ehDuplicidadeChaveAcesso(evidencia) || ehRejeicaoFiscalReal(evidencia)) {
     return "rejeitada";
   }
 

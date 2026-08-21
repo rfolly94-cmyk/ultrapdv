@@ -53,6 +53,7 @@ import {
 } from "@/lib/fiscal/fuso-horario-empresa";
 import {
   persistenciaFalhaComunicacaoEmitir,
+  registrarLogRespostaGeranet,
 } from "@/lib/fiscal/geranet/cliente-geranet";
 import {
   classificarRespostaEmitir,
@@ -1833,6 +1834,17 @@ export async function POST(
       await lerJsonSeguro(
         resposta
       );
+
+    registrarLogRespostaGeranet({
+      dados: geranet,
+      httpStatus: resposta.status,
+      httpOk: resposta.ok,
+      endpoint: "/api/v1/nfe/emitir",
+      contexto: {
+        modelo: "55",
+        emissao_id: emissaoId,
+      },
+    });
 
     const resumo =
       resumoGeranet(

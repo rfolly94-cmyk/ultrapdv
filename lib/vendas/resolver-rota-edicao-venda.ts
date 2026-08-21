@@ -85,7 +85,7 @@ export function resolverRotaEdicaoVenda(input: {
     return {
       href: `/vendas/${vendaId}`,
       label: estado.podeReconciliar
-        ? "Acompanhar reconciliação"
+        ? "Reconciliar agora"
         : estado.requerDiagnostico
           ? "Consultar diagnóstico"
           : "Abrir documento",

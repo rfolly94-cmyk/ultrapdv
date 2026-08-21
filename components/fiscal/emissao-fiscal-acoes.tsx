@@ -35,6 +35,7 @@ export type EmissaoFiscalAcoesEmissao = {
   geranetSituacao?: string | null;
   erroComunicacao?: string | null;
   classificacao?: string | null;
+  resposta_resumo?: unknown;
   autorizadaAt?: string | null;
   enviadaAt?: string | null;
   createdAt?: string | null;
@@ -98,6 +99,7 @@ export function EmissaoFiscalAcoes({
     geranetSituacao: emissao.geranetSituacao,
     erroComunicacao: emissao.erroComunicacao,
     classificacao: emissao.classificacao,
+    resposta_resumo: emissao.resposta_resumo,
   };
   const acoes = resolverAcoesEmissaoFiscal({
     emissao: entradaEstado,

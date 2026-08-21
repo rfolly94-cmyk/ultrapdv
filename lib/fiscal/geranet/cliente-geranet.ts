@@ -1,4 +1,5 @@
 import { sanitizarConsultaGeranet } from "@/lib/fiscal/geranet/classificar-consulta";
+import { cstatNormalizado } from "@/lib/fiscal/geranet/cstat";
 
 export type RespostaGeranet = {
   situacao?: string;
@@ -104,6 +105,31 @@ async function lerJsonSeguro(
   };
 }
 
+export function normalizarRespostaGeranet(
+  dados: RespostaGeranet
+): RespostaGeranet {
+  const bruto = dados as Record<string, unknown>;
+  const cstat =
+    cstatNormalizado(
+      texto(dados.cstat) || texto(bruto.cStat) || texto(bruto.CStat),
+      dados.mensagem
+    ) || texto(dados.cstat) || texto(bruto.cStat);
+  const chave =
+    texto(dados.chave) ||
+    texto(bruto.chNFe) ||
+    texto(bruto.chNfe) ||
+    texto(bruto.chaveAcesso);
+  const protocolo =
+    texto(dados.protocolo) || texto(bruto.nProt) || texto(bruto.nprot);
+
+  return {
+    ...dados,
+    ...(cstat ? { cstat } : {}),
+    ...(chave ? { chave } : {}),
+    ...(protocolo ? { protocolo } : {}),
+  };
+}
+
 function tamanhoDocumentoDiagnostico(valor: unknown) {
   if (valor == null) {
     return 0;
@@ -186,6 +212,127 @@ export function montarDiagnosticoRespostaGeranet({
   };
 }
 
+const CHAVES_SECRETAS_LOG =
+  /certificado|senha|api.?key|token|authorization|csc|csrt|password|secret|codigoSeguranca/i;
+
+const CHAVES_LOG_PRINCIPAIS = new Set([
+  "situacao",
+  "mensagem",
+  "cstat",
+  "cStat",
+  "numero",
+  "chave",
+  "protocolo",
+  "xml",
+  "pdf",
+  "erro",
+  "erros",
+  "errors",
+  "campo",
+  "detalhes",
+]);
+
+function textoLog(valor: unknown, max = 2000) {
+  const bruto = texto(valor);
+  if (!bruto) {
+    return null;
+  }
+
+  return bruto.length > max ? `${bruto.slice(0, max)}…` : bruto;
+}
+
+function campoLog(valor: unknown) {
+  if (valor == null) {
+    return null;
+  }
+
+  if (typeof valor === "number" || typeof valor === "boolean") {
+    return valor;
+  }
+
+  if (typeof valor === "string") {
+    return textoLog(valor);
+  }
+
+  return sanitizarConsultaGeranet(valor);
+}
+
+function extrasRespostaGeranet(dados: RespostaGeranet) {
+  const sanitizado = sanitizarConsultaGeranet(dados);
+  if (!sanitizado || typeof sanitizado !== "object" || Array.isArray(sanitizado)) {
+    return null;
+  }
+
+  const extras: Record<string, unknown> = {};
+
+  for (const [chave, valor] of Object.entries(
+    sanitizado as Record<string, unknown>
+  )) {
+    if (CHAVES_LOG_PRINCIPAIS.has(chave) || /^(xml|pdf)$/i.test(chave)) {
+      continue;
+    }
+
+    if (CHAVES_SECRETAS_LOG.test(chave)) {
+      continue;
+    }
+
+    extras[chave] = valor;
+  }
+
+  return Object.keys(extras).length > 0 ? extras : null;
+}
+
+export function montarLogRespostaGeranet({
+  dados,
+  httpStatus,
+  httpOk,
+  endpoint,
+  contexto = {},
+}: {
+  dados: RespostaGeranet;
+  httpStatus: number;
+  httpOk: boolean;
+  endpoint?: string | null;
+  contexto?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const bruto = dados as Record<string, unknown>;
+
+  return {
+    emissao_id: textoLog(contexto.emissao_id) ?? null,
+    modelo: textoLog(contexto.modelo) ?? null,
+    endpoint: textoLog(endpoint) ?? null,
+    httpOk,
+    httpStatus,
+    situacao: textoLog(dados.situacao),
+    mensagem: textoLog(dados.mensagem),
+    cstat: textoLog(dados.cstat) ?? textoLog(bruto.cStat),
+    numero: textoLog(dados.numero),
+    chave: textoLog(dados.chave),
+    protocolo: textoLog(dados.protocolo),
+    xml_disponivel: Boolean(texto(dados.xml)),
+    pdf_disponivel: Boolean(texto(dados.pdf)),
+    erro: campoLog(bruto.erro),
+    erros: campoLog(bruto.erros),
+    errors: campoLog(bruto.errors),
+    campo: campoLog(bruto.campo),
+    detalhes: campoLog(bruto.detalhes),
+    extras: extrasRespostaGeranet(dados),
+    chaves_body: Object.keys(bruto).filter(
+      (chave) => !CHAVES_SECRETAS_LOG.test(chave)
+    ),
+  };
+}
+
+export function registrarLogRespostaGeranet(input: {
+  dados: RespostaGeranet;
+  httpStatus: number;
+  httpOk: boolean;
+  endpoint?: string | null;
+  contexto?: Record<string, unknown>;
+}) {
+  console.info("[fiscal] geranet-resposta", montarLogRespostaGeranet(input));
+}
+
 export function resumirRespostaGeranet(
   resposta: RespostaGeranet
 ): ResumoRespostaGeranet {
@@ -201,9 +348,10 @@ export function resumirRespostaGeranet(
       ) || null,
 
     cstat:
-      texto(
-        resposta.cstat
-      ) || null,
+      cstatNormalizado(
+        resposta.cstat ?? (resposta as Record<string, unknown>).cStat,
+        resposta.mensagem
+      ) || texto(resposta.cstat) || null,
 
     numero:
       texto(
@@ -469,10 +617,19 @@ export async function chamarGeranet({
     httpStatus: resposta.status,
   });
 
-  const dados =
+  const dados = normalizarRespostaGeranet(
     await lerJsonSeguro(
       resposta
-    );
+    )
+  );
+
+  registrarLogRespostaGeranet({
+    dados,
+    httpStatus: resposta.status,
+    httpOk: resposta.ok,
+    endpoint: rota,
+    contexto,
+  });
 
   return {
     httpOk:

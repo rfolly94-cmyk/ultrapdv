@@ -2,6 +2,7 @@ import {
   resolverEstadoOperacionalFiscal,
   type CasoApresentacaoEmissao,
   type AcaoPrincipalEmissaoFiscal,
+  type TentativaFiscalParaEstado,
 } from "@/lib/fiscal/estado-operacional-fiscal";
 
 export {
@@ -35,21 +36,25 @@ export type ApresentacaoEmissaoFiscal = {
 };
 
 export function resolverApresentacaoEmissaoFiscal(
-  emissao: EvidenciaApresentacaoEmissao
+  emissao: EvidenciaApresentacaoEmissao,
+  ultimaTentativa?: TentativaFiscalParaEstado | null
 ): ApresentacaoEmissaoFiscal {
-  const estado = resolverEstadoOperacionalFiscal({
-    modelo: emissao.modelo,
-    status: emissao.status,
-    classificacao: emissao.classificacao,
-    resposta_resumo: emissao.resposta_resumo,
-    cstat: emissao.cstat,
-    motivo: emissao.motivo,
-    protocolo: emissao.protocolo,
-    chaveAcesso: emissao.chaveAcesso,
-    geranetHttpStatus: emissao.geranetHttpStatus,
-    geranetSituacao: emissao.geranetSituacao,
-    erroComunicacao: emissao.erroComunicacao,
-  });
+  const estado = resolverEstadoOperacionalFiscal(
+    {
+      modelo: emissao.modelo,
+      status: emissao.status,
+      classificacao: emissao.classificacao,
+      resposta_resumo: emissao.resposta_resumo,
+      cstat: emissao.cstat,
+      motivo: emissao.motivo,
+      protocolo: emissao.protocolo,
+      chaveAcesso: emissao.chaveAcesso,
+      geranetHttpStatus: emissao.geranetHttpStatus,
+      geranetSituacao: emissao.geranetSituacao,
+      erroComunicacao: emissao.erroComunicacao,
+    },
+    ultimaTentativa
+  );
 
   return {
     caso: estado.caso,

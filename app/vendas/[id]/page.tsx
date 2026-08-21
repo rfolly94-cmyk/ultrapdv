@@ -32,6 +32,8 @@ import {
   resolverApresentacaoEmissaoFiscal,
 } from "@/lib/fiscal/apresentacao-emissao";
 import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import { consolidarEvidencia539 } from "@/lib/fiscal/geranet/cstat";
+import { ultimaTentativaFiscal } from "@/lib/fiscal/emissao-tentativas";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { nomeProvedorPix } from "@/lib/pagamentos/pix/provedores-geranet";
@@ -829,21 +831,46 @@ export default async function VendaDetalhePage({
         ].includes(emissao.status)
     );
 
-  const apresentacoesFiscais = (emissoesFiscais ?? []).map((emissao) => ({
-    emissao,
-    ui: resolverApresentacaoEmissaoFiscal({
-      modelo: emissao.modelo,
-      status: emissao.status,
-      classificacao: classificacaoResumoDaEmissao(emissao.resposta_resumo),
+  const apresentacoesFiscais = (emissoesFiscais ?? []).map((emissao) => {
+    const tentativa = ultimaTentativaFiscal(
+      tentativasFiscais,
+      String(emissao.id)
+    );
+    const consolidado = consolidarEvidencia539({
       cstat: emissao.cstat,
       motivo: emissao.motivo,
-      protocolo: emissao.protocolo,
-      chaveAcesso: emissao.chave_acesso,
-      geranetHttpStatus: emissao.geranet_http_status,
-      geranetSituacao: emissao.geranet_situacao,
-      erroComunicacao: emissao.erro_comunicacao,
-    }),
-  }));
+      tentativaCstat: tentativa?.cstat,
+      tentativaMotivo: tentativa?.motivo,
+    });
+    return {
+      emissao,
+      tentativa,
+      consolidado,
+      ui: resolverApresentacaoEmissaoFiscal(
+        {
+          modelo: emissao.modelo,
+          status: emissao.status,
+          classificacao: classificacaoResumoDaEmissao(emissao.resposta_resumo),
+          resposta_resumo: emissao.resposta_resumo,
+          cstat: consolidado.cstat,
+          motivo: consolidado.motivo,
+          protocolo: emissao.protocolo,
+          chaveAcesso: emissao.chave_acesso,
+          geranetHttpStatus: emissao.geranet_http_status,
+          geranetSituacao: emissao.geranet_situacao,
+          erroComunicacao: emissao.erro_comunicacao,
+        },
+        tentativa
+          ? {
+              classificacao_inicial: tentativa.classificacao_inicial,
+              http_status: tentativa.http_status,
+              cstat: tentativa.cstat,
+              motivo: tentativa.motivo,
+            }
+          : null
+      ),
+    };
+  });
 
   const emissoesPendentesReconciliacao = apresentacoesFiscais
     .filter((item) => item.ui.caso === "aguardando_reconciliacao")
@@ -1141,8 +1168,14 @@ export default async function VendaDetalhePage({
               serie={emissao.serie}
               numero={emissao.numero}
               status={emissao.status}
-              motivo={emissao.motivo}
-              cstat={emissao.cstat}
+              motivo={
+                apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                  ?.consolidado.motivo ?? emissao.motivo
+              }
+              cstat={
+                apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                  ?.consolidado.cstat ?? emissao.cstat
+              }
               geranetHttpStatus={emissao.geranet_http_status}
               geranetSituacao={emissao.geranet_situacao}
               erroComunicacao={emissao.erro_comunicacao}
@@ -1170,8 +1203,14 @@ export default async function VendaDetalhePage({
               serie={emissao.serie}
               numero={emissao.numero}
               status={emissao.status}
-              motivo={emissao.motivo}
-              cstat={emissao.cstat}
+              motivo={
+                apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                  ?.consolidado.motivo ?? emissao.motivo
+              }
+              cstat={
+                apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                  ?.consolidado.cstat ?? emissao.cstat
+              }
               geranetHttpStatus={emissao.geranet_http_status}
               geranetSituacao={emissao.geranet_situacao}
               erroComunicacao={emissao.erro_comunicacao}
@@ -1195,8 +1234,14 @@ export default async function VendaDetalhePage({
               serie={emissao.serie}
               numero={emissao.numero}
               status={emissao.status}
-              motivo={emissao.motivo}
-              cstat={emissao.cstat}
+              motivo={
+                apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                  ?.consolidado.motivo ?? emissao.motivo
+              }
+              cstat={
+                apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                  ?.consolidado.cstat ?? emissao.cstat
+              }
               geranetHttpStatus={emissao.geranet_http_status}
               geranetSituacao={emissao.geranet_situacao}
               erroComunicacao={emissao.erro_comunicacao}
@@ -1349,14 +1394,21 @@ export default async function VendaDetalhePage({
               status: emissaoFiscalPrincipal.status,
               chaveAcesso: emissaoFiscalPrincipal.chave_acesso,
               protocolo: emissaoFiscalPrincipal.protocolo,
-              cstat: emissaoFiscalPrincipal.cstat,
-              motivo: emissaoFiscalPrincipal.motivo,
+              cstat:
+                apresentacoesFiscais.find(
+                  (item) => item.emissao.id === emissaoFiscalPrincipal.id
+                )?.consolidado.cstat ?? emissaoFiscalPrincipal.cstat,
+              motivo:
+                apresentacoesFiscais.find(
+                  (item) => item.emissao.id === emissaoFiscalPrincipal.id
+                )?.consolidado.motivo ?? emissaoFiscalPrincipal.motivo,
               geranetHttpStatus: emissaoFiscalPrincipal.geranet_http_status,
               geranetSituacao: emissaoFiscalPrincipal.geranet_situacao,
               erroComunicacao: emissaoFiscalPrincipal.erro_comunicacao,
               classificacao: classificacaoResumoDaEmissao(
                 emissaoFiscalPrincipal.resposta_resumo
               ),
+              resposta_resumo: emissaoFiscalPrincipal.resposta_resumo,
               autorizadaAt: emissaoFiscalPrincipal.autorizada_at,
               enviadaAt: emissaoFiscalPrincipal.enviada_at,
               createdAt: emissaoFiscalPrincipal.created_at,
@@ -1384,15 +1436,20 @@ export default async function VendaDetalhePage({
         )}
 
         <EmissaoFiscalHistorico
-          emissoes={(emissoesFiscais ?? []).map((emissao) => ({
-            id: emissao.id,
-            modelo: emissao.modelo,
-            serie: emissao.serie,
-            numero: emissao.numero,
-            status: emissao.status,
-            cstat: emissao.cstat,
-            motivo: emissao.motivo,
-          }))}
+          emissoes={(emissoesFiscais ?? []).map((emissao) => {
+            const consolidado =
+              apresentacoesFiscais.find((item) => item.emissao.id === emissao.id)
+                ?.consolidado;
+            return {
+              id: emissao.id,
+              modelo: emissao.modelo,
+              serie: emissao.serie,
+              numero: emissao.numero,
+              status: emissao.status,
+              cstat: consolidado?.cstat ?? emissao.cstat,
+              motivo: consolidado?.motivo ?? emissao.motivo,
+            };
+          })}
           eventos={eventosFiscais ?? []}
           tentativas={(tentativasFiscais ?? []).map((tentativa) => ({
             id: tentativa.id,

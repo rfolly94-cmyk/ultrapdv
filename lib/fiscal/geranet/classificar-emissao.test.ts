@@ -802,3 +802,84 @@ test("CASO G. empresa B não reconcilia emissão da empresa A", () => {
     /Reconcilie o documento antes de qualquer nova tentativa/
   );
 });
+
+test("HTTP 422 + cStat 539 é rejeição determinística, não processando e não retransmite", () => {
+  const evidencia = {
+    httpOk: false,
+    httpStatus: 422,
+    situacao: "erro",
+    cstat: "539",
+    mensagem: "Duplicidade de NF-e com diferença na Chave de Acesso",
+    chave: null,
+    protocolo: null,
+  };
+  const situacao = classificarRespostaEmitir(evidencia);
+  const persistencia = persistirClassificacaoNaoAutorizada("rejeitada");
+  const acoes = acoesEmissaoFiscal({
+    status: "aguardando_reconciliacao",
+    modelo: "65",
+    cstat: "539",
+    motivo: evidencia.mensagem,
+    geranet_http_status: 422,
+    geranet_situacao: "erro",
+  });
+
+  assert.equal(situacao, "rejeitada");
+  assert.equal(ehRejeicaoFiscalReal(evidencia), true);
+  assert.equal(ehRejeicaoFiscalConclusiva(evidencia), true);
+  assert.equal(persistencia.retransmitir, false);
+  assert.equal(acoes.podeRetransmitir, false);
+  assert.equal(acoes.podeConsultarNovamente, true);
+  assert.equal(
+    classificarRespostaEmitir({
+      ...evidencia,
+      cstat: null,
+    }),
+    "rejeitada"
+  );
+
+  assert.equal(
+    classificarLogEmitir(
+      log({
+        http_status: 422,
+        sucesso: false,
+        situacao: "erro",
+        cstat: null,
+        mensagem: "Duplicidade de NF-e com diferença na Chave de Acesso",
+        chave: null,
+        protocolo: null,
+      }),
+      emissao({ status: "aguardando_reconciliacao", numero: 26 })
+    ),
+    "rejeitada"
+  );
+  assert.equal(
+    decidirStatusLocal("aguardando_reconciliacao", "nao_encontrada", {
+      cstat: "539",
+      motivo: "Duplicidade de NF-e com diferença na Chave de Acesso",
+    }),
+    "rejeitada"
+  );
+  assert.equal(
+    decidirStatusLocal("aguardando_reconciliacao", "falha_consulta", {
+      cstat: null,
+      motivo: "timeout depois do POST",
+    }),
+    "aguardando_reconciliacao"
+  );
+
+  const { readFileSync } = require("node:fs") as typeof import("node:fs");
+  const { join } = require("node:path") as typeof import("node:path");
+  const uiReconciliar = readFileSync(
+    join(process.cwd(), "components/vendas/reconciliar-emissao-fiscal.tsx"),
+    "utf8"
+  );
+  const reconciliarEmissao = readFileSync(
+    join(process.cwd(), "lib/fiscal/reconciliar-emissao.ts"),
+    "utf8"
+  );
+  assert.match(uiReconciliar, /Reconciliar agora/);
+  assert.doesNotMatch(uiReconciliar, /Acompanhar reconciliação/);
+  assert.doesNotMatch(reconciliarEmissao, /\/api\/v1\/nfe\/emitir/);
+  assert.match(reconciliarEmissao, /consultarEmissaoGeranet/);
+});

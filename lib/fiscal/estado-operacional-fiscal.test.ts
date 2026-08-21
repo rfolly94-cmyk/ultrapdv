@@ -228,3 +228,61 @@ test("HTTP 422 sozinho não vira rejeição nem erro_envio", () => {
   assert.equal(rejeitada.estado, "rejeitada_sefaz");
   assert.equal(rejeitada.podeRetry, true);
 });
+
+test("HTTP 422 + cStat 539 não aparece como processando e só reconcilia", () => {
+  const estado = resolverEstadoOperacionalFiscal(
+    {
+      modelo: "65",
+      status: "aguardando_reconciliacao",
+      classificacao: "erro_tecnico",
+      geranetHttpStatus: 422,
+      motivo: "Documento ainda está sendo processado pela Geranet.",
+    },
+    {
+      classificacao_inicial: "aguardando_reconciliacao",
+      http_status: 422,
+      cstat: null,
+      motivo: "Duplicidade de NF-e com diferença na Chave de Acesso",
+    }
+  );
+  const ui = resolverApresentacaoEmissaoFiscal(
+    {
+      modelo: "65",
+      status: "aguardando_reconciliacao",
+      classificacao: "erro_tecnico",
+      geranetHttpStatus: 422,
+      motivo: "Documento ainda está sendo processado pela Geranet.",
+    },
+    {
+      classificacao_inicial: "aguardando_reconciliacao",
+      http_status: 422,
+      motivo: "Duplicidade de NF-e com diferença na Chave de Acesso",
+    }
+  );
+
+  assert.equal(estado.estado, "rejeitada_sefaz");
+  assert.equal(estado.podeRetry, false);
+  assert.equal(estado.podeReconciliar, true);
+  assert.equal(estado.acaoPrincipal, "reconciliar");
+  assert.equal(ui.titulo, "Rejeição fiscal identificada");
+  assert.match(ui.texto, /Rejeição 539/);
+  assert.match(ui.texto, /Duplicidade de NFC-e com diferença na Chave de Acesso/);
+  assert.doesNotMatch(ui.texto, /ainda está sendo processado/i);
+  assert.equal(ui.podeRetransmitir, false);
+
+  const confirmada = resolverEstadoOperacionalFiscal({
+    modelo: "65",
+    status: "rejeitada",
+    classificacao: "rejeitada",
+    cstat: "539",
+    motivo: "Duplicidade de NF-e com diferença na Chave de Acesso",
+    resposta_resumo: {
+      classificacao: "rejeitada",
+      origem_classificacao: "consulta_geranet",
+      situacao_remota: "rejeitada",
+    },
+  });
+  assert.equal(confirmada.podeRetry, false);
+  assert.equal(confirmada.podeReconciliar, true);
+  assert.equal(confirmada.bloqueiaRetransmissao, false);
+});

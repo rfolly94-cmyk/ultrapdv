@@ -347,7 +347,7 @@ export function ReconciliarEmissaoFiscal({
               onClick={consultar}
               className="updv-btn updv-btn-primary shrink-0 bg-amber-800 hover:bg-amber-900"
             >
-              {enviando ? "Consultando..." : "Acompanhar reconciliação"}
+              {enviando ? "Consultando..." : "Reconciliar agora"}
             </button>
           </div>
         </div>
@@ -431,7 +431,7 @@ export function ReconciliarEmissaoFiscal({
           onClick={consultar}
           className="updv-btn updv-btn-primary shrink-0 bg-amber-800 hover:bg-amber-900 disabled:opacity-50"
         >
-          {enviando ? "Consultando..." : "Acompanhar reconciliação"}
+          {enviando ? "Consultando..." : "Reconciliar agora"}
         </button>
         {diagnosticoAberto ? (
           <pre className="max-w-sm whitespace-pre-wrap text-[12px] text-zinc-600">

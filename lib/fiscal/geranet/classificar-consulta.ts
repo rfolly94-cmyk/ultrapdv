@@ -8,6 +8,10 @@ import {
   MENSAGEM_FALHA_TECNICA_CONSULTA,
   mensagemFalhaConsultaSefaz,
 } from "./classificar-emissao";
+import {
+  cstatNormalizado,
+  ehDuplicidadeChaveAcesso,
+} from "./cstat";
 
 export type SituacaoConsultaFiscal =
   | "autorizada"
@@ -228,9 +232,13 @@ export function extrairCamposLog(
         : typeof log.sucesso === "boolean"
           ? log.sucesso
           : null,
-    chave: somenteDigitos(resposta.chave) || null,
+    chave: somenteDigitos(resposta.chave ?? resposta.chNFe ?? resposta.chNfe) || null,
     protocolo: somenteDigitos(resposta.protocolo) || null,
-    cstat: texto(resposta.cstat) || null,
+    cstat:
+      cstatNormalizado(
+        resposta.cstat ?? resposta.cStat,
+        resposta.mensagem
+      ) || texto(resposta.cstat) || texto(resposta.cStat) || null,
     numero: texto(resposta.numero ?? nfe.numeroNotaEmitir) || null,
     situacao: texto(resposta.situacao).toLowerCase() || null,
     mensagem: texto(resposta.mensagem) || null,
@@ -326,9 +334,9 @@ export function classificarLogEmitir(
   log: LogGeranetResumo,
   emissao: EmissaoParaConsulta
 ): SituacaoConsultaFiscal {
-  const cstat = texto(log.cstat);
-  const situacao = texto(log.situacao).toLowerCase();
   const mensagem = texto(log.mensagem);
+  const cstat = cstatNormalizado(log.cstat, mensagem) || texto(log.cstat);
+  const situacao = texto(log.situacao).toLowerCase();
   const chave = somenteDigitos(log.chave);
   const protocolo = somenteDigitos(log.protocolo);
   const http = Number(log.http_status ?? 0);
@@ -429,6 +437,16 @@ export function evidenciaProcessamentoRemotoNaoConclusivo(evidencia?: {
   const situacao = texto(evidencia?.situacao).toLowerCase();
 
   if (
+    ehDuplicidadeChaveAcesso({
+      cstat,
+      mensagem,
+      motivo: evidencia?.motivo,
+    })
+  ) {
+    return false;
+  }
+
+  if (
     ehFalhaNfeConsulta4({
       mensagem,
       cstat,
@@ -482,6 +500,17 @@ export function decidirStatusLocal(
   }
 
   if (situacao === "rejeitada") {
+    return "rejeitada";
+  }
+
+  if (
+    ehDuplicidadeChaveAcesso({
+      cstat: evidencia?.cstat,
+      mensagem: evidencia?.motivo,
+      motivo: evidencia?.erro_comunicacao,
+    }) &&
+    (situacao === "nao_encontrada" || situacao === "processando")
+  ) {
     return "rejeitada";
   }
 
@@ -601,7 +630,11 @@ export function montarAtualizacaoEmissao({
   origem: "manual" | "cron";
 }) {
   const agora = new Date().toISOString();
-  const cstat = texto(log?.cstat) || null;
+  const cstat =
+    cstatNormalizado(log?.cstat, log?.mensagem) ||
+    texto(log?.cstat) ||
+    cstatNormalizado(emissao.cstat, emissao.motivo) ||
+    null;
   const motivo = texto(log?.mensagem) || null;
   const evidenciaConsulta = {
     cstat: cstat || texto(emissao.cstat) || null,

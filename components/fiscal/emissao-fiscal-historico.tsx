@@ -14,6 +14,7 @@ import {
   rotuloClassificacaoTentativa,
   type TentativaFiscalResumo,
 } from "@/lib/fiscal/emissao-tentativas";
+import { ehDuplicidadeChaveAcesso } from "@/lib/fiscal/geranet/cstat";
 
 type EmissaoResumo = {
   id: string;
@@ -39,7 +40,23 @@ function formatarData(valor: string | null | undefined) {
   }).format(data);
 }
 
-function marcaTentativa(classificacao: string | null | undefined) {
+function marcaTentativa(
+  classificacao: string | null | undefined,
+  evidencia?: { cstat?: string | null; motivo?: string | null }
+) {
+  if (
+    evidencia &&
+    ehDuplicidadeChaveAcesso({
+      cstat: evidencia.cstat,
+      mensagem: evidencia.motivo,
+    })
+  ) {
+    return {
+      simbolo: "×",
+      classe: "text-red-700",
+    };
+  }
+
   const chave = String(classificacao ?? "").toLowerCase();
   if (chave === "autorizada") {
     return {
@@ -124,14 +141,21 @@ export function EmissaoFiscalHistorico({
         ) : null}
         <ol className="divide-y divide-zinc-100">
           {tentativas.map((tentativa) => {
-            const marca = marcaTentativa(tentativa.classificacao_inicial);
+            const marca = marcaTentativa(tentativa.classificacao_inicial, {
+              cstat: tentativa.cstat,
+              motivo: tentativa.motivo,
+            });
             return (
               <li key={tentativa.id} className="px-3 py-3">
                 <p className={`text-[13px] font-semibold ${marca.classe}`}>
                   {marca.simbolo} Tentativa {tentativa.tentativa}
                   {" · "}
                   {rotuloClassificacaoTentativa(
-                    tentativa.classificacao_inicial
+                    tentativa.classificacao_inicial,
+                    {
+                      cstat: tentativa.cstat,
+                      motivo: tentativa.motivo,
+                    }
                   )}
                 </p>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[12px] text-zinc-500">

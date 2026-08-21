@@ -6,6 +6,11 @@ import {
   nfce65DeveApenasReconciliar,
   textoEmissao,
 } from "@/lib/fiscal/geranet/classificar-emissao";
+import {
+  descricaoRejeicao539,
+  ehDuplicidadeChaveAcesso,
+  cstatNormalizado,
+} from "@/lib/fiscal/geranet/cstat";
 
 export type EstadoOperacionalFiscal =
   | "autorizada"
@@ -117,8 +122,18 @@ const MENSAGEM_PROCESSAMENTO_REMOTO_PERSISTIDO =
   /ainda está sendo processado|em processamento|aguardando processamento|aguardando retorno|documento pendente|status pendente/i;
 
 function evidenciaProcessamentoRemotoPersistido(
-  emissao: EntradaEstadoOperacionalFiscal
+  emissao: EntradaEstadoOperacionalFiscal,
+  ultimaTentativa?: TentativaFiscalParaEstado | null
 ) {
+  if (
+    ehDuplicidadeChaveAcesso({
+      cstat: ultimaTentativa?.cstat ?? emissao.cstat,
+      mensagem: `${emissao.motivo ?? ""} ${ultimaTentativa?.motivo ?? ""}`,
+      motivo: emissao.erro_comunicacao,
+    })
+  ) {
+    return false;
+  }
   const resumo =
     emissao.resposta_resumo && typeof emissao.resposta_resumo === "object"
       ? (emissao.resposta_resumo as Record<string, unknown>)
@@ -133,8 +148,11 @@ function evidenciaProcessamentoRemotoPersistido(
   );
 }
 
-function descricaoEstadoAmbiguo(emissao: EntradaEstadoOperacionalFiscal) {
-  if (evidenciaProcessamentoRemotoPersistido(emissao)) {
+function descricaoEstadoAmbiguo(
+  emissao: EntradaEstadoOperacionalFiscal,
+  ultimaTentativa?: TentativaFiscalParaEstado | null
+) {
+  if (evidenciaProcessamentoRemotoPersistido(emissao, ultimaTentativa)) {
     return "Documento ainda está sendo processado pela Geranet. Não retransmita este documento até que a situação fiscal seja confirmada.";
   }
 
@@ -252,11 +270,33 @@ export function resolverEstadoOperacionalFiscal(
   const classificacao = classificacaoEfetiva(emissao, ultimaTentativa);
   const evidencias = evidenciasPersistidas(emissao);
   const podeConsultar = STATUS_CONSULTAVEIS.has(status);
+  const mensagemConsolidada = `${evidencias.mensagem ?? ""} ${ultimaTentativa?.motivo ?? ""}`;
+  const cstatConsolidado =
+    cstatNormalizado(
+      ultimaTentativa?.cstat ?? evidencias.cstat,
+      mensagemConsolidada
+    ) || textoEmissao(ultimaTentativa?.cstat ?? evidencias.cstat);
+  const duplicidade539 = ehDuplicidadeChaveAcesso({
+    cstat: cstatConsolidado,
+    mensagem: mensagemConsolidada,
+  });
   const cstatConclusivo = ehRejeicaoFiscalConclusiva({
     ...evidencias,
-    cstat: ultimaTentativa?.cstat ?? evidencias.cstat,
-    mensagem: `${evidencias.mensagem ?? ""} ${ultimaTentativa?.motivo ?? ""}`,
+    cstat: cstatConsolidado || evidencias.cstat,
+    mensagem: mensagemConsolidada,
   });
+  const consultaConfirmouRejeicao539 =
+    duplicidade539 &&
+    textoEmissao(
+      emissao.resposta_resumo && typeof emissao.resposta_resumo === "object"
+        ? (emissao.resposta_resumo as Record<string, unknown>).origem_classificacao
+        : ""
+    ) === "consulta_geranet" &&
+    textoEmissao(
+      emissao.resposta_resumo && typeof emissao.resposta_resumo === "object"
+        ? (emissao.resposta_resumo as Record<string, unknown>).situacao_remota
+        : ""
+    ) === "rejeitada";
 
   if (status === "autorizada") {
     return montarEstado({
@@ -327,13 +367,30 @@ export function resolverEstadoOperacionalFiscal(
     });
   }
 
+  if (duplicidade539) {
+    return montarEstado({
+      estado: "rejeitada_sefaz",
+      caso: consultaConfirmouRejeicao539 ? "rejeitada" : "aguardando_reconciliacao",
+      documento,
+      titulo: "Rejeição fiscal identificada",
+      descricao: descricaoRejeicao539(emissao.modelo),
+      podeRetry: false,
+      podeReconciliar: true,
+      podeConsultar: true,
+      podeEditarFiscal: false,
+      documentoFiscalAmbiguo: !consultaConfirmouRejeicao539,
+      documentoFiscalSensivel: !consultaConfirmouRejeicao539,
+      acaoPrincipal: "reconciliar",
+    });
+  }
+
   if (status === "aguardando_reconciliacao" || CLASSIFICACAO_AMBIGUA.has(classificacao)) {
     return montarEstado({
       estado: "ambigua",
       caso: "aguardando_reconciliacao",
       documento,
       titulo: "Emissão pendente de reconciliação",
-      descricao: descricaoEstadoAmbiguo(emissao),
+      descricao: descricaoEstadoAmbiguo(emissao, ultimaTentativa),
       podeRetry: false,
       podeReconciliar: true,
       podeConsultar: true,

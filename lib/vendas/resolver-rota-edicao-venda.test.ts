@@ -80,7 +80,7 @@ test("NF-e autorizada ou em reconciliação não reabre rascunho", () => {
     statusFiscal: "aguardando_reconciliacao",
   });
   assert.equal(pendente.href, "/vendas/v1");
-  assert.equal(pendente.label, "Acompanhar reconciliação");
+  assert.equal(pendente.label, "Reconciliar agora");
 
   const emitir = resolverRotaEmissaoListaVenda({
     vendaId: "v1",
