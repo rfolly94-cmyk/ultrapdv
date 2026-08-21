@@ -3,8 +3,13 @@ import { Search } from "lucide-react";
 
 import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { listarEmpresasMaster } from "@/lib/master/empresas";
-import { formatarData } from "@/lib/relatorios/formatacao";
+import { formatarCnpjMaster } from "@/lib/master/apresentacao-empresa";
+import {
+  listarEmpresasMaster,
+  listarPlanosMaster,
+  metricasMaster,
+} from "@/lib/master/empresas";
+import { formatarData, formatarMoeda } from "@/lib/relatorios/formatacao";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +20,7 @@ export const metadata = {
 const FILTROS = [
   { id: "", label: "Todas" },
   { id: "ativa", label: "Ativas" },
-  { id: "trial", label: "Trial" },
+  { id: "trial", label: "Em teste" },
   { id: "carencia", label: "Carência" },
   { id: "suspensa", label: "Suspensas" },
   { id: "cancelada", label: "Canceladas" },
@@ -25,24 +30,25 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-function formatarCnpj(valor: string) {
-  const digitos = valor.replace(/\D/g, "");
-  if (digitos.length !== 14) {
-    return valor || "—";
-  }
-  return digitos.replace(
-    /^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,
-    "$1.$2.$3/$4-$5"
-  );
+function param(valor: string | string[] | undefined) {
+  return Array.isArray(valor) ? valor[0] : valor ?? "";
 }
 
-function hrefLista(params: { q: string; status: string; page?: number }) {
+function hrefLista(params: {
+  q: string;
+  status: string;
+  planoId: string;
+  page?: number;
+}) {
   const busca = new URLSearchParams();
   if (params.q) {
     busca.set("q", params.q);
   }
   if (params.status) {
     busca.set("status", params.status);
+  }
+  if (params.planoId) {
+    busca.set("plano", params.planoId);
   }
   if (params.page && params.page > 1) {
     busca.set("page", String(params.page));
@@ -53,26 +59,51 @@ function hrefLista(params: { q: string; status: string; page?: number }) {
 
 export default async function MasterEmpresasPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const q = Array.isArray(params.q) ? params.q[0] : params.q ?? "";
-  const status = Array.isArray(params.status) ? params.status[0] : params.status ?? "";
-  const page = Number(Array.isArray(params.page) ? params.page[0] : params.page ?? 1);
-  const lista = await listarEmpresasMaster({ q, status, page });
+  const q = param(params.q);
+  const status = param(params.status);
+  const planoId = param(params.plano);
+  const page = Number(param(params.page) || 1);
+  const [lista, metricas, planos] = await Promise.all([
+    listarEmpresasMaster({ q, status, planoId, page }),
+    metricasMaster(),
+    listarPlanosMaster(),
+  ]);
   const totalPaginas = Math.max(1, Math.ceil(lista.total / lista.pageSize));
+  const cards = [
+    { label: "Total de empresas", valor: String(metricas.empresas) },
+    { label: "Ativas", valor: String(metricas.ativas) },
+    { label: "Em teste", valor: String(metricas.trial) },
+    { label: "Suspensas", valor: String(metricas.suspensas) },
+  ];
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-zinc-950">Empresas</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Plano, status e vencimento de cada empresa da plataforma.
+          Administração comercial das empresas da plataforma.
         </p>
       </div>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map((card) => (
+          <article
+            key={card.label}
+            className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm"
+          >
+            <p className="text-[12px] text-zinc-500">{card.label}</p>
+            <p className="mt-1 text-2xl font-bold tracking-tight text-zinc-950">
+              {card.valor}
+            </p>
+          </article>
+        ))}
+      </section>
 
       <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-100 px-4 py-3">
           <form
             action="/master/empresas"
-            className="flex flex-col gap-3 sm:flex-row sm:items-center"
+            className="flex flex-col gap-3 lg:flex-row lg:items-center"
           >
             <input type="hidden" name="status" value={lista.status} />
             <div className="relative min-w-0 flex-1">
@@ -80,10 +111,22 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
               <input
                 name="q"
                 defaultValue={lista.q}
-                placeholder="Buscar por nome ou CNPJ"
+                placeholder="Buscar nome fantasia, razão social ou CNPJ"
                 className="updv-input updv-input-search w-full"
               />
             </div>
+            <select
+              name="plano"
+              defaultValue={lista.planoId}
+              className="updv-input w-full lg:w-52"
+            >
+              <option value="">Todos os planos</option>
+              {planos.map((plano) => (
+                <option key={plano.id} value={plano.id}>
+                  {plano.nome}
+                </option>
+              ))}
+            </select>
             <button type="submit" className="updv-btn updv-btn-primary shrink-0">
               Buscar
             </button>
@@ -95,7 +138,11 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
               return (
                 <Link
                   key={filtro.id || "todas"}
-                  href={hrefLista({ q: lista.q, status: filtro.id })}
+                  href={hrefLista({
+                    q: lista.q,
+                    status: filtro.id,
+                    planoId: lista.planoId,
+                  })}
                   className={`inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium ${
                     ativo
                       ? "bg-zinc-900 text-white"
@@ -110,7 +157,7 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="updv-table min-w-[920px]">
+          <table className="updv-table min-w-[980px]">
             <thead>
               <tr>
                 <th>Ações</th>
@@ -118,14 +165,15 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
                 <th>CNPJ</th>
                 <th>Plano</th>
                 <th>Status</th>
-                <th>Vencimento</th>
+                <th>Valor contratado</th>
+                <th>Usuários</th>
                 <th>Cadastro</th>
               </tr>
             </thead>
             <tbody>
               {lista.linhas.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="updv-table-empty">
+                  <td colSpan={8} className="updv-table-empty">
                     Nenhuma empresa encontrada.
                   </td>
                 </tr>
@@ -146,14 +194,19 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
                         {linha.nome}
                       </Link>
                     </td>
-                    <td>{formatarCnpj(linha.cnpj)}</td>
+                    <td>{formatarCnpjMaster(linha.cnpj)}</td>
                     <td>{linha.plano}</td>
                     <td>
                       <StatusBadge status={linha.status}>
                         {linha.rotuloStatus}
                       </StatusBadge>
                     </td>
-                    <td>{formatarData(linha.vencimento)}</td>
+                    <td>
+                      {linha.valorContratado == null
+                        ? "—"
+                        : formatarMoeda(linha.valorContratado)}
+                    </td>
+                    <td>{linha.usuarios ?? "—"}</td>
                     <td>{formatarData(linha.cadastro)}</td>
                   </tr>
                 ))
@@ -173,6 +226,7 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
                 href={hrefLista({
                   q: lista.q,
                   status: lista.status,
+                  planoId: lista.planoId,
                   page: lista.page - 1,
                 })}
                 className="updv-btn updv-btn-ghost"
@@ -185,6 +239,7 @@ export default async function MasterEmpresasPage({ searchParams }: PageProps) {
                 href={hrefLista({
                   q: lista.q,
                   status: lista.status,
+                  planoId: lista.planoId,
                   page: lista.page + 1,
                 })}
                 className="updv-btn updv-btn-ghost"

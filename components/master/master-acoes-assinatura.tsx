@@ -1,7 +1,7 @@
 "use client";
 
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
 
 import { AppModal } from "@/components/ui/app-modal";
 import {
@@ -13,28 +13,48 @@ import {
   masterSuspenderEmpresa,
 } from "@/lib/master/acoes";
 import { diasLiberacaoTemporaria } from "@/lib/assinatura/aplicar-acao";
+import { formatarMoeda } from "@/lib/relatorios/formatacao";
 
-type Painel = "suspender" | "carencia" | "liberar" | null;
+type Painel = "plano" | "suspender" | "carencia" | "liberar" | null;
+
+type PlanoOpcao = {
+  id: string;
+  nome: string;
+  valorMensal?: number | null;
+};
 
 export function MasterAcoesAssinatura({
   empresaId,
   planoId,
+  planoNome,
+  valorContratado,
   vencimento,
   status,
   planos,
+  variante = "completo",
 }: {
   empresaId: string;
   planoId: string | null;
+  planoNome?: string | null;
+  valorContratado?: number | null;
   vencimento: string | null;
   status?: string | null;
-  planos: Array<{ id: string; nome: string }>;
+  planos: PlanoOpcao[];
+  variante?: "completo" | "cabecalho";
 }) {
   const [erro, setErro] = useState("");
   const [painel, setPainel] = useState<Painel>(null);
+  const [planoSelecionado, setPlanoSelecionado] = useState(planoId ?? "");
   const [pending, start] = useTransition();
   const router = useRouter();
   const jaAtiva = status === "ativa" || status === "trial";
   const jaCancelada = status === "cancelada";
+  const cabecalho = variante === "cabecalho";
+
+  const planoNovo = useMemo(
+    () => planos.find((item) => item.id === planoSelecionado) ?? null,
+    [planos, planoSelecionado]
+  );
 
   function executar(
     acao: (formData: FormData) => Promise<{ ok: boolean; erro?: string }>,
@@ -60,50 +80,12 @@ export function MasterAcoesAssinatura({
     executar(acao, new FormData(form));
   }
 
-  return (
-    <div className="space-y-5">
-      {erro ? (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>
-      ) : null}
-
-      <form
-        className="grid gap-3 border-b border-zinc-100 pb-5 sm:grid-cols-[1fr_1fr_auto]"
-        onSubmit={(event) => {
-          event.preventDefault();
-          enviarFormulario(masterAlterarPlano, event.currentTarget);
-        }}
-      >
-        <label className="text-sm">
-          <span className="mb-1 block text-zinc-500">Plano</span>
-          <select name="plano_id" defaultValue={planoId ?? ""} className="updv-input w-full">
-            <option value="">Sem plano</option>
-            {planos.map((plano) => (
-              <option key={plano.id} value={plano.id}>
-                {plano.nome}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-zinc-500">Vencimento</span>
-          <input
-            type="date"
-            name="vencimento_em"
-            defaultValue={vencimento?.slice(0, 10) ?? ""}
-            className="updv-input w-full"
-          />
-        </label>
-        <div className="flex items-end">
-          <button type="submit" disabled={pending} className="updv-btn updv-btn-primary">
-            Salvar plano
-          </button>
-        </div>
-      </form>
-
-      <div className="flex flex-wrap gap-2">
+  const botoesStatus = (
+    <>
+      {!jaAtiva ? (
         <button
           type="button"
-          disabled={pending || jaAtiva}
+          disabled={pending}
           className="updv-btn updv-btn-primary"
           onClick={() => {
             if (!confirm("Reativar esta empresa?")) return;
@@ -112,52 +94,205 @@ export function MasterAcoesAssinatura({
             executar(masterAtivarEmpresa, data);
           }}
         >
-          Reativar
+          Reativar empresa
         </button>
+      ) : (
         <button
           type="button"
           disabled={pending || jaCancelada}
           className="updv-btn updv-btn-ghost"
           onClick={() => setPainel("suspender")}
         >
-          Suspender
+          Suspender empresa
         </button>
-        <button
-          type="button"
-          disabled={pending || jaCancelada}
-          className="updv-btn updv-btn-ghost"
-          onClick={() => setPainel("carencia")}
-        >
-          Carência
-        </button>
-        <button
-          type="button"
-          disabled={pending || jaCancelada}
-          className="updv-btn updv-btn-ghost"
-          onClick={() => setPainel("liberar")}
-        >
-          Liberar
-        </button>
-        <button
-          type="button"
-          disabled={pending || jaCancelada}
-          className="updv-btn updv-btn-ghost text-red-700"
-          onClick={() => {
-            if (
-              !confirm(
-                "Cancelar a assinatura? Os dados da empresa serão preservados."
-              )
-            ) {
-              return;
-            }
-            const data = new FormData();
-            data.set("motivo", "Cancelamento Master");
-            executar(masterCancelarAssinatura, data);
+      )}
+    </>
+  );
+
+  return (
+    <div className={cabecalho ? "space-y-3" : "space-y-5"}>
+      {erro ? (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>
+      ) : null}
+
+      {cabecalho ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={pending}
+            className="updv-btn updv-btn-primary"
+            onClick={() => {
+              setPlanoSelecionado(planoId ?? "");
+              setPainel("plano");
+            }}
+          >
+            Alterar plano
+          </button>
+          {botoesStatus}
+        </div>
+      ) : (
+        <>
+          <form
+            className="grid gap-3 border-b border-zinc-100 pb-5 sm:grid-cols-[1fr_1fr_auto]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              enviarFormulario(masterAlterarPlano, event.currentTarget);
+            }}
+          >
+            <label className="text-sm">
+              <span className="mb-1 block text-zinc-500">Plano atual</span>
+              <p className="updv-input flex items-center bg-zinc-50">
+                {planoNome || "Sem plano"}
+              </p>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-zinc-500">Novo plano</span>
+              <select
+                name="plano_id"
+                value={planoSelecionado}
+                onChange={(event) => setPlanoSelecionado(event.target.value)}
+                className="updv-input w-full"
+              >
+                <option value="">Sem plano</option>
+                {planos.map((plano) => (
+                  <option key={plano.id} value={plano.id}>
+                    {plano.nome}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-zinc-500">Valor contratado</span>
+              <p className="updv-input flex items-center bg-zinc-50">
+                {planoNovo?.valorMensal == null && valorContratado == null
+                  ? "—"
+                  : formatarMoeda(planoNovo?.valorMensal ?? valorContratado)}
+              </p>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-zinc-500">Vencimento</span>
+              <input
+                type="date"
+                name="vencimento_em"
+                defaultValue={vencimento?.slice(0, 10) ?? ""}
+                className="updv-input w-full"
+              />
+            </label>
+            <div className="flex items-end sm:col-span-2">
+              <button type="submit" disabled={pending} className="updv-btn updv-btn-primary">
+                Salvar alteração
+              </button>
+            </div>
+          </form>
+
+          <div className="flex flex-wrap gap-2">
+            {botoesStatus}
+            <button
+              type="button"
+              disabled={pending || jaCancelada}
+              className="updv-btn updv-btn-ghost"
+              onClick={() => setPainel("carencia")}
+            >
+              Carência
+            </button>
+            <button
+              type="button"
+              disabled={pending || jaCancelada}
+              className="updv-btn updv-btn-ghost"
+              onClick={() => setPainel("liberar")}
+            >
+              Liberar
+            </button>
+            <button
+              type="button"
+              disabled={pending || jaCancelada}
+              className="updv-btn updv-btn-ghost text-red-700"
+              onClick={() => {
+                if (
+                  !confirm(
+                    "Cancelar a assinatura? Os dados da empresa serão preservados."
+                  )
+                ) {
+                  return;
+                }
+                const data = new FormData();
+                data.set("motivo", "Cancelamento Master");
+                executar(masterCancelarAssinatura, data);
+              }}
+            >
+              Cancelar assinatura
+            </button>
+          </div>
+        </>
+      )}
+
+      <AppModal
+        open={painel === "plano"}
+        title="Alterar plano"
+        onClose={() => setPainel(null)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="updv-btn updv-btn-ghost"
+              onClick={() => setPainel(null)}
+              disabled={pending}
+            >
+              Voltar
+            </button>
+            <button
+              type="submit"
+              form="master-alterar-plano"
+              disabled={pending}
+              className="updv-btn updv-btn-primary"
+            >
+              Salvar alteração
+            </button>
+          </>
+        }
+      >
+        <form
+          id="master-alterar-plano"
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            enviarFormulario(masterAlterarPlano, event.currentTarget);
           }}
         >
-          Cancelar assinatura
-        </button>
-      </div>
+          <div className="text-sm">
+            <span className="mb-1 block text-zinc-500">Plano atual</span>
+            <p className="font-medium text-zinc-950">{planoNome || "Sem plano"}</p>
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-500">Novo plano</span>
+            <select
+              name="plano_id"
+              value={planoSelecionado}
+              onChange={(event) => setPlanoSelecionado(event.target.value)}
+              className="updv-input w-full"
+            >
+              <option value="">Sem plano</option>
+              {planos.map((plano) => (
+                <option key={plano.id} value={plano.id}>
+                  {plano.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="text-sm">
+            <span className="mb-1 block text-zinc-500">Valor contratado</span>
+            <p className="font-medium text-zinc-950">
+              {planoNovo?.valorMensal == null
+                ? "—"
+                : formatarMoeda(planoNovo.valorMensal)}
+            </p>
+            <p className="mt-1 text-[12px] text-zinc-500">
+              Este valor fica gravado no contrato. Alterar o preço do catálogo não
+              muda assinaturas já existentes.
+            </p>
+          </div>
+        </form>
+      </AppModal>
 
       <AppModal
         open={painel === "suspender"}

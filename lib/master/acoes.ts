@@ -1,12 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 
 import { aplicarAcaoAssinatura } from "@/lib/assinatura/aplicar-acao";
 import type { AcaoAssinatura } from "@/lib/assinatura/tipos";
 import { exigirMaster } from "@/lib/master/exigir-master";
 import { registrarAuditoriaPlataforma } from "@/lib/plataforma/auditoria";
+import {
+  payloadPlanoParaRpc,
+  validarPayloadPlano,
+} from "@/lib/plataforma/recursos/validar-plano";
 
 async function gravarAssinatura(
   empresaId: string,
@@ -38,13 +41,16 @@ async function gravarAssinatura(
 
   const planoAtual = Array.isArray(atual.planos) ? atual.planos[0] : atual.planos;
   let planoNome: string | null = planoAtual?.nome ? String(planoAtual.nome) : null;
+  let valorMensalContratado: number | null | undefined;
   if (params.planoId) {
     const { data: plano } = await admin
       .from("planos")
-      .select("id, nome")
+      .select("id, nome, valor_mensal")
       .eq("id", params.planoId)
       .maybeSingle();
     planoNome = plano?.nome ? String(plano.nome) : planoNome;
+    valorMensalContratado =
+      plano?.valor_mensal == null ? null : Number(plano.valor_mensal);
   }
 
   const { proxima, evento } = aplicarAcaoAssinatura(
@@ -77,6 +83,9 @@ async function gravarAssinatura(
       suspenso_em: proxima.suspenso_em,
       cancelado_em: proxima.cancelado_em,
       observacao: proxima.observacao,
+      ...(valorMensalContratado !== undefined
+        ? { valor_mensal_contratado: valorMensalContratado }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("empresa_id", empresaId)
@@ -180,33 +189,61 @@ export async function masterCancelarAssinatura(formData: FormData) {
   });
 }
 
-export async function masterSalvarPlano(formData: FormData): Promise<void> {
-  const { admin } = await exigirMaster();
-  const id = String(formData.get("id") ?? "").trim();
-  const payload = {
-    nome: String(formData.get("nome") ?? "").trim(),
-    descricao: String(formData.get("descricao") ?? "").trim() || null,
-    valor_mensal: String(formData.get("valor_mensal") ?? "").trim()
-      ? Number(String(formData.get("valor_mensal")).replace(",", "."))
-      : null,
-    ativo: formData.get("ativo") === "on" || formData.get("ativo") === "true",
-    ordem: Number(formData.get("ordem") ?? 0) || 0,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (!payload.nome) {
-    redirect(
-      `/master/planos?erro=${encodeURIComponent("Informe o nome do plano.")}`
-    );
+export async function masterSalvarPlano(entrada: {
+  id?: string | null;
+  nome?: unknown;
+  descricao?: unknown;
+  valorMensal?: unknown;
+  valorAnual?: unknown;
+  ordem?: unknown;
+  ativo?: unknown;
+  destaque?: unknown;
+  textoDestaque?: unknown;
+  oferecerTeste?: unknown;
+  diasTeste?: unknown;
+  nivelSuporte?: unknown;
+  limites?: unknown;
+  recursos?: unknown;
+}): Promise<{ ok: true; id: string } | { ok: false; erro: string }> {
+  const { supabase } = await exigirMaster();
+  const validado = validarPayloadPlano(entrada);
+  if (!validado.ok) {
+    return validado;
   }
 
-  const { error } = id
-    ? await admin.from("planos").update(payload).eq("id", id)
-    : await admin.from("planos").insert(payload);
+  const { data, error } = await supabase.rpc("rpc_master_salvar_plano", {
+    p_payload: payloadPlanoParaRpc(validado.payload),
+  });
 
   if (error) {
-    redirect(`/master/planos?erro=${encodeURIComponent(error.message)}`);
+    return {
+      ok: false,
+      erro: mensagemErroSalvarPlano(error.message),
+    };
   }
 
+  const retorno = (data ?? {}) as { id?: string; nome?: string };
+  const planoId = String(retorno.id ?? validado.payload.id ?? "").trim();
+
   revalidatePath("/master/planos");
+  revalidatePath("/master");
+  revalidatePath("/master/empresas");
+  return { ok: true, id: planoId };
+}
+
+function mensagemErroSalvarPlano(mensagem: string) {
+  const texto = mensagem.toLowerCase();
+  if (texto.includes("nao_autorizado") || texto.includes("42501")) {
+    return "Você não tem permissão para alterar planos.";
+  }
+  if (texto.includes("nome_obrigatorio")) {
+    return "Informe o nome do plano.";
+  }
+  if (texto.includes("planos_nome_unico") || texto.includes("duplicate")) {
+    return "Já existe um plano com este nome.";
+  }
+  if (texto.includes("plano_nao_encontrado")) {
+    return "Plano não encontrado.";
+  }
+  return "Não foi possível salvar o plano.";
 }
