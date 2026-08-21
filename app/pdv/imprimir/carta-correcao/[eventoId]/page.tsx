@@ -275,6 +275,9 @@ export default async function ImprimirCartaCorrecaoPage({
               emissao.origem_id
             ) ?? undefined
           }
+          pdfUrl={`/api/impressao/carta-correcao/${evento.id}`}
+          tipoDocumento="danfe_nfe"
+          papel="a4"
         />
 
         <article className="rounded-2xl bg-white p-8 shadow-sm print:rounded-none print:p-0 print:shadow-none">

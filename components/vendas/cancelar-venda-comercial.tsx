@@ -45,6 +45,15 @@ type Preflight = {
     boolean;
   permite_credito?:
     boolean;
+
+  possui_documento_fiscal?:
+    boolean;
+  fiscal_modelo?:
+    string | null;
+  fiscal_numero?:
+    number | string | null;
+  fiscal_status?:
+    string | null;
 };
 
 type RespostaPreflight = {
@@ -165,10 +174,17 @@ export function CancelarVendaComercial({
   ] =
     useState(false);
 
+  const [
+    avisoFiscalOk,
+    setAvisoFiscalOk,
+  ] =
+    useState(false);
+
   function fechar() {
     setAberto(false);
     setMensagem(null);
     setDestinoRecebido(null);
+    setAvisoFiscalOk(false);
     onFechar?.();
   }
 
@@ -188,6 +204,7 @@ export function CancelarVendaComercial({
     setDestinoRecebido(
       null
     );
+    setAvisoFiscalOk(false);
     setPreflight(null);
     setCarregandoAnalise(
       true
@@ -335,6 +352,10 @@ export function CancelarVendaComercial({
                   motivoLimpo,
                 destino_valor_recebido:
                   destinoRecebido,
+                confirmar_fiscal_comercial:
+                  Boolean(
+                    preflight?.possui_documento_fiscal
+                  ) && avisoFiscalOk,
               }),
           }
         );
@@ -487,8 +508,48 @@ export function CancelarVendaComercial({
         Cancelamento comercial
       </h3>
 
+      {preflight?.possui_documento_fiscal &&
+        !avisoFiscalOk &&
+        !carregandoAnalise && (
+          <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-950">
+              Esta venda possui documento fiscal.
+            </p>
+            <p className="mt-2 text-sm text-amber-900">
+              A operação irá alterar somente as movimentações comerciais
+              relacionadas à venda.
+            </p>
+            <p className="mt-2 text-sm text-amber-900">
+              O documento fiscal permanecerá com a situação fiscal atual.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={fechar}
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => setAvisoFiscalOk(true)}
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-4 text-sm font-semibold text-white"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        )}
+
+      {!(
+        preflight?.possui_documento_fiscal &&
+        !avisoFiscalOk &&
+        !carregandoAnalise
+      ) && (
+        <>
       <p className="mt-1 text-sm text-red-800">
-        Venda #{numero ?? "—"}. Se existir documento fiscal autorizado, ele precisa estar cancelado antes.
+        Venda #{numero ?? "—"}. O documento fiscal, se existir, não será
+        cancelado nem alterado.
       </p>
 
       {carregandoAnalise && (
@@ -680,6 +741,8 @@ export function CancelarVendaComercial({
           Voltar
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }

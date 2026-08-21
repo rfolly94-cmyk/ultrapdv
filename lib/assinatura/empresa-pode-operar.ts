@@ -55,11 +55,13 @@ export function erroSchemaAssinaturaAusente(mensagem: string | null | undefined)
   );
 }
 
+export type AssinaturaParaOperar = Pick<
+  AssinaturaEmpresa,
+  "empresa_id" | "status" | "carencia_ate" | "liberado_ate"
+>;
+
 export function empresaPodeOperar(
-  assinatura: Pick<
-    AssinaturaEmpresa,
-    "status" | "carencia_ate" | "liberado_ate"
-  > | null,
+  assinatura: AssinaturaParaOperar | null,
   agora = new Date()
 ) {
   if (!assinatura) {
@@ -91,10 +93,7 @@ export function empresaPodeOperar(
 }
 
 export function assinaturaBloqueiaOperacao(
-  assinatura: Pick<
-    AssinaturaEmpresa,
-    "status" | "carencia_ate" | "liberado_ate"
-  > | null,
+  assinatura: AssinaturaParaOperar | null,
   error: { message?: string } | null | undefined,
   agora = new Date()
 ) {
@@ -108,10 +107,7 @@ export function assinaturaBloqueiaOperacao(
 }
 
 export function rotuloStatusAssinatura(
-  assinatura: Pick<
-    AssinaturaEmpresa,
-    "status" | "liberado_ate" | "carencia_ate"
-  > | null,
+  assinatura: AssinaturaParaOperar | null,
   agora = new Date()
 ) {
   if (!assinatura) {

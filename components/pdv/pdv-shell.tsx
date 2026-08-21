@@ -27,9 +27,14 @@ import { finalizarVendaPdv } from "../../app/pdv/actions";
 import {
   buscarConfiguracoesImpressaoAction,
 } from "@/app/configuracoes/impressao/actions";
+import { BotaoImprimirConector } from "@/components/impressao/botao-imprimir-conector";
 import { obterDispositivoId } from "@/lib/impressao/dispositivo";
 import { executarDestinoImpressao } from "@/lib/impressao/executar-cliente";
-import { decidirDestinoImpressaoAutomatica } from "@/lib/impressao/regras";
+import {
+  configDoTipo,
+  decidirDestinoImpressaoAutomatica,
+  decidirDocumentoImpressao,
+} from "@/lib/impressao/regras";
 import type {
   ConfiguracaoImpressao,
   DestinoImpressaoAutomatica,
@@ -98,6 +103,14 @@ import {
   preferenciasAposCancelarPreview,
   type PreferenciasPdv,
 } from "@/lib/pdv/preferencias";
+import {
+  MENSAGEM_PRODUTO_CODIGO_NAO_ENCONTRADO,
+  decidirAcaoEnterBuscaPdv,
+  detectorScannerVazio,
+  pareceLeituraScanner,
+  quantidadeAposAdicionarPdv,
+  registrarTeclaBusca,
+} from "@/lib/pdv/busca-produto";
 import { urlPublicaCatalogo } from "@/lib/catalogo/storage";
 import { salvarPreferenciasPdvAction } from "@/app/pdv/preferencias-actions";
 import { PdvPreferenciasModal } from "@/components/pdv/pdv-preferencias-modal";
@@ -537,10 +550,12 @@ export function PdvShell({
   ] = useState<{
     status: "idle" | "imprimindo" | "ok" | "falha";
     erro: string | null;
+    mensagem: string | null;
     destino: DestinoImpressaoAutomatica;
   }>({
     status: "idle",
     erro: null,
+    mensagem: null,
     destino: { tipo: "nenhum" },
   });
 
@@ -553,6 +568,8 @@ export function PdvShell({
     useRef<HTMLInputElement>(
       null
     );
+
+  const detectorScannerRef = useRef(detectorScannerVazio());
 
   const idempotencyRef =
     useRef<string | null>(
@@ -577,13 +594,16 @@ export function PdvShell({
 
   async function tentarImpressaoPosVenda(
     vendaId: string,
-    fiscal: FiscalUltimaVenda | null
+    fiscal: FiscalUltimaVenda | null,
+    forcar = false
   ) {
-    const destino = decidirDestinoImpressaoAutomatica({
-      configs: configsImpressao,
-      vendaId,
-      fiscal,
-    });
+    const destino = forcar
+      ? decidirDocumentoImpressao({ vendaId, fiscal })
+      : decidirDestinoImpressaoAutomatica({
+          configs: configsImpressao,
+          vendaId,
+          fiscal,
+        });
     if (destino.tipo === "nenhum") {
       return false;
     }
@@ -591,6 +611,7 @@ export function PdvShell({
     setImpressaoPos({
       status: "imprimindo",
       erro: null,
+      mensagem: null,
       destino,
     });
 
@@ -598,21 +619,40 @@ export function PdvShell({
       const resultado = await executarDestinoImpressao({
         destino,
         configs: configsImpressao,
+        forcar: true,
       });
+      if ("pulou" in resultado && resultado.pulou) {
+        setImpressaoPos({
+          status: "idle",
+          erro: null,
+          mensagem: null,
+          destino,
+        });
+        return false;
+      }
       if (resultado.ok) {
         setImpressaoPos({
           status: "ok",
           erro: null,
+          mensagem:
+            "mensagem" in resultado
+              ? resultado.mensagem
+              : "Enviado para impressão",
           destino,
         });
         return true;
       }
+      const erroBase =
+        "erro" in resultado
+          ? resultado.erro
+          : "Venda concluída, mas não foi possível imprimir.";
       setImpressaoPos({
         status: "falha",
         erro:
-          "erro" in resultado
-            ? resultado.erro
-            : "Venda concluída, mas não foi possível imprimir automaticamente.",
+          fiscal?.kind === "autorizada"
+            ? `NFC-e autorizada, mas não foi possível imprimir.\n${erroBase}`
+            : erroBase,
+        mensagem: null,
         destino,
       });
       return false;
@@ -620,7 +660,10 @@ export function PdvShell({
       setImpressaoPos({
         status: "falha",
         erro:
-          "Venda concluída, mas não foi possível imprimir automaticamente.",
+          fiscal?.kind === "autorizada"
+            ? "NFC-e autorizada, mas não foi possível imprimir."
+            : "Venda concluída, mas não foi possível imprimir.",
+        mensagem: null,
         destino,
       });
       return false;
@@ -947,9 +990,10 @@ export function PdvShell({
               produto.id
                 ? {
                     ...item,
-                    quantidade:
-                      item.quantidade +
-                      qtd,
+                    quantidade: quantidadeAposAdicionarPdv(
+                      item.quantidade,
+                      qtd
+                    ),
                   }
                 : item
           );
@@ -976,6 +1020,7 @@ export function PdvShell({
 
     setBusca("");
     setQuantidadeDigitada("1");
+    detectorScannerRef.current = detectorScannerVazio();
 
     requestAnimationFrame(
       () =>
@@ -1058,44 +1103,40 @@ export function PdvShell({
   function aoPressionarBusca(
     event: React.KeyboardEvent<HTMLInputElement>
   ) {
-    if (
-      event.key !== "Enter"
-    ) {
+    detectorScannerRef.current = registrarTeclaBusca(
+      detectorScannerRef.current,
+      event.key,
+      event.timeStamp
+    );
+
+    if (event.key !== "Enter") {
       return;
     }
 
     event.preventDefault();
 
-    const termo =
-      busca.trim();
+    const leituraScanner = pareceLeituraScanner(
+      detectorScannerRef.current,
+      event.timeStamp
+    );
+    detectorScannerRef.current = detectorScannerVazio();
 
-    if (!termo) {
+    const acao = decidirAcaoEnterBuscaPdv({
+      termo: busca,
+      produtos,
+      produtosFiltrados,
+      leituraScanner,
+    });
+
+    if (acao.tipo === "adicionar") {
+      adicionarProduto(acao.produto as Produto);
       return;
     }
 
-    const exato =
-      produtos.find(
-        (produto) =>
-          produto.codigo ===
-            termo ||
-          produto.codigo_barras ===
-            termo
-      );
-
-    if (exato) {
-      adicionarProduto(
-        exato
-      );
-      return;
-    }
-
-    if (
-      produtosFiltrados.length ===
-      1
-    ) {
-      adicionarProduto(
-        produtosFiltrados[0]
-      );
+    if (acao.tipo === "nao-encontrado") {
+      setToastPdv(MENSAGEM_PRODUTO_CODIGO_NAO_ENCONTRADO);
+      setBusca("");
+      requestAnimationFrame(() => buscaRef.current?.focus());
     }
   }
 
@@ -1617,6 +1658,7 @@ export function PdvShell({
         setImpressaoPos({
           status: "idle",
           erro: null,
+          mensagem: null,
           destino: { tipo: "nenhum" },
         });
 
@@ -1641,22 +1683,11 @@ export function PdvShell({
           null
         );
 
-        if (!emitirNfceAutomaticoPdv && imprimirApos) {
-          const imprimiuAgente = await tentarImpressaoPosVenda(
-            resultado.vendaId,
-            null
-          );
-          if (!imprimiuAgente) {
-            window.open(
-              `/pdv/imprimir/recibo/${resultado.vendaId}?auto=1`,
-              "_blank",
-              "noopener,noreferrer"
-            );
-          }
-        } else if (!emitirNfceAutomaticoPdv) {
+        if (!emitirNfceAutomaticoPdv) {
           await tentarImpressaoPosVenda(
             resultado.vendaId,
-            null
+            null,
+            imprimirApos
           );
         }
         idempotencyRef.current =
@@ -1685,23 +1716,11 @@ export function PdvShell({
                 }
               : atual
           );
-          const acoes = resolverAcoesPosVendaPdv({
-            emitirNfceAutomatico: true,
-            vendaId: resultado.vendaId,
-            imprimirApos,
-            fiscal: fiscalAtualizado,
-          });
-          const imprimiuAgente = await tentarImpressaoPosVenda(
+          await tentarImpressaoPosVenda(
             resultado.vendaId,
-            fiscalAtualizado
+            fiscalAtualizado,
+            imprimirApos
           );
-          if (
-            !imprimiuAgente &&
-            acoes.autoAbrir === "danfe" &&
-            acoes.hrefDanfe
-          ) {
-            window.open(acoes.hrefDanfe, "_blank", "noopener,noreferrer");
-          }
         }
 
         requestAnimationFrame(
@@ -1868,18 +1887,18 @@ export function PdvShell({
             </p>
 
             {impressaoPos.status === "imprimindo" ? (
-              <p className="mt-3 text-sm text-zinc-500">Imprimindo...</p>
+              <p className="mt-3 text-sm text-zinc-500">Enviando para impressão...</p>
             ) : null}
             {impressaoPos.status === "ok" ? (
               <p className="mt-3 text-sm text-emerald-700">
-                Impresso com sucesso
+                {impressaoPos.mensagem || "Enviado para impressão"}
               </p>
             ) : null}
             {impressaoPos.status === "falha" ? (
               <div className="mt-3 space-y-2">
-                <p className="text-sm text-amber-800">
+                <p className="whitespace-pre-line text-sm text-amber-800">
                   {impressaoPos.erro ||
-                    "Venda concluída, mas não foi possível imprimir automaticamente."}
+                    "Venda concluída, mas não foi possível imprimir."}
                 </p>
                 <button
                   type="button"
@@ -1890,11 +1909,12 @@ export function PdvShell({
                     }
                     void tentarImpressaoPosVenda(
                       ultimaVenda.vendaId,
-                      ultimaVenda.fiscal
+                      ultimaVenda.fiscal,
+                      true
                     );
                   }}
                 >
-                  Tentar imprimir novamente
+                  Tentar novamente
                 </button>
               </div>
             ) : null}
@@ -1917,14 +1937,24 @@ export function PdvShell({
             ) : null}
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {acoesPosVenda?.mostrarImprimirNfce && ultimaVenda.fiscal?.emissaoId ? (
+                <BotaoImprimirConector
+                  pdfUrl={`/api/impressao/danfe/${ultimaVenda.fiscal.emissaoId}`}
+                  tipoDocumento="danfe_nfce"
+                  papel={configDoTipo(configsImpressao, "danfe_nfce").papel}
+                  label="Imprimir NFC-e"
+                  className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              ) : null}
+
               {acoesPosVenda?.mostrarImprimirNfce && acoesPosVenda.hrefDanfe ? (
                 <a
                   href={acoesPosVenda.hrefDanfe}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                  className="inline-flex h-12 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100"
                 >
-                  Imprimir NFC-e
+                  Visualizar DANFE
                 </a>
               ) : null}
 
@@ -1940,14 +1970,13 @@ export function PdvShell({
               ) : null}
 
               {acoesPosVenda?.mostrarImprimirReciboNormal ? (
-                <a
-                  href={acoesPosVenda.hrefRecibo}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                >
-                  {acoesPosVenda.rotuloBotaoRecibo}
-                </a>
+                <BotaoImprimirConector
+                  pdfUrl={`/api/impressao/recibo/${ultimaVenda.vendaId}?papel=${configDoTipo(configsImpressao, "recibo").papel}`}
+                  tipoDocumento="recibo"
+                  papel={configDoTipo(configsImpressao, "recibo").papel}
+                  label={acoesPosVenda.rotuloBotaoRecibo}
+                  className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                />
               ) : null}
 
               <button
@@ -1957,6 +1986,7 @@ export function PdvShell({
                   setImpressaoPos({
                     status: "idle",
                     erro: null,
+                    mensagem: null,
                     destino: { tipo: "nenhum" },
                   });
                   setBusca("");
@@ -1987,6 +2017,10 @@ export function PdvShell({
           {deveRenderizarLogoCentro({
             mostrarLogoCentro: preferencias.mostrarLogoCentro,
             logoUrl,
+            carrinhoVazio: carrinho.length === 0,
+            buscaAtiva: Boolean(busca.trim()),
+            resultadosAbertos: Boolean(busca.trim()),
+            buscaCarregando: false,
           }) ? (
             <div className="pdv-logo-centro" aria-hidden>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2079,7 +2113,8 @@ export function PdvShell({
             </div>
           </div>
 
-          <div className="mt-6 flex items-center gap-3">
+          <div className="relative z-10 mt-6">
+          <div className="flex items-center gap-3">
             <div className="flex h-12 flex-1 items-center rounded-full border border-zinc-200 bg-white px-4">
               <Search className="h-5 w-5 shrink-0 text-zinc-400" />
               <input
@@ -2089,10 +2124,11 @@ export function PdvShell({
                 onKeyDown={aoPressionarBusca}
                 placeholder="Buscar produto, código ou código de barras"
                 className="ml-3 h-full flex-1 border-0 bg-transparent text-sm outline-none"
+                autoComplete="off"
               />
               <ChevronDown className="h-4 w-4 shrink-0 text-zinc-400" />
             </div>
-            <div className="flex h-10 items-center rounded-full border border-zinc-200 px-4 text-sm font-medium text-zinc-700">
+            <div className="flex h-10 items-center rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700">
               Quant:
               <input
                 value={quantidadeDigitada}
@@ -2104,8 +2140,8 @@ export function PdvShell({
             </div>
           </div>
 
-          {busca.trim() && (
-            <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-zinc-200">
+          {busca.trim() ? (
+            <div className="pdv-busca-resultados mt-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-200">
               {produtosFiltrados.length === 0 ? (
                 <p className="px-4 py-3 text-sm text-zinc-500">
                   Nenhum produto encontrado.
@@ -2161,9 +2197,10 @@ export function PdvShell({
                 })
               )}
             </div>
-          )}
+          ) : null}
+          </div>
 
-          <div className="mt-6 min-h-0 flex-1 overflow-auto">
+          <div className="relative z-[1] mt-6 min-h-0 flex-1 overflow-auto">
             <div className="grid grid-cols-[48px_72px_minmax(0,1fr)_160px] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
               <span>Nº</span>
               <span>Qtd</span>
@@ -2172,9 +2209,11 @@ export function PdvShell({
             </div>
             <div className="mt-2 border-t border-zinc-200">
               {carrinho.length === 0 ? (
+                busca.trim() ? null : (
                 <p className="py-16 text-center text-sm text-zinc-400">
                   Busque um produto para iniciar a venda.
                 </p>
+                )
               ) : (
                 carrinho.map((item, index) => (
                   <div

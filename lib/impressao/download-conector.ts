@@ -1,0 +1,5 @@
+export const ULTRAPDV_CONNECTOR_SETUP_FILENAME =
+  "UltraPDV-Conector-Setup.exe";
+
+export const ULTRAPDV_CONNECTOR_DOWNLOAD_URL =
+  "https://xdcmoqvfrdqfinylyjqt.supabase.co/storage/v1/object/sign/Impressora/UltraPDV-Conector-Setup.exe?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9iZjAxYThjZi00NDgyLTQyOTEtYmZiZC04Mjc5ZjIwYTRhZWUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJJbXByZXNzb3JhL1VsdHJhUERWLUNvbmVjdG9yLVNldHVwLmV4ZSIsInNjb3BlIjoiZG93bmxvYWQiLCJpYXQiOjE3ODczMzE3NzEsImV4cCI6MzM2NDEzMTc3MX0.ERxH0gT8_akVrZVyseuEWBJ5pJplgzes3KL5uUQ6BWk";

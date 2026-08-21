@@ -169,7 +169,11 @@ export function EmitirNfeVendaButton({
                 });
                 if (!impressao.ok) {
                   setMensagem(
-                    `${data.autorizada ? "NF-e autorizada." : ""} Não foi possível imprimir automaticamente.`
+                    `NF-e autorizada, mas não foi possível imprimir.\n${impressao.erro}`
+                  );
+                } else if ("mensagem" in impressao) {
+                  setMensagem(
+                    `NF-e autorizada. Série ${data.serie ?? "—"}, número ${data.numero ?? "—"}. ${impressao.mensagem}`
                   );
                 }
               }

@@ -29,6 +29,7 @@ type Body = {
   destino_valor_recebido?:
     | DestinoRecebido
     | null;
+  confirmar_fiscal_comercial?: boolean;
 };
 
 function json(
@@ -510,6 +511,19 @@ export async function GET(
         )
       : 0;
 
+  const {
+    data: fiscal,
+  } =
+    await admin
+      .from("fiscal_emissoes")
+      .select("modelo, numero, serie, status")
+      .eq("empresa_id", ctx.vinculo.empresa_id)
+      .eq("origem_tipo", "venda")
+      .eq("origem_id", vendaId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
   return json({
     ok: true,
     preflight: {
@@ -566,6 +580,15 @@ export async function GET(
         Boolean(
           venda.cliente_id
         ),
+
+      possui_documento_fiscal:
+        Boolean(fiscal?.status),
+      fiscal_modelo:
+        fiscal?.modelo ?? null,
+      fiscal_numero:
+        fiscal?.numero ?? null,
+      fiscal_status:
+        fiscal?.status ?? null,
     },
   });
 }
@@ -657,6 +680,33 @@ export async function POST(
           "Destino do valor recebido inválido.",
       },
       400
+    );
+  }
+
+  const {
+    data: fiscalPost,
+  } =
+    await admin
+      .from("fiscal_emissoes")
+      .select("id, status")
+      .eq("empresa_id", ctx.vinculo.empresa_id)
+      .eq("origem_tipo", "venda")
+      .eq("origem_id", vendaId)
+      .limit(1)
+      .maybeSingle();
+
+  if (
+    fiscalPost?.status &&
+    body.confirmar_fiscal_comercial !== true
+  ) {
+    return json(
+      {
+        ok: false,
+        erro:
+          "Esta venda possui documento fiscal. Confirme que a operação alterará somente as movimentações comerciais.",
+        exige_confirmacao_fiscal: true,
+      },
+      409
     );
   }
 

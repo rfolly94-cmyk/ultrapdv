@@ -37,6 +37,7 @@ import {
 import type {
   SegredosFiscaisGeranet,
 } from "@/lib/fiscal/geranet/montar-payload-nfce";
+import { aplicarContingenciaContratoGeranet } from "@/lib/fiscal/geranet/contingencia-contrato";
 
 import type {
   AmbienteGeranet,

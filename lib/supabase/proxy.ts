@@ -72,7 +72,17 @@ export async function updateSession(request: NextRequest) {
           .eq("empresa_id", String(vinculo.empresa_id))
           .maybeSingle();
 
-        if (assinaturaBloqueiaOperacao(assinatura, erroAssinatura)) {
+        if (
+          assinaturaBloqueiaOperacao(
+            assinatura
+              ? {
+                  ...assinatura,
+                  empresa_id: String(vinculo.empresa_id),
+                }
+              : null,
+            erroAssinatura
+          )
+        ) {
           const url = request.nextUrl.clone();
           url.pathname = "/assinatura";
           url.search = "";

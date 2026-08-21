@@ -102,7 +102,9 @@ test("usuário empresa A não recebe permissões da empresa B", () => {
   assert.equal(temPermissao(lucasA, "produtos", "editar"), true);
   assert.equal(temPermissao(lucasB, "produtos", "editar"), false);
   assert.notEqual(empresaA, empresaB);
-  assert.equal(usuarioA === usuarioX, false);
+  const idUsuarioA: string = usuarioA;
+  const idUsuarioX: string = usuarioX;
+  assert.equal(idUsuarioA === idUsuarioX, false);
 });
 
 test("mesmo usuário pode ter permissões diferentes entre empresa A e B", () => {

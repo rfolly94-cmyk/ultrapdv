@@ -83,6 +83,8 @@ test("cadastro de cliente consulta CEP no ViaCEP sem criar campos novos", () => 
     "utf8"
   );
   assert.match(pagina, /EnderecoViaCepCampos/);
+  assert.match(pagina, /const mostrarLista = !clienteEdicao && !params\.novo/);
+  assert.match(pagina, /ClienteNavegacao/);
   assert.match(campos, /name="cep"/);
   assert.match(campos, /name="logradouro"/);
   assert.match(campos, /name="codigo_municipio_ibge"/);

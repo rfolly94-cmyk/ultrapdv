@@ -57,6 +57,8 @@ export type StatusAgenteImpressao = {
   version?: string;
   port?: number;
   dispositivoId?: string;
+  lastPrinter?: string | null;
+  lastPaper?: string | null;
   motorImpressao?: {
     encontrado: boolean;
     tipo?: string | null;

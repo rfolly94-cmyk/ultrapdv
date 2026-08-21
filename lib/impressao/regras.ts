@@ -126,10 +126,7 @@ export function podeImprimirAutomaticamente(
   config: ConfiguracaoImpressao | null | undefined
 ) {
   return Boolean(
-    config &&
-      config.ativo !== false &&
-      config.impressaoAutomatica === true &&
-      String(config.impressoraNome ?? "").trim()
+    config && config.ativo !== false && config.impressaoAutomatica === true
   );
 }
 
@@ -150,8 +147,7 @@ export function danfeNfceAutorizadaImprimivel(fiscal: {
   );
 }
 
-export function decidirDestinoImpressaoAutomatica(input: {
-  configs: ConfiguracaoImpressao[];
+export function decidirDocumentoImpressao(input: {
   vendaId: string;
   fiscal?: {
     emitindo?: boolean;
@@ -166,10 +162,8 @@ export function decidirDestinoImpressaoAutomatica(input: {
     return { tipo: "nenhum" };
   }
 
-  const danfeNfce = configDoTipo(input.configs, "danfe_nfce");
   if (
     danfeNfceAutorizadaImprimivel(input.fiscal ?? null) &&
-    podeImprimirAutomaticamente(danfeNfce) &&
     input.fiscal?.emissaoId
   ) {
     return {
@@ -178,10 +172,29 @@ export function decidirDestinoImpressaoAutomatica(input: {
     };
   }
 
-  const recibo = configDoTipo(input.configs, "recibo");
-  if (podeImprimirAutomaticamente(recibo)) {
-    return { tipo: "recibo", vendaId };
+  return { tipo: "recibo", vendaId };
+}
+
+export function decidirDestinoImpressaoAutomatica(input: {
+  configs: ConfiguracaoImpressao[];
+  vendaId: string;
+  fiscal?: {
+    emitindo?: boolean;
+    kind?: string | null;
+    status?: string | null;
+    emissaoId?: string | null;
+    danfeDisponivel?: boolean;
+  } | null;
+}): DestinoImpressaoAutomatica {
+  const destino = decidirDocumentoImpressao(input);
+  if (destino.tipo === "nenhum") {
+    return destino;
   }
 
-  return { tipo: "nenhum" };
+  const tipo = destino.tipo === "recibo" ? "recibo" : destino.tipo;
+  if (!podeImprimirAutomaticamente(configDoTipo(input.configs, tipo))) {
+    return { tipo: "nenhum" };
+  }
+
+  return destino;
 }

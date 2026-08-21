@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { cadastrarCliente, editarCliente } from "./actions";
 
+import { ClienteNavegacao } from "@/components/clientes/cliente-navegacao";
 import { EnderecoViaCepCampos } from "@/components/cadastro/endereco-via-cep-campos";
 import { createClient } from "@/lib/supabase/server";
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
@@ -183,79 +184,17 @@ export default async function ClientesPage({
         )
       : null;
 
-  const clienteIds =
-    (clientes ?? []).map(
-      (cliente) =>
-        cliente.id
-    );
-
-  const creditoPorCliente =
-    new Map<string, number>();
-
-  if (clienteIds.length) {
-    const {
-      data: creditos,
-      error: creditosError,
-    } =
-      await supabase
-        .from(
-          "carteira_cliente_creditos"
-        )
-        .select(
-          "cliente_id, valor_disponivel, status"
-        )
-        .eq(
-          "empresa_id",
-          vinculo.empresa_id
-        )
-        .in(
-          "cliente_id",
-          clienteIds
-        )
-        .in(
-          "status",
-          [
-            "DISPONIVEL",
-            "PARCIAL",
-          ]
-        );
-
-    if (creditosError) {
-      throw new Error(
-        creditosError.message
-      );
-    }
-
-    for (
-      const credito of
-      creditos ?? []
-    ) {
-      creditoPorCliente.set(
-        credito.cliente_id,
-        (
-          creditoPorCliente.get(
-            credito.cliente_id
-          ) ?? 0
-        ) +
-          Number(
-            credito.valor_disponivel ??
-            0
-          )
-      );
-    }
-  }
-
-  const creditoClienteEdicao =
-    clienteEdicao
-      ? creditoPorCliente.get(
-          clienteEdicao.id
-        ) ?? 0
-      : 0;
-
   const mostrarFormulario = Boolean(clienteEdicao || params.novo);
+  const mostrarLista = !clienteEdicao && !params.novo;
 
   return (
     <main className="updv-page">
+      {clienteEdicao ? (
+        <ClienteNavegacao
+          clienteId={clienteEdicao.id}
+          clienteNome={clienteEdicao.nome}
+        />
+      ) : (
       <PageHeader
         title="Clientes"
         description="Cadastro de clientes da empresa."
@@ -274,12 +213,15 @@ export default async function ClientesPage({
           </div>
         }
       />
+      )}
 
+      {mostrarLista ? (
       <ListToolbar
         searchAction="/clientes"
         searchDefault={busca}
         searchPlaceholder="Buscar cliente, CPF/CNPJ ou telefone"
       />
+      ) : null}
 
       <div>
         {params.erro && <PageAlert type="erro">{params.erro}</PageAlert>}
@@ -470,7 +412,7 @@ export default async function ClientesPage({
               Crédito / Fiado
             </h3>
 
-            <div className="mt-4 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-4 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
               <Campo
                 label="Limite de crédito"
                 name="limite_credito"
@@ -527,43 +469,6 @@ export default async function ClientesPage({
                   />
                 )}
               </div>
-
-              {clienteEdicao && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-red-700">
-                    Saldo devedor
-                  </p>
-
-                  <p className="mt-2 text-xl font-bold text-red-700">
-                    {dinheiro(
-                      clienteEdicao
-                        .saldo_devedor
-                    )}
-                  </p>
-
-                  <p className="mt-1 text-xs text-red-700/80">
-                    Dívida aberta na Carteira.
-                  </p>
-                </div>
-              )}
-
-              {clienteEdicao && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">
-                    Crédito disponível
-                  </p>
-
-                  <p className="mt-2 text-xl font-bold text-emerald-700">
-                    {dinheiro(
-                      creditoClienteEdicao
-                    )}
-                  </p>
-
-                  <p className="mt-1 text-xs text-emerald-700/80">
-                    Saldo a favor do cliente.
-                  </p>
-                </div>
-              )}
             </div>
 
             <div className="mt-5">
@@ -599,6 +504,7 @@ export default async function ClientesPage({
         )}
       </div>
 
+        {mostrarLista ? (
         <DataTable minWidth={900}>
           <thead>
             <tr>
@@ -676,6 +582,7 @@ export default async function ClientesPage({
             )}
           </tbody>
         </DataTable>
+        ) : null}
     </main>
   );
 }

@@ -109,6 +109,7 @@ export async function listarEmpresasMaster({
           }
           const plano = Array.isArray(linha.planos) ? linha.planos[0] : linha.planos;
           const assinatura = {
+            empresa_id: String(empresa.id),
             status: String(linha.status ?? filtro),
             vencimento_em: linha.vencimento_em ? String(linha.vencimento_em) : null,
             liberado_ate: linha.liberado_ate ? String(linha.liberado_ate) : null,
@@ -167,6 +168,7 @@ export async function listarEmpresasMaster({
         : null;
       const assinatura = assinaturaRaw
         ? {
+            empresa_id: String(empresa.id),
             status: String(assinaturaRaw.status ?? "ativa"),
             vencimento_em: assinaturaRaw.vencimento_em
               ? String(assinaturaRaw.vencimento_em)

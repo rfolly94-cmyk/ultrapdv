@@ -198,9 +198,11 @@ test("7. configuração desligada mantém fluxo comercial normal", () => {
 
   const shell = fonte("components/pdv/pdv-shell.tsx");
   assert.match(shell, /resolverAcoesPosVendaPdv/);
-  assert.match(shell, /if \(!emitirNfceAutomaticoPdv && imprimirApos\)/);
+  assert.match(shell, /if \(!emitirNfceAutomaticoPdv\)/);
+  assert.match(shell, /imprimirApos/);
   assert.match(shell, /rotuloBotaoRecibo/);
   assert.match(shell, /não substitui NF-e, NFC-e ou DANFE/);
+  assert.doesNotMatch(shell, /window\.open/);
   assert.match(fonte("lib/pdv/acoes-pos-venda.ts"), /Imprimir recibo normal/);
   assert.doesNotMatch(shell, /setUltimaVenda\(null\).*chamarEmissaoNfceVenda/);
 });

@@ -398,6 +398,9 @@ export default async function ReciboVendaPage({
           voltarHref={
             `/vendas/${venda.id}`
           }
+          pdfUrl={`/api/impressao/recibo/${venda.id}?papel=80mm`}
+          tipoDocumento="recibo"
+          papel="80mm"
         />
 
         <article className="bg-white px-3 py-4 font-mono text-[11px] leading-4 shadow-sm print:p-0 print:shadow-none">

@@ -7,6 +7,7 @@ import {
   invalidarOrigemConector,
   MENSAGEM_CONECTOR_AUSENTE,
 } from "./descobrir";
+import { normalizarErroImpressaoConector } from "./mensagens";
 
 const TIMEOUT_MS = 2500;
 const TIMEOUT_PRINT_MS = 20000;
@@ -80,19 +81,28 @@ export async function listarImpressorasAgente(): Promise<ImpressoraWindows[]> {
 
 export async function enviarImpressaoAgente(input: {
   tipoDocumento: string;
-  impressora: string;
+  impressora?: string | null;
   copias: number;
   papel: string;
   pdfBase64: string;
 }) {
-  const impressora = String(input.impressora ?? "").trim();
-  if (!impressora) {
-    return { ok: false as const, erro: "Selecione uma impressora." };
-  }
-
-  const pdf = String(input.pdfBase64 ?? "").replace(/^data:application\/pdf;base64,/, "");
+  const pdf = String(input.pdfBase64 ?? "").replace(
+    /^data:application\/pdf;base64,/,
+    ""
+  );
   if (!pdf) {
     return { ok: false as const, erro: "Documento de impressão vazio." };
+  }
+
+  const impressora = String(input.impressora ?? "").trim();
+  const payload: Record<string, unknown> = {
+    tipoDocumento: input.tipoDocumento,
+    copias: input.copias,
+    papel: input.papel,
+    pdfBase64: pdf,
+  };
+  if (impressora) {
+    payload.impressora = impressora;
   }
 
   try {
@@ -101,13 +111,7 @@ export async function enviarImpressaoAgente(input: {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tipoDocumento: input.tipoDocumento,
-          impressora,
-          copias: input.copias,
-          papel: input.papel,
-          pdfBase64: pdf,
-        }),
+        body: JSON.stringify(payload),
       },
       TIMEOUT_PRINT_MS
     );
@@ -115,18 +119,24 @@ export async function enviarImpressaoAgente(input: {
     const data = (await resposta.json().catch(() => ({}))) as {
       ok?: boolean;
       erro?: string;
+      impressora?: string;
+      papel?: string;
     };
 
     if (!resposta.ok || data.ok !== true) {
       return {
         ok: false as const,
-        erro:
-          data.erro ||
-          "Não foi possível imprimir neste computador.",
+        erro: normalizarErroImpressaoConector(
+          data.erro || "Não foi possível imprimir neste computador."
+        ),
       };
     }
 
-    return { ok: true as const };
+    return {
+      ok: true as const,
+      impressora: String(data.impressora ?? impressora).trim(),
+      papel: String(data.papel ?? input.papel).trim(),
+    };
   } catch {
     return {
       ok: false as const,

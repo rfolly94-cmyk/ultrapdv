@@ -450,8 +450,21 @@ export function preferenciasAposCancelarPreview(
 export function deveRenderizarLogoCentro(input: {
   mostrarLogoCentro: boolean;
   logoUrl: string | null | undefined;
+  carrinhoVazio?: boolean;
+  buscaAtiva?: boolean;
+  resultadosAbertos?: boolean;
+  buscaCarregando?: boolean;
 }) {
-  return input.mostrarLogoCentro === true && Boolean(input.logoUrl);
+  if (input.mostrarLogoCentro !== true || !input.logoUrl) {
+    return false;
+  }
+  if (input.carrinhoVazio === false) {
+    return false;
+  }
+  if (input.buscaAtiva || input.resultadosAbertos || input.buscaCarregando) {
+    return false;
+  }
+  return true;
 }
 
 export function imagemProdutoDaEmpresaAtiva(

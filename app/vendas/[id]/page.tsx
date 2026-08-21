@@ -4,6 +4,7 @@ import {
   redirect,
 } from "next/navigation";
 
+import { BotaoImprimirConector } from "@/components/impressao/botao-imprimir-conector";
 import { createClient } from "@/lib/supabase/server";
 import { CancelarVendaComercial } from "@/components/vendas/cancelar-venda-comercial";
 import { TransporteVendaForm } from "@/components/vendas/transporte-venda-form";
@@ -1027,13 +1028,20 @@ export default async function VendaDetalhePage({
             </p>
 
             <div className="flex shrink-0 flex-wrap gap-2">
+              <BotaoImprimirConector
+                pdfUrl={`/api/impressao/recibo/${venda.id}?papel=80mm`}
+                tipoDocumento="recibo"
+                papel="80mm"
+                label="Imprimir recibo"
+                className="updv-btn updv-btn-ghost"
+              />
               <a
                 href={`/pdv/imprimir/recibo/${venda.id}`}
                 target="_blank"
                 rel="noreferrer"
                 className="updv-btn updv-btn-ghost"
               >
-                Imprimir recibo
+                Visualizar recibo
               </a>
 
               {possuiFiscalBloqueante ? (

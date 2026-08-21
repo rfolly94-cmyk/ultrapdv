@@ -12,7 +12,7 @@ export const MENSAGEM_IMPRESSORA_AUSENTE =
   "Impressora não encontrada neste computador.";
 export const MENSAGEM_PDF_INVALIDO = "Documento PDF inválido.";
 export const MENSAGEM_IMPRESSORA_INDISPONIVEL =
-  "Nenhuma impressora disponível. Selecione uma impressora no UltraPDV Conector.";
+  "Nenhuma impressora disponível/configurada no UltraPDV Conector.\n\nAbra o UltraPDV Conector e selecione uma impressora.";
 
 export function impressoraSegura(nome) {
   const limpo = String(nome ?? "").trim();
@@ -33,6 +33,19 @@ export function impressoraExiste(lista, nome) {
   return lista.some((item) => item.nome === alvo);
 }
 
+export function ehImpressoraSomenteArquivo(nome) {
+  const n = String(nome ?? "").trim().toLowerCase();
+  if (!n) {
+    return false;
+  }
+  return (
+    n.includes("microsoft print to pdf") ||
+    n.includes("microsoft xps document writer") ||
+    n === "fax" ||
+    n.endsWith(" fax")
+  );
+}
+
 export function escolherImpressora({ pedida, lastPrinter, impressoras } = {}) {
   const lista = Array.isArray(impressoras) ? impressoras : [];
   if (impressoraExiste(lista, pedida)) {
@@ -42,7 +55,7 @@ export function escolherImpressora({ pedida, lastPrinter, impressoras } = {}) {
     return impressoraSegura(lastPrinter);
   }
   const padrao = lista.find((item) => item.padrao)?.nome;
-  if (impressoraExiste(lista, padrao)) {
+  if (impressoraExiste(lista, padrao) && !ehImpressoraSomenteArquivo(padrao)) {
     return impressoraSegura(padrao);
   }
   return null;

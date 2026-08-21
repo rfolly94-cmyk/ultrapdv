@@ -36,6 +36,7 @@ import {
 import { formatarDataHoraGeranet } from "@/lib/fiscal/geranet/data-hora";
 import { exigirFusoHorarioFiscalDaEmissao } from "@/lib/fiscal/fuso-horario-empresa";
 import { montarItemGeranet } from "@/lib/fiscal/geranet/montar-item";
+import { montarPayloadNfeGeranet } from "@/lib/fiscal/geranet/montar-payload-nfe";
 import {
   DistribuicaoDescontoFiscalError,
   distribuirDescontoItens,

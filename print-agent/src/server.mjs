@@ -30,7 +30,7 @@ import {
   avisarInstanciaExistente,
   obterMutexExclusivo,
 } from "./mutex.mjs";
-import { carregarOrigens } from "./origens.mjs";
+import { carregarOrigens, ORIGENS_FIXAS } from "./origens.mjs";
 import {
   candidatosPorta,
   escolherPortaLivre,
@@ -177,10 +177,7 @@ export function criarServidor(deps = {}) {
   const localizar = deps.localizarMotorPdf ?? localizarMotorPdf;
   const listar = deps.listarImpressoras ?? listarImpressoras;
   const imprimir = deps.imprimirPdfComSumatra ?? imprimirPdfComSumatra;
-  const origensBase = deps.origens ?? [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ];
+  const origensBase = deps.origens ?? ORIGENS_FIXAS;
   const nome = deps.nome ?? NOME_CONECTOR;
   const versao = deps.versao ?? VERSAO_INFO.version;
   const estado = deps.estado ?? { porta: PORTA_PADRAO, status: "conectado" };
@@ -528,7 +525,13 @@ export function criarServidor(deps = {}) {
             papel,
           });
         }
-        json(res, 200, { ok: true }, origemCheck.origem, origens);
+        json(
+          res,
+          200,
+          { ok: true, impressora, papel },
+          origemCheck.origem,
+          origens
+        );
         return;
       }
 

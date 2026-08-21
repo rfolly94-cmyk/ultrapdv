@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { aplicarAcaoAssinatura } from "@/lib/assinatura/aplicar-acao";
 import type { AcaoAssinatura } from "@/lib/assinatura/tipos";
@@ -179,7 +180,7 @@ export async function masterCancelarAssinatura(formData: FormData) {
   });
 }
 
-export async function masterSalvarPlano(formData: FormData) {
+export async function masterSalvarPlano(formData: FormData): Promise<void> {
   const { admin } = await exigirMaster();
   const id = String(formData.get("id") ?? "").trim();
   const payload = {
@@ -194,7 +195,9 @@ export async function masterSalvarPlano(formData: FormData) {
   };
 
   if (!payload.nome) {
-    return { ok: false as const, erro: "Informe o nome do plano." };
+    redirect(
+      `/master/planos?erro=${encodeURIComponent("Informe o nome do plano.")}`
+    );
   }
 
   const { error } = id
@@ -202,9 +205,8 @@ export async function masterSalvarPlano(formData: FormData) {
     : await admin.from("planos").insert(payload);
 
   if (error) {
-    return { ok: false as const, erro: error.message };
+    redirect(`/master/planos?erro=${encodeURIComponent(error.message)}`);
   }
 
   revalidatePath("/master/planos");
-  return { ok: true as const };
 }

@@ -10,7 +10,7 @@ import {
 import {
   CarteiraClienteWorkspace,
 } from "@/components/clientes/carteira/CarteiraClienteWorkspace";
-import { PageHeader } from "@/components/ui/page-header";
+import { ClienteNavegacao } from "@/components/clientes/cliente-navegacao";
 
 type Props = {
   params: Promise<{
@@ -79,6 +79,7 @@ export default async function CarteiraClientePage({
     movimentosResult,
     formasResult,
     vendasResult,
+    estornosResult,
   ] =
     await Promise.all([
       supabase
@@ -117,7 +118,8 @@ export default async function CarteiraClientePage({
           valor_aberto,
           vencimento,
           status,
-          created_at
+          created_at,
+          updated_at
         `)
         .eq(
           "empresa_id",
@@ -317,6 +319,25 @@ export default async function CarteiraClientePage({
           }
         )
         .limit(100),
+
+      supabase
+        .from("carteira_cliente_recebimento_estornos")
+        .select(`
+          id,
+          recebimento_id,
+          alocacao_id,
+          venda_id,
+          titulo_id,
+          usuario_id,
+          valor,
+          motivo,
+          status,
+          created_at,
+          concluido_at
+        `)
+        .eq("empresa_id", vinculo.empresa_id)
+        .eq("cliente_id", clienteId)
+        .order("created_at", { ascending: false }),
     ]);
 
   if (
@@ -343,6 +364,7 @@ export default async function CarteiraClientePage({
     movimentosResult.error,
     formasResult.error,
     vendasResult.error,
+    estornosResult.error,
   ].filter(Boolean);
 
   if (
@@ -356,69 +378,81 @@ export default async function CarteiraClientePage({
 
   const cliente = clienteResult.data;
   const saldo = Number(cliente.saldo_devedor ?? 0);
+  const titulos = titulosResult.data ?? [];
+  const itens = itensResult.data ?? [];
+  const recebimentos = recebimentosResult.data ?? [];
+  const vendas = vendasResult.data ?? [];
+
+  const recebimentoIds = recebimentos.map((item) => item.id);
+  const vendaIds = Array.from(
+    new Set(
+      [
+        ...titulos.map((titulo) => titulo.venda_id),
+        ...vendas.map((venda) => venda.id),
+      ].filter((id): id is string => Boolean(id))
+    )
+  );
+
+  const [alocacoesResult, fiscaisResult] = await Promise.all([
+    recebimentoIds.length
+      ? supabase
+          .from("carteira_cliente_recebimento_alocacoes")
+          .select(`
+            id,
+            recebimento_id,
+            item_id,
+            valor,
+            created_at
+          `)
+          .eq("empresa_id", vinculo.empresa_id)
+          .in("recebimento_id", recebimentoIds)
+      : Promise.resolve({ data: [], error: null }),
+    vendaIds.length
+      ? supabase
+          .from("fiscal_emissoes")
+          .select("origem_id, modelo, numero, serie, status")
+          .eq("empresa_id", vinculo.empresa_id)
+          .eq("origem_tipo", "venda")
+          .in("origem_id", vendaIds)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (alocacoesResult.error) {
+    throw new Error(alocacoesResult.error.message);
+  }
+  if (fiscaisResult.error) {
+    throw new Error(fiscaisResult.error.message);
+  }
 
   return (
     <div className="updv-page">
-      <PageHeader
-        title={cliente.nome}
+      <ClienteNavegacao
+        clienteId={clienteId}
+        clienteNome={cliente.nome}
         description={
           saldo > 0
-            ? `Carteira · Saldo: -${saldo.toLocaleString("pt-BR", {
+            ? `Cliente · Saldo: -${saldo.toLocaleString("pt-BR", {
                 style: "currency",
                 currency: "BRL",
               })}`
-            : "Carteira do cliente"
+            : "Cliente"
         }
-        breadcrumb={[
-          { label: "Clientes", href: "/clientes" },
-          { label: cliente.nome, href: `/clientes?editar=${clienteId}` },
-          { label: "Carteira" },
-        ]}
       />
-      <nav className="flex h-9 items-center gap-1 border-b border-zinc-200 px-3 text-[13px] font-medium">
-        <a
-          href={`/clientes?editar=${clienteId}`}
-          className="px-2.5 py-1.5 text-zinc-500 hover:text-zinc-800"
-        >
-          Cadastro
-        </a>
-        <span className="relative px-2.5 py-1.5 text-zinc-950">
-          Carteira
-          <span className="absolute inset-x-2 bottom-0 h-0.5 bg-zinc-950" />
-        </span>
-      </nav>
     <CarteiraClienteWorkspace
       cliente={
         cliente
       }
-      titulos={
-        titulosResult.data ??
-        []
-      }
-      itens={
-        itensResult.data ??
-        []
-      }
-      creditos={
-        creditosResult.data ??
-        []
-      }
-      recebimentos={
-        recebimentosResult.data ??
-        []
-      }
-      movimentos={
-        movimentosResult.data ??
-        []
-      }
-      formasPagamento={
-        formasResult.data ??
-        []
-      }
-      vendas={
-        vendasResult.data ??
-        []
-      }
+      titulos={titulos}
+      itens={itens}
+      creditos={creditosResult.data ?? []}
+      recebimentos={recebimentos}
+      movimentos={movimentosResult.data ?? []}
+      formasPagamento={formasResult.data ?? []}
+      vendas={vendas}
+      alocacoes={alocacoesResult.data ?? []}
+      estornos={estornosResult.data ?? []}
+      fiscais={fiscaisResult.data ?? []}
     />
     </div>
   );

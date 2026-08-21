@@ -8,8 +8,16 @@ export const metadata = {
   title: "Planos",
 };
 
-export default async function MasterPlanosPage() {
+type PageProps = {
+  searchParams: Promise<{
+    erro?: string;
+  }>;
+};
+
+export default async function MasterPlanosPage({ searchParams }: PageProps) {
+  const params = await searchParams;
   const planos = await listarPlanosMaster();
+  const erro = String(params.erro ?? "").trim();
 
   return (
     <div className="space-y-8">
@@ -47,6 +55,9 @@ export default async function MasterPlanosPage() {
 
       <section className="rounded-2xl border border-zinc-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Novo plano ou edição</h2>
+        {erro ? (
+          <p className="mt-2 text-sm text-red-700">{erro}</p>
+        ) : null}
         <form action={masterSalvarPlano} className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-zinc-500">ID (preencha para editar)</span>

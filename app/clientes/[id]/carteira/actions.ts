@@ -342,3 +342,80 @@ export async function receberCarteira(
     };
   }
 }
+
+type EstornarInput = {
+  clienteId: string;
+  recebimentoId: string;
+  motivo: string;
+};
+
+export async function estornarRecebimentoCarteira(
+  input: EstornarInput
+): Promise<Resultado> {
+  try {
+    await exigirPermissao({ modulo: "clientes", acao: "receber_carteira" });
+  } catch (error) {
+    if (error instanceof ErroPermissao) {
+      return { ok: false, erro: error.message };
+    }
+    throw error;
+  }
+
+  try {
+    const { supabase, empresaId } = await getContexto();
+
+    if (!uuidValido(input.clienteId) || !uuidValido(input.recebimentoId)) {
+      return { ok: false, erro: "Recebimento inválido." };
+    }
+
+    const motivo = String(input.motivo ?? "").trim();
+    if (motivo.length < 5) {
+      return {
+        ok: false,
+        erro: "Informe o motivo com pelo menos 5 caracteres.",
+      };
+    }
+
+    const { data: cliente } = await supabase
+      .from("clientes")
+      .select("id")
+      .eq("empresa_id", empresaId)
+      .eq("id", input.clienteId)
+      .maybeSingle();
+
+    if (!cliente) {
+      return { ok: false, erro: "Cliente não encontrado." };
+    }
+
+    const { data, error } = await supabase.rpc(
+      "rpc_estornar_recebimento_carteira",
+      {
+        p_empresa_id: empresaId,
+        p_cliente_id: input.clienteId,
+        p_recebimento_id: input.recebimentoId,
+        p_motivo: motivo,
+      }
+    );
+
+    if (error) {
+      return { ok: false, erro: error.message };
+    }
+
+    revalidatePath(`/clientes/${input.clienteId}/carteira`);
+    revalidatePath("/clientes");
+
+    return {
+      ok: true,
+      valorRecebido: Number(data?.valor_estornado ?? 0),
+      saldoAtual: Number(data?.saldo_atual ?? 0),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      erro:
+        error instanceof Error
+          ? error.message
+          : "Erro inesperado ao estornar recebimento.",
+    };
+  }
+}

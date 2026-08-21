@@ -82,6 +82,39 @@ export function resolverExigenciaRota(
     };
   }
 
+  if (
+    pathname.startsWith("/api/clientes/") &&
+    pathname.includes("/carteira/cancelar-itens")
+  ) {
+    return {
+      tipo: "permissao",
+      modulo: "vendas",
+      acao: "cancelar",
+    };
+  }
+
+  if (
+    pathname.startsWith("/api/clientes/") &&
+    pathname.includes("/carteira/estornar-recebimento")
+  ) {
+    return {
+      tipo: "permissao",
+      modulo: "clientes",
+      acao: "receber_carteira",
+    };
+  }
+
+  if (
+    pathname.startsWith("/api/clientes/") &&
+    pathname.includes("/carteira/receber")
+  ) {
+    return {
+      tipo: "permissao",
+      modulo: "clientes",
+      acao: "receber_carteira",
+    };
+  }
+
   if (pathname.startsWith("/clientes")) {
     return { tipo: "permissao", modulo: "clientes", acao: "acessar" };
   }

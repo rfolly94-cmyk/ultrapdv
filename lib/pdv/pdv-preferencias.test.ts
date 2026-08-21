@@ -359,6 +359,26 @@ test("Mostrar logo = true renderiza logo da empresa ativa no centro da área pri
   );
 });
 
+test("Logo some quando a busca está ativa ou há itens no carrinho", () => {
+  const logoUrl = "https://cdn.example/a/logo.png";
+  assert.equal(
+    deveRenderizarLogoCentro({
+      mostrarLogoCentro: true,
+      logoUrl,
+      buscaAtiva: true,
+    }),
+    false
+  );
+  assert.equal(
+    deveRenderizarLogoCentro({
+      mostrarLogoCentro: true,
+      logoUrl,
+      carrinhoVazio: false,
+    }),
+    false
+  );
+});
+
 test("Empresa sem logo não gera imagem quebrada", () => {
   assert.equal(
     deveRenderizarLogoCentro({

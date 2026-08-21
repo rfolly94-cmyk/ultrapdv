@@ -53,15 +53,16 @@ async function comServidor(deps, fn) {
   }
 }
 
-function getJson(url) {
+function getJson(url, headers = {}) {
   return new Promise((resolve, reject) => {
     http
-      .get(url, (res) => {
+      .get(url, { headers }, (res) => {
         const chunks = [];
         res.on("data", (c) => chunks.push(c));
         res.on("end", () => {
           resolve({
             status: res.statusCode,
+            headers: res.headers,
             body: JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"),
           });
         });
@@ -253,6 +254,7 @@ test("POST /print de teste retorna sucesso com motor mockado", async () => {
       });
       assert.equal(resultado.status, 200);
       assert.equal(resultado.body.ok, true);
+      assert.equal(resultado.body.impressora, "ELGIN i9");
       assert.equal(chamado, true);
     }
   );
@@ -409,7 +411,7 @@ test("versão única vem de version.json", () => {
   assert.match(fonte("../installer/ultrapdv-connector.nsi"), /generated\\version\.nsh/);
 });
 
-test("origens de produção não vêm hardcoded", async () => {
+test("origens de produção incluem ultrapdv.app sem wildcard", async () => {
   const origens = await carregarOrigens({
     env: {},
     raiz: path.join(raiz, ".."),
@@ -417,11 +419,50 @@ test("origens de produção não vêm hardcoded", async () => {
   assert.deepEqual(origens, [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://ultrapdv.app",
+    "https://www.ultrapdv.app",
   ]);
   const config = JSON.parse(
     readFileSync(path.join(raiz, "..", "config", "origins.json"), "utf8")
   );
   assert.deepEqual(config.origens, []);
+  const fonteOrigens = fonte("./origens.mjs");
+  assert.doesNotMatch(fonteOrigens, /Access-Control-Allow-Origin:\s*\*/);
+});
+
+test("CORS aceita https://ultrapdv.app e recusa origem estranha", async () => {
+  await comServidor(
+    {
+      origens: [
+        "http://localhost:3000",
+        "https://ultrapdv.app",
+        "https://www.ultrapdv.app",
+      ],
+    },
+    async (base) => {
+      const ok = await getJson(`${base}/health`, {
+        Origin: "https://ultrapdv.app",
+      });
+      assert.equal(ok.status, 200);
+      assert.equal(ok.body.ok, true);
+      assert.equal(ok.headers["access-control-allow-origin"], "https://ultrapdv.app");
+
+      const www = await getJson(`${base}/health`, {
+        Origin: "https://www.ultrapdv.app",
+      });
+      assert.equal(www.status, 200);
+      assert.equal(
+        www.headers["access-control-allow-origin"],
+        "https://www.ultrapdv.app"
+      );
+
+      const denied = await getJson(`${base}/health`, {
+        Origin: "https://evil.example",
+      });
+      assert.equal(denied.status, 403);
+      assert.notEqual(denied.headers["access-control-allow-origin"], "*");
+    }
+  );
 });
 
 test("dispositivoId é UUID persistido, sem fingerprint", async () => {
@@ -572,7 +613,7 @@ test("cenário C/D: lastPrinter Bematech vence Print to PDF", () => {
       lastPrinter: null,
       impressoras: listaMista,
     }),
-    printToPdf
+    null
   );
   assert.equal(
     escolherImpressora({
@@ -653,6 +694,7 @@ test("cenário F/G: lastPrinter persiste e a impressão do UltraPDV a reutiliza"
         pdfBase64: pdfValido.toString("base64"),
       });
       assert.equal(print.body.ok, true);
+      assert.equal(print.body.impressora, bematech);
       assert.equal(impressoraUsada, bematech);
     }
   );

@@ -16,6 +16,7 @@ import { CancelarVendaComercial } from "@/components/vendas/cancelar-venda-comer
 import { DocumentoFiscalBotoes } from "@/components/vendas/documento-fiscal-botoes";
 import { VendasModuleTabs } from "@/components/vendas/vendas-module-tabs";
 import { VendasPeriodoFiltro } from "@/components/vendas/vendas-periodo-filtro";
+import { imprimirUrlPdfNoUltraPdvConector } from "@/lib/impressao/imprimir-pdf";
 import {
   montarHrefListaVendas,
   type FiltrosListaVendas,
@@ -237,6 +238,17 @@ export function VendasLista({
     id: string;
     numero: number | string | null;
   } | null>(null);
+  const [impressaoLista, setImpressaoLista] = useState<string | null>(null);
+
+  async function imprimirPeloConector(url: string, tipoDocumento: string, papel: string) {
+    setImpressaoLista("Enviando para o UltraPDV Conector...");
+    const resultado = await imprimirUrlPdfNoUltraPdvConector({
+      url,
+      tipoDocumento,
+      papel,
+    });
+    setImpressaoLista(resultado.ok ? resultado.mensagem : resultado.erro);
+  }
 
   function ir(
     patch: Partial<FiltrosListaVendas>
@@ -381,6 +393,11 @@ export function VendasLista({
           </>
         }
       />
+      {impressaoLista ? (
+        <p className="whitespace-pre-line px-4 text-sm text-zinc-600">
+          {impressaoLista}
+        </p>
+      ) : null}
       <VendasModuleTabs pedidosNovos={pedidosNovos} />
 
       <ListToolbar
@@ -533,6 +550,16 @@ export function VendasLista({
                     },
                     {
                       label: "Imprimir comprovante de venda",
+                      onClick: () =>
+                        void imprimirPeloConector(
+                          `/api/impressao/recibo/${venda.id}?papel=80mm`,
+                          "recibo",
+                          "80mm"
+                        ),
+                      hidden: venda.status !== "finalizada",
+                    },
+                    {
+                      label: "Visualizar comprovante",
                       href: `/pdv/imprimir/recibo/${venda.id}`,
                       target: "_blank",
                       hidden: venda.status !== "finalizada",
@@ -546,6 +573,24 @@ export function VendasLista({
                       label: emitirNfce.label,
                       href: emitirNfce.href,
                       hidden: emitirNfce.ocultar,
+                    },
+                    {
+                      label: "Imprimir DANFE",
+                      onClick: () => {
+                        if (!venda.fiscal) {
+                          return;
+                        }
+                        void imprimirPeloConector(
+                          `/api/impressao/danfe/${venda.fiscal.id}`,
+                          venda.fiscal.modelo === "55"
+                            ? "danfe_nfe"
+                            : "danfe_nfce",
+                          venda.fiscal.modelo === "55" ? "a4" : "80mm"
+                        );
+                      },
+                      hidden:
+                        !venda.fiscal ||
+                        venda.fiscal.status !== "autorizada",
                     },
                     {
                       label: "Abrir DANFE",

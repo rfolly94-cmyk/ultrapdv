@@ -565,6 +565,13 @@ body {
   opacity: 0.14;
 }
 
+.pdv-shell .pdv-busca-resultados {
+  position: relative;
+  z-index: 2;
+  background: var(--pdv-surface);
+  box-shadow: 0 10px 24px rgba(24, 24, 27, 0.08);
+}
+
 .pdv-btn-primary {
   background: var(--pdv-primary);
   color: var(--pdv-primary-foreground);

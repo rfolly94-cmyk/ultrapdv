@@ -7,6 +7,7 @@ import {
   completarConfiguracoesImpressao,
   danfeNfceAutorizadaImprimivel,
   decidirDestinoImpressaoAutomatica,
+  decidirDocumentoImpressao,
   ehUuid,
   podeImprimirAutomaticamente,
   sanitizarConfiguracaoImpressao,
@@ -15,6 +16,15 @@ import {
 import { portasDescobertaConector } from "./descobrir";
 import { DISPOSITIVO_STORAGE_KEY, PRINT_AGENT_PORT } from "./tipos";
 import { gerarPdfSimples } from "./pdf-simples";
+import {
+  ULTRAPDV_CONNECTOR_DOWNLOAD_URL,
+  ULTRAPDV_CONNECTOR_SETUP_FILENAME,
+} from "./download-conector";
+import {
+  MENSAGEM_CONECTOR_AUSENTE,
+  mensagemDocumentoEnviado,
+} from "./mensagens";
+import { linhasRelatorioPdf } from "./linhas-relatorio";
 
 function fonte(relativo: string) {
   return readFileSync(path.join(process.cwd(), relativo), "utf8");
@@ -187,14 +197,18 @@ test("cópias ficam entre 1 e 10 e PDF de teste não usa dados fiscais", () => {
 
 test("PDV não dá rollback da venda se a impressão falhar", () => {
   const shell = fonte("components/pdv/pdv-shell.tsx");
-  assert.match(shell, /if \(!emitirNfceAutomaticoPdv && imprimirApos\)/);
+  assert.match(shell, /if \(!emitirNfceAutomaticoPdv\)/);
   assert.match(shell, /tentarImpressaoPosVenda/);
-  assert.match(shell, /Tentar imprimir novamente/);
+  assert.match(shell, /Tentar novamente/);
   const posFinalizar = shell.indexOf("await finalizarVendaPdv");
   const posImpressao = shell.indexOf("await tentarImpressaoPosVenda");
   assert.ok(posImpressao > posFinalizar);
-  assert.match(shell, /Venda concluída, mas não foi possível imprimir automaticamente/);
+  assert.match(shell, /Venda concluída, mas não foi possível imprimir/);
+  assert.match(shell, /NFC-e autorizada, mas não foi possível imprimir/);
   assert.doesNotMatch(shell, /rollback/);
+  assert.doesNotMatch(shell, /window\.open/);
+  assert.doesNotMatch(shell, /window\.print/);
+  assert.match(shell, /imprimirPdfNoUltraPdvConector|BotaoImprimirConector/);
   assert.match(
     fonte("app/api/impressao/danfe/[id]/route.ts"),
     /status !== "autorizada"/
@@ -242,6 +256,10 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   assert.match(tela, /UltraPDV Conector conectado/);
   assert.match(tela, /UltraPDV Conector desconectado/);
   assert.match(tela, /Motor de impressão PDF não encontrado/);
+  assert.match(tela, /Baixar Impressão UltraPDV/);
+  assert.match(tela, /Baixar instalador/);
+  assert.match(tela, /ULTRAPDV_CONNECTOR_DOWNLOAD_URL/);
+  assert.doesNotMatch(tela, /xdcmoqvfrdqfinylyjqt\.supabase\.co/);
   assert.doesNotMatch(tela, /http:\/\/127\.0\.0\.1:18181/);
   assert.match(descobrir, /export async function descobrirUltraPdvConector/);
   assert.match(descobrir, /PRINT_AGENT_APP/);
@@ -275,3 +293,130 @@ test("configuração sanitiza tipo e ignora empresa_id do cliente", () => {
     null
   );
 });
+
+test("impressão automática usa o Conector mesmo sem impressora na config da empresa", () => {
+  const configs = completarConfiguracoesImpressao([
+    {
+      id: "1",
+      tipoDocumento: "recibo",
+      impressoraNome: null,
+      papel: "80mm",
+      copias: 1,
+      impressaoAutomatica: true,
+      ativo: true,
+    },
+  ]);
+  assert.equal(podeImprimirAutomaticamente(configs[0]), true);
+  const destino = decidirDestinoImpressaoAutomatica({
+    configs,
+    vendaId: "v1",
+    fiscal: null,
+  });
+  assert.deepEqual(destino, { tipo: "recibo", vendaId: "v1" });
+});
+
+test("Imprimir no PDV, Vendas, Carteira, CC-e e Relatórios passa pelo Conector", () => {
+  const oficial = fonte("lib/impressao/imprimir-pdf.ts");
+  assert.match(oficial, /export async function imprimirPdfNoUltraPdvConector/);
+  assert.match(oficial, /enviarImpressaoAgente/);
+  assert.match(fonte("lib/impressao/agente.ts"), /descobrirUltraPdvConector/);
+  assert.doesNotMatch(fonte("components/pdv/pdv-shell.tsx"), /127\.0\.0\.1:18181/);
+  assert.doesNotMatch(fonte("components/vendas/vendas-lista.tsx"), /127\.0\.0\.1:18181/);
+  assert.match(
+    fonte("components/vendas/vendas-lista.tsx"),
+    /imprimirUrlPdfNoUltraPdvConector/
+  );
+  assert.match(
+    fonte("app/vendas/[id]/page.tsx"),
+    /BotaoImprimirConector/
+  );
+  assert.match(
+    fonte("components/clientes/carteira/CarteiraClienteWorkspace.tsx"),
+    /\/api\/impressao\/carteira-abertos/
+  );
+  assert.match(
+    fonte("components/fiscal/emissao-fiscal-acoes.tsx"),
+    /Imprimir CC-e/
+  );
+  assert.match(
+    fonte("components/fiscal/emissao-fiscal-acoes.tsx"),
+    /Visualizar CC-e/
+  );
+  assert.doesNotMatch(
+    fonte("components/impressao/controles-impressao.tsx"),
+    /window\.print/
+  );
+  assert.doesNotMatch(
+    fonte("components/relatorios/relatorio-acoes.tsx"),
+    /window\.print/
+  );
+  assert.match(
+    fonte("components/relatorios/relatorio-acoes.tsx"),
+    /BotaoImprimirConector/
+  );
+  assert.match(MENSAGEM_CONECTOR_AUSENTE, /UltraPDV Conector não encontrado/);
+  assert.equal(
+    mensagemDocumentoEnviado("\\\\SERVIDOR\\Bematech MP-4200 HS"),
+    "Documento enviado para \\\\SERVIDOR\\Bematech MP-4200 HS."
+  );
+});
+
+test("PDF simples e relatório não usam window.print", () => {
+  const pdf = gerarPdfSimples({
+    papel: "a4",
+    linhas: Array.from({ length: 80 }, (_, i) => `Linha ${i + 1}`),
+  });
+  assert.equal(Buffer.from(pdf.subarray(0, 5)).toString(), "%PDF-");
+  const linhas = linhasRelatorioPdf({
+    empresaNome: "Loja Teste",
+    periodo: "Hoje",
+    relatorio: {
+      titulo: "Vendas",
+      vazio: "Sem dados",
+      indicadores: [{ label: "Total", valor: "R$ 10,00" }],
+      colunas: ["Venda", "Valor"],
+      linhas: [{ id: "1", celulas: ["#1", "10"] }],
+      totalFiltrado: 1,
+    },
+  });
+  assert.match(linhas.join("\n"), /Loja Teste/);
+  assert.match(linhas.join("\n"), /Vendas/);
+});
+
+test("documento de impressão manual prioriza DANFE autorizado e senão recibo", () => {
+  const danfe = decidirDocumentoImpressao({
+    vendaId: "v1",
+    fiscal: {
+      emitindo: false,
+      kind: "autorizada",
+      status: "autorizada",
+      emissaoId: "em-1",
+      danfeDisponivel: true,
+    },
+  });
+  assert.deepEqual(danfe, { tipo: "danfe_nfce", emissaoId: "em-1" });
+  const recibo = decidirDocumentoImpressao({
+    vendaId: "v1",
+    fiscal: {
+      kind: "rejeitada",
+      status: "rejeitada",
+      emissaoId: "em-2",
+      danfeDisponivel: false,
+    },
+  });
+  assert.deepEqual(recibo, { tipo: "recibo", vendaId: "v1" });
+});
+
+test("download do Conector fica em um único arquivo e não executa o instalador", () => {
+  assert.equal(
+    ULTRAPDV_CONNECTOR_SETUP_FILENAME,
+    "UltraPDV-Conector-Setup.exe"
+  );
+  assert.match(ULTRAPDV_CONNECTOR_DOWNLOAD_URL, /Impressora\/UltraPDV-Conector-Setup\.exe/);
+  const download = fonte("lib/impressao/download-conector.ts");
+  const tela = fonte("components/impressao/impressao-workspace.tsx");
+  assert.match(download, /ULTRAPDV_CONNECTOR_DOWNLOAD_URL/);
+  assert.match(tela, /download=\{ULTRAPDV_CONNECTOR_SETUP_FILENAME\}/);
+  assert.doesNotMatch(tela, /xdcmoqvfrdqfinylyjqt\.supabase\.co/);
+});
+

@@ -9,6 +9,10 @@ import {
 } from "@/app/configuracoes/impressao/actions";
 import { consultarSaudeAgente, listarImpressorasAgente } from "@/lib/impressao/agente";
 import {
+  ULTRAPDV_CONNECTOR_DOWNLOAD_URL,
+  ULTRAPDV_CONNECTOR_SETUP_FILENAME,
+} from "@/lib/impressao/download-conector";
+import {
   aplicarDispositivoIdDoConector,
   obterDispositivoId,
   rotuloDispositivo,
@@ -143,7 +147,7 @@ export function ImpressaoWorkspace() {
     const resultado = await imprimirPdfNaConfiguracao(config, pdf.pdfBase64);
     setMensagem(
       resultado.ok
-        ? "Teste enviado à impressora."
+        ? resultado.mensagem
         : resultado.erro
     );
   }
@@ -176,6 +180,16 @@ export function ImpressaoWorkspace() {
               <p className="mt-1 text-[12px] text-zinc-400">{versaoConector}</p>
             ) : null}
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {agenteOk ? (
+              <a
+                href={ULTRAPDV_CONNECTOR_DOWNLOAD_URL}
+                download={ULTRAPDV_CONNECTOR_SETUP_FILENAME}
+                className="updv-btn updv-btn-ghost"
+              >
+                Baixar instalador
+              </a>
+            ) : null}
           <button
             type="button"
             className="updv-btn updv-btn-ghost"
@@ -208,6 +222,7 @@ export function ImpressaoWorkspace() {
           >
             {agenteOk ? "Testar conexão" : "Verificar novamente"}
           </button>
+          </div>
         </div>
         {agenteOk && !motorOk && !carregando ? (
           <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
@@ -216,10 +231,25 @@ export function ImpressaoWorkspace() {
           </p>
         ) : null}
         {!agenteOk && !carregando ? (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
-            UltraPDV Conector desconectado. Instale o UltraPDV Connector neste
-            computador para imprimir automaticamente.
-          </p>
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-amber-800">
+              Impressão UltraPDV
+            </p>
+            <p className="mt-2 text-sm font-semibold text-amber-950">
+              UltraPDV Conector não encontrado
+            </p>
+            <p className="mt-1 text-[13px] leading-5 text-amber-900">
+              Para utilizar impressão automática neste computador, baixe e
+              instale o Impressão UltraPDV.
+            </p>
+            <a
+              href={ULTRAPDV_CONNECTOR_DOWNLOAD_URL}
+              download={ULTRAPDV_CONNECTOR_SETUP_FILENAME}
+              className="updv-btn updv-btn-primary mt-4"
+            >
+              Baixar Impressão UltraPDV
+            </a>
+          </div>
         ) : null}
       </section>
 

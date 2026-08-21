@@ -7,15 +7,22 @@ import {
   type PermissoesEfetivas,
 } from "./tipos";
 
+function definirAcoesDoModulo<M extends ModuloPermissao>(
+  matriz: PermissoesEfetivas,
+  modulo: M,
+  valor: boolean
+) {
+  const bloco = Object.fromEntries(
+    ACOES_POR_MODULO[modulo].map((acao) => [acao, valor])
+  ) as PermissoesEfetivas[M];
+  matriz[modulo] = bloco;
+}
+
 export function matrizVazia(): PermissoesEfetivas {
   const matriz = {} as PermissoesEfetivas;
 
   for (const modulo of MODULOS_PERMISSAO) {
-    const acoes = {} as PermissoesEfetivas[typeof modulo];
-    for (const acao of ACOES_POR_MODULO[modulo]) {
-      (acoes as Record<string, boolean>)[acao] = false;
-    }
-    matriz[modulo] = acoes;
+    definirAcoesDoModulo(matriz, modulo, false);
   }
 
   return matriz;

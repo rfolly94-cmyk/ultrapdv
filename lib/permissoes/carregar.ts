@@ -9,6 +9,25 @@ export type SessaoPermissoes = {
   linhas: LinhaPermissao[];
 };
 
+type LinhaPermissaoConsulta = {
+  modulo?: unknown;
+  permissoes?: unknown;
+};
+
+function permissoesDaLinha(valor: unknown): Record<string, boolean> {
+  if (!valor || typeof valor !== "object" || Array.isArray(valor)) {
+    return {};
+  }
+
+  const saida: Record<string, boolean> = {};
+  for (const [chave, item] of Object.entries(valor)) {
+    if (typeof item === "boolean") {
+      saida[chave] = item;
+    }
+  }
+  return saida;
+}
+
 export async function carregarPermissoesDoVinculo(input: {
   supabase: { from: (tabela: string) => any };
   usuarioId: string;
@@ -25,13 +44,12 @@ export async function carregarPermissoesDoVinculo(input: {
       .eq("usuario_id", input.usuarioId)
       .eq("empresa_id", input.empresaId);
 
-    linhas = (consulta.data ?? []).map((linha) => ({
-      modulo: String(linha.modulo ?? ""),
-      permissoes:
-        linha.permissoes && typeof linha.permissoes === "object"
-          ? (linha.permissoes as Record<string, boolean>)
-          : {},
-    }));
+    linhas = ((consulta.data ?? []) as LinhaPermissaoConsulta[]).map(
+      (linha) => ({
+        modulo: String(linha.modulo ?? ""),
+        permissoes: permissoesDaLinha(linha.permissoes),
+      })
+    );
   }
 
   return {

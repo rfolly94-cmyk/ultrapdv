@@ -1,3 +1,4 @@
+import { MENSAGEM_CONECTOR_AUSENTE } from "./mensagens";
 import {
   PRINT_AGENT_APP,
   PRINT_AGENT_HOST,
@@ -7,7 +8,7 @@ import {
 } from "./tipos";
 import { ehUuid } from "./regras";
 
-export const MENSAGEM_CONECTOR_AUSENTE = "UltraPDV Conector não encontrado.";
+export { MENSAGEM_CONECTOR_AUSENTE };
 const STORAGE_ORIGEM = "ultrapdv_conector_origem";
 const TIMEOUT_DESCOBERTA_MS = 450;
 
@@ -51,6 +52,8 @@ function mapearSaude(data: StatusAgenteImpressao): StatusAgenteImpressao {
     version: data.version ?? data.versao,
     port: typeof data.port === "number" ? data.port : undefined,
     dispositivoId: ehUuid(data.dispositivoId) ? data.dispositivoId : undefined,
+    lastPrinter: data.lastPrinter ?? null,
+    lastPaper: data.lastPaper ?? null,
     motorImpressao: data.motorImpressao
       ? {
           encontrado: data.motorImpressao.encontrado === true,

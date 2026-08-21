@@ -6,6 +6,13 @@ const ORIGENS_DESENVOLVIMENTO = [
   "http://127.0.0.1:3000",
 ];
 
+const ORIGENS_PRODUCAO = [
+  "https://ultrapdv.app",
+  "https://www.ultrapdv.app",
+];
+
+export const ORIGENS_FIXAS = [...ORIGENS_DESENVOLVIMENTO, ...ORIGENS_PRODUCAO];
+
 function limparOrigem(valor) {
   return String(valor ?? "").trim().replace(/\/$/, "");
 }
@@ -36,5 +43,5 @@ export async function carregarOrigens({
     }
   }
 
-  return [...new Set([...ORIGENS_DESENVOLVIMENTO, ...extra])];
+  return [...new Set([...ORIGENS_FIXAS, ...extra])];
 }

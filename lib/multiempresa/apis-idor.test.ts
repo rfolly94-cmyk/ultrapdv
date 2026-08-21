@@ -16,6 +16,7 @@ const ROTAS_ID = [
   "app/api/fiscal/emissoes/[id]/carta-correcao/route.ts",
   "app/api/fiscal/emissoes/[id]/inutilizar/route.ts",
   "app/api/clientes/[id]/carteira/receber/route.ts",
+  "app/api/clientes/[id]/carteira/estornar-recebimento/route.ts",
   "app/api/configuracoes/usuarios/[id]/route.ts",
   "app/api/transportadoras/[id]/route.ts",
 ];

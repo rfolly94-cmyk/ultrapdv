@@ -134,7 +134,10 @@ export default async function RelatoriosPage({ searchParams }: PageProps) {
                 Próxima
               </Link>
             ) : null}
-            <RelatorioAcoes exportHref={`/api/relatorios/exportar?${exportQuery.toString()}`} />
+            <RelatorioAcoes
+              exportHref={`/api/relatorios/exportar?${exportQuery.toString()}`}
+              printHref={`/api/impressao/relatorio?${exportQuery.toString()}`}
+            />
           </div>
         </div>
       </div>

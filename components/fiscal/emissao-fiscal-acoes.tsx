@@ -5,6 +5,7 @@ import { CartaCorrecaoNfe } from "@/components/vendas/carta-correcao-nfe";
 import { DocumentoFiscalBotoes } from "@/components/vendas/documento-fiscal-botoes";
 import { ReconciliarEmissaoFiscal } from "@/components/vendas/reconciliar-emissao-fiscal";
 import { DocumentoFiscalCard } from "@/components/fiscal/documento-fiscal-card";
+import { BotaoImprimirConector } from "@/components/impressao/botao-imprimir-conector";
 import {
   resolverAcoesEmissaoFiscal,
   rotuloModeloFiscal,
@@ -274,14 +275,23 @@ export function EmissaoFiscalAcoes({
                         </a>
                       ) : null}
                       {evento.status === "sucesso" ? (
-                        <a
-                          href={`/pdv/imprimir/carta-correcao/${evento.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-semibold underline"
-                        >
-                          Imprimir Carta de Correção
-                        </a>
+                        <>
+                          <a
+                            href={`/pdv/imprimir/carta-correcao/${evento.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold underline"
+                          >
+                            Visualizar CC-e
+                          </a>
+                          <BotaoImprimirConector
+                            pdfUrl={`/api/impressao/carta-correcao/${evento.id}`}
+                            tipoDocumento="danfe_nfe"
+                            papel="a4"
+                            label="Imprimir CC-e"
+                            className="font-semibold underline"
+                          />
+                        </>
                       ) : null}
                     </div>
                     {evento.motivo ? (
