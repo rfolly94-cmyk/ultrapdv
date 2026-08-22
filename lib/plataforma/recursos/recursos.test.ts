@@ -14,6 +14,8 @@ import { validarPayloadPlano } from "@/lib/plataforma/recursos/validar-plano";
 
 const MIGRATION =
   "supabase/migrations/20260821160000_planos_saas_recursos_limites.sql";
+const MIGRATION_CATALOGO =
+  "supabase/migrations/20260821220000_recurso_catalogo.sql";
 
 function recursosTodos(habilitado: boolean) {
   return CATALOGO_RECURSOS.map((item) => ({
@@ -26,7 +28,7 @@ function recursosTodos(habilitado: boolean) {
 test("catálogo de recursos não duplica chaves e migration casa com o código", () => {
   const chaves = CATALOGO_RECURSOS.map((item) => item.chave);
   assert.equal(new Set(chaves).size, chaves.length);
-  const sql = fonte(MIGRATION);
+  const sql = fonte(MIGRATION) + fonte(MIGRATION_CATALOGO);
   for (const chave of chaves) {
     assert.match(sql, new RegExp(`'${chave}'`));
   }
@@ -206,6 +208,7 @@ test("UI não pede UUID manual e não bloqueia o ERP", () => {
   const page = fonte("app/master/planos/page.tsx");
   assert.match(ui, /Editar plano/);
   assert.match(ui, /Novo plano/);
+  assert.match(ui, /GRUPOS_COMERCIAIS_PLANO/);
   assert.doesNotMatch(ui, /preencha para editar/);
   assert.doesNotMatch(page, /preencha para editar/);
   assert.doesNotMatch(fonte("app/pdv/editar-actions.ts"), /empresaPossuiRecurso/);
@@ -246,6 +249,113 @@ test("backfill preserva Básico, Pro e Premium e habilita recursos existentes", 
   assert.match(sql, /INSERT INTO public\.planos_recursos/);
   assert.match(sql, /CROSS JOIN public\.recursos_plataforma/);
   assert.match(sql, /ON CONFLICT \(plano_id, recurso_id\) DO NOTHING/);
+});
+
+const MATRIZ =
+  "supabase/migrations/20260821210000_planos_matriz_comercial.sql";
+
+const CHAVES_TECNICAS = [
+  "pdv",
+  "vendas",
+  "produtos",
+  "clientes",
+  "estoque",
+  "carteira",
+  "relatorios",
+  "nfce",
+  "nfe",
+  "cce",
+  "inutilizacao_fiscal",
+  "contabilidade",
+  "importador",
+  "pix_integrado",
+  "impressao_automatica",
+] as const;
+
+function linhasMatriz(sql: string) {
+  const bloco = sql.match(
+    /VALUES\s+([\s\S]*?)\) AS v\(plano_nome, recurso_chave, habilitado\)/
+  );
+  assert.ok(bloco, "migration da matriz precisa ter VALUES de recursos");
+  const linhas = [...bloco[1].matchAll(
+    /\('([^']+)'(?:::text)?, '([^']+)'(?:::text)?, (true|false)\)/g
+  )];
+  return linhas.map((item) => ({
+    plano: item[1],
+    chave: item[2],
+    habilitado: item[3] === "true",
+  }));
+}
+
+test("matriz comercial atualiza só seed em planos_recursos e planos_limites", () => {
+  const sql = fonte(MATRIZ);
+  const linhas = linhasMatriz(sql);
+  assert.equal(linhas.length, CHAVES_TECNICAS.length * 3);
+
+  for (const plano of ["Básico", "Pro", "Premium"]) {
+    const doPlano = linhas.filter((item) => item.plano === plano);
+    assert.deepEqual(
+      doPlano.map((item) => item.chave).sort(),
+      [...CHAVES_TECNICAS].sort()
+    );
+  }
+
+  const basico = Object.fromEntries(
+    linhas.filter((item) => item.plano === "Básico").map((item) => [item.chave, item.habilitado])
+  );
+  assert.equal(basico.pdv, true);
+  assert.equal(basico.carteira, false);
+  assert.equal(basico.nfe, false);
+  assert.equal(basico.contabilidade, false);
+  assert.equal(basico.relatorios, true);
+  assert.equal(basico.estoque, true);
+
+  const pro = Object.fromEntries(
+    linhas.filter((item) => item.plano === "Pro").map((item) => [item.chave, item.habilitado])
+  );
+  assert.equal(pro.nfe, true);
+  assert.equal(pro.carteira, true);
+  assert.equal(pro.contabilidade, false);
+  assert.equal(pro.importador, true);
+
+  const premium = Object.fromEntries(
+    linhas.filter((item) => item.plano === "Premium").map((item) => [item.chave, item.habilitado])
+  );
+  for (const chave of CHAVES_TECNICAS) {
+    assert.equal(premium[chave], true, chave);
+  }
+
+  assert.match(sql, /\('Básico'::text, 'usuarios'::text, 2::integer\)/);
+  assert.match(sql, /\('Pro', 'usuarios', 5\)/);
+  assert.match(sql, /\('Premium', 'usuarios', NULL\)/);
+  assert.match(sql, /\('Básico', 'filiais', NULL\)/);
+  assert.doesNotMatch(sql, /INSERT INTO public\.recursos_plataforma/);
+  assert.doesNotMatch(sql, /assinaturas_empresas/);
+  assert.doesNotMatch(sql, /CREATE TABLE/);
+  assert.doesNotMatch(sql, /suporte_prioritario/);
+  assert.equal(CHAVES_TECNICAS.length, 15);
+});
+
+test("migration de catalogo cadastra a chave e associa só nos planos seed", () => {
+  const sql = fonte(MIGRATION_CATALOGO);
+  assert.match(sql, /'catalogo'/);
+  assert.match(sql, /\('Básico'::text, false\)/);
+  assert.match(sql, /\('Pro', true\)/);
+  assert.match(sql, /\('Premium', true\)/);
+  assert.match(sql, /ON CONFLICT \(plano_id, recurso_id\) DO UPDATE/);
+  assert.doesNotMatch(sql, /assinaturas_empresas/);
+  assert.doesNotMatch(sql, /DELETE FROM/);
+  assert.doesNotMatch(sql, /CREATE TABLE/);
+  assert.doesNotMatch(sql, /INSERT INTO public\.recursos_plataforma[\s\S]*'pdv'/);
+});
+
+test("sistema continua lendo planos_recursos e não ramifica por nome comercial", () => {
+  assert.match(fonte("lib/plataforma/recursos/carregar.ts"), /planos_recursos/);
+  assert.match(fonte("lib/master/acoes.ts"), /rpc_master_salvar_plano/);
+  assert.doesNotMatch(fonte("lib/master/planos.ts"), /if \(plano\.nome ===/);
+  assert.doesNotMatch(fonte("lib/plataforma/recursos/validar-plano.ts"), /Básico|Premium/);
+  assert.doesNotMatch(fonte("lib/plataforma/entitlements/camadas.ts"), /Básico|Premium/);
+  assert.doesNotMatch(fonte("lib/plataforma/recursos/carregar.ts"), /Básico|Premium/);
 });
 
 test("auditoria do plano fica na RPC da plataforma", () => {

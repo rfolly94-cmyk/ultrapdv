@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { createClient } from "@/lib/supabase/server";
 import { PdvEdicaoShell } from "@/components/pdv/pdv-edicao-shell";
 import {
   classificarIntegracaoPix,
   pixConfigPublicoPdv,
 } from "@/lib/pagamentos/pix/modo-ativo";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import {
   consolidarPagamentosCheckoutPdv,
   filtrarFormasPagamentoCheckoutPdv,
@@ -61,6 +64,29 @@ export default async function EditarVendaNoPdvPage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const planoPdv = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "pdv"
+  );
+  if (!planoPdv.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="PDV"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. A edição de venda pelo caixa está disponível em planos que incluem o PDV. As vendas já registradas não são apagadas."
+            planoNome={entitlements.planoNome}
+            voltarHref="/painel"
+            voltarLabel="Voltar ao início"
+          />
+        </div>
+      </main>
+    );
   }
 
   const empresa =
@@ -309,6 +335,11 @@ export default async function EditarVendaNoPdvPage({
     ),
   };
 
+  const planoPix = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "pix_integrado"
+  );
+
   return (
     <PdvEdicaoShell
       empresaNome={
@@ -321,6 +352,7 @@ export default async function EditarVendaNoPdvPage({
       pixConfig={pixConfigPublicoPdv(
         classificarIntegracaoPix(pixResult.data)
       )}
+      pixIntegradoLiberado={planoPix.permitido}
     />
   );
 }

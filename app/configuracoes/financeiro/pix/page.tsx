@@ -4,6 +4,7 @@ import { ConfiguracoesModuleTabs } from "@/components/configuracoes/configuracoe
 import { PageShell } from "@/components/layout/page-shell";
 import { integracaoPublicaParaCliente } from "@/lib/pagamentos/pix/credenciais";
 import type { CobrancaPixPublica } from "@/lib/pagamentos/pix/types";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { createClient } from "@/lib/supabase/server";
 
 import { PixGeranetWorkspace } from "./pix-workspace";
@@ -33,7 +34,7 @@ export default async function PixGeranetPage() {
     redirect("/onboarding");
   }
 
-  const [{ data: integracao }, { data: cobrancas }] = await Promise.all([
+  const [{ data: integracao }, { data: cobrancas }, planoPix] = await Promise.all([
     supabase
       .from("integracoes_pix")
       .select(
@@ -49,6 +50,7 @@ export default async function PixGeranetPage() {
       .eq("empresa_id", vinculo.empresa_id)
       .order("created_at", { ascending: false })
       .limit(20),
+    planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "pix_integrado"),
   ]);
 
   return (
@@ -63,6 +65,7 @@ export default async function PixGeranetPage() {
     >
       <div className="updv-config">
         <PixGeranetWorkspace
+          pixIntegradoLiberado={planoPix.permitido}
           integracao={
             integracao
               ? integracaoPublicaParaCliente({

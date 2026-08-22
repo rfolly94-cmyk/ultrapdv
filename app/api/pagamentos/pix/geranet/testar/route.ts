@@ -1,4 +1,5 @@
 import { chamarGeranetBanking } from "@/lib/geranet/cliente";
+import { exigirPixIntegradoEmpresa } from "@/lib/pagamentos/pix/acesso-operacao";
 import {
   carregarApiKeyGeranet,
   carregarIntegracaoPix,
@@ -13,6 +14,10 @@ import { erroPix, jsonPix } from "../_shared";
 export async function POST() {
   try {
     const { empresaId } = await exigirAdministradorPix();
+    await exigirPixIntegradoEmpresa({
+      empresaId,
+      origem: "POST /api/pagamentos/pix/geranet/testar",
+    });
     await exigirPixGeranetAtivo(empresaId);
     const [apiKey, integracao] = await Promise.all([
       carregarApiKeyGeranet(empresaId),

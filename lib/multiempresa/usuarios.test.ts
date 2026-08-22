@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ehContador, podeAcessarContabilidade } from "@/lib/contabilidade/acesso";
+import { presetDoPerfil } from "@/lib/permissoes/presets";
 import { selecionarVinculoEmpresaAtiva } from "@/lib/empresa/empresa-ativa";
 
 import {
@@ -48,7 +49,7 @@ test("usuários: senha de outro tenant não é redefinida sem vínculo na empres
 
 test("contador: perfil não é acesso global; só empresas com vínculo ativo", () => {
   assert.equal(ehContador("contador"), true);
-  assert.equal(podeAcessarContabilidade("contador"), true);
+  assert.equal(podeAcessarContabilidade(presetDoPerfil("contador")), true);
   assert.equal(temAcessoEmpresa(usuarioX, empresaA, vinculosPadrao), true);
   assert.equal(temAcessoEmpresa(usuarioX, empresaB, vinculosPadrao), true);
   assert.equal(temAcessoEmpresa(usuarioA, empresaB, vinculosPadrao), false);

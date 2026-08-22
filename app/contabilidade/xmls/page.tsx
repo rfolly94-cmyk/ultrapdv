@@ -3,8 +3,10 @@ import {
   chaveCompetencia,
   parseCompetencia,
 } from "@/lib/contabilidade/competencia";
-import { obterContextoContabilidade } from "@/lib/contabilidade/contexto";
+import { obterContextoContabilidade, planoContabilidadePermitidoNaSessao } from "@/lib/contabilidade/contexto";
 import { carregarDocumentosCompetencia } from "@/lib/contabilidade/documentos";
+import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
+import { temPermissao } from "@/lib/permissoes/tem-permissao";
 
 export const metadata = {
   title: "XMLs",
@@ -18,7 +20,16 @@ export default async function ContabilidadeXmlsPage({
   searchParams,
 }: PageProps) {
   const params = await searchParams;
+  const plano = await planoContabilidadePermitidoNaSessao();
+  if (!plano.permitido) {
+    return null;
+  }
   const ctx = await obterContextoContabilidade();
+  const sessaoPermissoes = await obterPermissoesSessao();
+  const podeRelatorio = Boolean(
+    sessaoPermissoes &&
+      temPermissao(sessaoPermissoes.permissoes, "contabilidade", "relatorios")
+  );
   const competencia = parseCompetencia(params.competencia);
   const documentos = await carregarDocumentosCompetencia(
     ctx.supabase,
@@ -40,12 +51,14 @@ export default async function ContabilidadeXmlsPage({
   return (
     <>
       <div className="flex justify-end px-4 py-2">
-        <a
-          href={`/api/contabilidade/relatorio?competencia=${chaveCompetencia(competencia)}`}
-          className="updv-btn updv-btn-ghost"
-        >
-          Relatório CSV
-        </a>
+        {podeRelatorio ? (
+          <a
+            href={`/api/contabilidade/relatorio?competencia=${chaveCompetencia(competencia)}`}
+            className="updv-btn updv-btn-ghost"
+          >
+            Relatório CSV
+          </a>
+        ) : null}
       </div>
       <ContabilidadeXmlsLista
         documentos={documentos.todos}

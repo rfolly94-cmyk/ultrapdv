@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import {
+  exigirOperacaoCarteira,
+  respostaNegacaoCarteira,
+} from "@/lib/carteira/acesso-operacao";
+import {
   carregarItensAbertosCarteiraDaEmpresaAtiva,
   linhasItensAbertosCarteira,
 } from "@/lib/impressao/carregar-carteira";
@@ -36,6 +40,20 @@ export async function GET(request: Request, context: RouteContext) {
       { erro: "Empresa ativa não encontrada." },
       { status: 403 }
     );
+  }
+
+  try {
+    await exigirOperacaoCarteira({
+      empresaId: String(vinculo.empresa_id),
+      acao: "acessar_carteira",
+      origem: "GET /api/impressao/carteira-abertos",
+    });
+  } catch (error) {
+    const negacao = respostaNegacaoCarteira(error);
+    if (negacao) {
+      return negacao;
+    }
+    throw error;
   }
 
   const dados = await carregarItensAbertosCarteiraDaEmpresaAtiva({

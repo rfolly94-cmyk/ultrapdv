@@ -4,10 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import {
+  exigirOperacaoCatalogo,
+  resultadoNegacaoCatalogo,
+} from "@/lib/catalogo/acesso-operacao";
 import { createClient } from "@/lib/supabase/server";
 import type { CatalogoPedidoStatus } from "@/lib/catalogo/tipos";
 import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 
 type Resultado =
   | { ok: true; mensagem: string }
@@ -37,7 +40,11 @@ async function getContexto() {
   await exigirEmpresaOperacionalOuRedirecionar(String(vinculo.empresa_id));
 
   try {
-    await exigirPermissao({ modulo: "catalogo", acao: "pedidos" });
+    await exigirOperacaoCatalogo({
+      empresaId: String(vinculo.empresa_id),
+      acao: "pedidos",
+      origem: "vendas/pedidos",
+    });
   } catch (error) {
     if (error instanceof ErroPermissao) {
       if (error.status === 401) redirect("/login");
@@ -49,12 +56,28 @@ async function getContexto() {
   return { supabase, empresaId: vinculo.empresa_id };
 }
 
+async function contextoOuNegacao() {
+  try {
+    return { ok: true as const, ...(await getContexto()) };
+  } catch (error) {
+    const negacao = resultadoNegacaoCatalogo(error);
+    if (negacao) {
+      return negacao;
+    }
+    throw error;
+  }
+}
+
 async function atualizarStatus(
   pedidoId: string,
   status: CatalogoPedidoStatus,
   permitidos: CatalogoPedidoStatus[]
 ): Promise<Resultado> {
-  const { supabase, empresaId } = await getContexto();
+  const contexto = await contextoOuNegacao();
+  if (!contexto.ok) {
+    return contexto;
+  }
+  const { supabase, empresaId } = contexto;
 
   const { data: pedido, error } = await supabase
     .from("catalogo_pedidos")
@@ -98,7 +121,11 @@ export async function aceitarPedidoCatalogo(pedidoId: string) {
 }
 
 export async function cancelarPedidoCatalogo(pedidoId: string) {
-  const { supabase, empresaId } = await getContexto();
+  const contexto = await contextoOuNegacao();
+  if (!contexto.ok) {
+    return contexto;
+  }
+  const { supabase, empresaId } = contexto;
 
   const { data: pedido } = await supabase
     .from("catalogo_pedidos")
@@ -126,7 +153,11 @@ export async function cancelarPedidoCatalogo(pedidoId: string) {
 }
 
 export async function converterPedidoParaVenda(pedidoId: string) {
-  const { supabase, empresaId } = await getContexto();
+  const contexto = await contextoOuNegacao();
+  if (!contexto.ok) {
+    return contexto;
+  }
+  const { supabase, empresaId } = contexto;
 
   const { data: pedido } = await supabase
     .from("catalogo_pedidos")

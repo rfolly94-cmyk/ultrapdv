@@ -7,6 +7,7 @@ import { ListToolbar } from "@/components/ui/list-toolbar";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { DocumentoFiscalContabil } from "@/lib/contabilidade/documentos";
 import { modeloFiscalRotulo } from "@/lib/contabilidade/regras";
+import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
 
 type EventoXml = {
   id: string;
@@ -26,6 +27,7 @@ export function ContabilidadeXmlsLista({
 }) {
   const [modelo, setModelo] = useState("");
   const [tipo, setTipo] = useState("documentos");
+  const podeBaixarXml = useTemPermissao("contabilidade", "baixar_xml");
 
   const eventosPorEmissao = useMemo(() => {
     const mapa = new Map<string, EventoXml[]>();
@@ -79,12 +81,14 @@ export function ContabilidadeXmlsLista({
           </div>
         }
         actions={
-          <a
-            href={`/api/contabilidade/zip?competencia=${competencia}`}
-            className="updv-btn updv-btn-primary"
-          >
-            Baixar XMLs da competência
-          </a>
+          podeBaixarXml ? (
+            <a
+              href={`/api/contabilidade/zip?competencia=${competencia}`}
+              className="updv-btn updv-btn-primary"
+            >
+              Baixar XMLs da competência
+            </a>
+          ) : null
         }
       />
 
@@ -124,17 +128,19 @@ export function ContabilidadeXmlsLista({
                 </td>
                 <td>
                   <div className="flex items-center gap-1.5">
-                    {(doc.status === "autorizada" || doc.status === "cancelada") && (
+                    {podeBaixarXml &&
+                    (doc.status === "autorizada" || doc.status === "cancelada") ? (
                       <a
                         href={`/api/fiscal/emissoes/${doc.id}/arquivo?tipo=xml&download=1`}
                         className="updv-btn-row"
                       >
                         XML
                       </a>
-                    )}
-                    {eventosDoc
-                      .filter((evento) => evento.temXml)
-                      .map((evento) => (
+                    ) : null}
+                    {podeBaixarXml
+                      ? eventosDoc
+                          .filter((evento) => evento.temXml)
+                          .map((evento) => (
                         <a
                           key={evento.id}
                           href={`/api/fiscal/eventos/${evento.id}/arquivo?tipo=xml&download=1`}
@@ -146,7 +152,8 @@ export function ContabilidadeXmlsLista({
                               ? "CC-e"
                               : "Evento"}
                         </a>
-                      ))}
+                          ))
+                      : null}
                   </div>
                 </td>
               </tr>

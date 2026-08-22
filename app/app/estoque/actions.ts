@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import { exigirOperacaoEstoque } from "@/lib/estoque/acesso-operacao";
 import { createClient } from "@/lib/supabase/server";
 import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import type { AcaoDoModulo } from "@/lib/permissoes/tipos";
+import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
 
 type Resultado =
   | { ok: true }
@@ -59,6 +61,31 @@ async function getContexto() {
     perfil:
       vinculo.perfil,
   };
+}
+
+async function exigirEstoque(
+  empresaId: string,
+  acao: AcaoDoModulo<"estoque">,
+  origem: string
+) {
+  await exigirOperacaoEstoque({
+    empresaId: String(empresaId),
+    acao,
+    origem,
+  });
+}
+
+function resultadoNegacaoEstoque(error: unknown): {
+  ok: false;
+  erro: string;
+} {
+  if (error instanceof ErroPermissao && error.status === 401) {
+    redirect("/login");
+  }
+  if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+    return { ok: false, erro: error.message };
+  }
+  throw error;
 }
 
 function decimal(
@@ -114,23 +141,24 @@ export async function movimentarEstoque(
   }
 ): Promise<Resultado> {
   try {
-    const acao =
-      input.operacao === "AJUSTE" ? "ajustar" : "movimentar";
-
-    try {
-      await exigirPermissao({ modulo: "estoque", acao });
-    } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return { ok: false, erro: error.message };
-      }
-      throw error;
-    }
-
     const {
       supabase,
       empresaId,
     } =
       await getContexto();
+
+    const acao =
+      input.operacao === "AJUSTE" ? "ajustar" : "movimentar";
+
+    try {
+      await exigirEstoque(
+        String(empresaId),
+        acao,
+        "movimentarEstoque"
+      );
+    } catch (error) {
+      return resultadoNegacaoEstoque(error);
+    }
 
     const quantidade =
       decimal(
@@ -200,20 +228,21 @@ export async function atualizarLimitesEstoque(
   }
 ): Promise<Resultado> {
   try {
-    try {
-      await exigirPermissao({ modulo: "estoque", acao: "ajustar" });
-    } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return { ok: false, erro: error.message };
-      }
-      throw error;
-    }
-
     const {
       supabase,
       empresaId,
     } =
       await getContexto();
+
+    try {
+      await exigirEstoque(
+        String(empresaId),
+        "ajustar",
+        "atualizarLimitesEstoque"
+      );
+    } catch (error) {
+      return resultadoNegacaoEstoque(error);
+    }
 
     const minimo =
       decimal(

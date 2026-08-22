@@ -18,6 +18,7 @@ import {
   configDoTipo,
   podeImprimirAutomaticamente,
 } from "@/lib/impressao/regras";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type Props = {
   vendaId: string;
@@ -46,6 +47,8 @@ export function EmitirNfeVendaButton({
 }: Props) {
   const router =
     useRouter();
+  const conectorLiberado = useRecursoLiberado("impressao_automatica");
+  const nfeLiberada = useRecursoLiberado("nfe");
 
   const [
     enviando,
@@ -147,12 +150,12 @@ export function EmitirNfeVendaButton({
             "Emissão processada."
       );
 
-      if (data.autorizada) {
+      if (data.autorizada && conectorLiberado) {
         try {
           const configs = await buscarConfiguracoesImpressaoAction(
             obterDispositivoId()
           );
-          if (configs.ok) {
+          if (configs.ok && configs.conectorLiberado !== false) {
             const configNfe = configDoTipo(configs.configs, "danfe_nfe");
             if (podeImprimirAutomaticamente(configNfe)) {
               const emissao = await buscarEmissaoAutorizadaVendaAction(
@@ -166,6 +169,7 @@ export function EmitirNfeVendaButton({
                     emissaoId: emissao.emissaoId,
                   },
                   configs: configs.configs,
+                  conectorPermitido: true,
                 });
                 if (!impressao.ok) {
                   setMensagem(
@@ -196,6 +200,10 @@ export function EmitirNfeVendaButton({
     } finally {
       setEnviando(false);
     }
+  }
+
+  if (!nfeLiberada) {
+    return null;
   }
 
   return (

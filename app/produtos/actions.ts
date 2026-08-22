@@ -7,6 +7,13 @@ import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-
 import { createClient } from "@/lib/supabase/server";
 import { ErroPermissao } from "@/lib/permissoes/erro";
 import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import type { AcaoDoModulo } from "@/lib/permissoes/tipos";
+import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
+import {
+  exigirRecursoEmpresa,
+  planoPermiteRecursoEmpresa,
+} from "@/lib/plataforma/entitlements/exigir-recurso";
+import { exigirOperacaoProduto } from "@/lib/produtos/acesso-operacao";
 import {
   bucketCatalogo,
   caminhoImagemProduto,
@@ -85,6 +92,44 @@ async function getContexto() {
     empresaId: vinculo.empresa_id,
     perfil: vinculo.perfil,
   };
+}
+
+async function exigirProduto(
+  empresaId: string,
+  acao: AcaoDoModulo<"produtos">,
+  origem: string
+) {
+  await exigirOperacaoProduto({
+    empresaId: String(empresaId),
+    acao,
+    origem,
+  });
+}
+
+function redirecionarNegacaoProduto(
+  error: unknown,
+  destino: (mensagem: string) => never
+): never {
+  if (error instanceof ErroPermissao && error.status === 401) {
+    redirect("/login");
+  }
+  if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+    destino(error.message);
+  }
+  throw error;
+}
+
+function resultadoNegacaoProduto(error: unknown): {
+  ok: false;
+  erro: string;
+} {
+  if (error instanceof ErroPermissao && error.status === 401) {
+    redirect("/login");
+  }
+  if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+    return { ok: false, erro: error.message };
+  }
+  throw error;
 }
 
 function voltarErro(mensagem: string): never {
@@ -533,18 +578,14 @@ async function persistirDadosFiscaisProduto({
 export async function cadastrarProduto(
   formData: FormData
 ) {
-  try {
-    await exigirPermissao({ modulo: "produtos", acao: "criar" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      voltarErro(error.message);
-    }
-    throw error;
-  }
-
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "criar", "cadastrarProduto");
+  } catch (error) {
+    redirecionarNegacaoProduto(error, voltarErro);
+  }
 
   const dados = lerDadosComerciaisProduto(formData, {
     permitirAutomatico: true,
@@ -702,32 +743,38 @@ export async function cadastrarProduto(
   }
 
   if (produtoId) {
-    const catalogo = lerDadosCatalogoProduto(formData);
-    let imagemPath: string | null | undefined;
+    const catalogoNoPlano = await planoPermiteRecursoEmpresa(
+      String(empresaId),
+      "catalogo"
+    );
+    if (catalogoNoPlano.permitido) {
+      const catalogo = lerDadosCatalogoProduto(formData);
+      let imagemPath: string | null | undefined;
 
-    try {
-      imagemPath = await enviarImagemProdutoCatalogo(
-        supabase,
-        empresaId,
-        produtoId,
-        catalogo.imagem
-      );
-    } catch (error) {
-      voltarErro(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível enviar a imagem."
-      );
-    }
+      try {
+        imagemPath = await enviarImagemProdutoCatalogo(
+          supabase,
+          empresaId,
+          produtoId,
+          catalogo.imagem
+        );
+      } catch (error) {
+        voltarErro(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível enviar a imagem."
+        );
+      }
 
-    const { error: erroCatalogo } = await supabase
-      .from("produtos")
-      .update(payloadCatalogoProduto(catalogo, imagemPath))
-      .eq("empresa_id", empresaId)
-      .eq("id", produtoId);
+      const { error: erroCatalogo } = await supabase
+        .from("produtos")
+        .update(payloadCatalogoProduto(catalogo, imagemPath))
+        .eq("empresa_id", empresaId)
+        .eq("id", produtoId);
 
-    if (erroCatalogo) {
-      voltarErro(erroCatalogo.message);
+      if (erroCatalogo) {
+        voltarErro(erroCatalogo.message);
+      }
     }
 
     const fiscal = await persistirDadosFiscaisProduto({
@@ -759,17 +806,13 @@ export async function cadastrarProduto(
 export async function editarProduto(
   formData: FormData
 ): Promise<ResultadoProduto> {
-  try {
-    await exigirPermissao({ modulo: "produtos", acao: "editar" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      return { ok: false, erro: error.message };
-    }
-    throw error;
-  }
-
   const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "editarProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
 
   const produtoId = String(formData.get("id") ?? "").trim();
   const dados = lerDadosComerciaisProduto(formData);
@@ -814,43 +857,51 @@ export async function editarProduto(
     return { ok: false, erro: erroFiscal };
   }
 
-  const catalogo = lerDadosCatalogoProduto(formData);
+  const catalogoNoPlano = await planoPermiteRecursoEmpresa(
+    String(empresaId),
+    "catalogo"
+  );
+  const catalogo = catalogoNoPlano.permitido
+    ? lerDadosCatalogoProduto(formData)
+    : null;
   let imagemPath: string | null | undefined;
 
-  try {
-    if (catalogo.removerImagem) {
-      const { data: atualImagem } = await supabase
-        .from("produtos")
-        .select("catalogo_imagem_path")
-        .eq("empresa_id", empresaId)
-        .eq("id", produtoId)
-        .maybeSingle();
+  if (catalogo) {
+    try {
+      if (catalogo.removerImagem) {
+        const { data: atualImagem } = await supabase
+          .from("produtos")
+          .select("catalogo_imagem_path")
+          .eq("empresa_id", empresaId)
+          .eq("id", produtoId)
+          .maybeSingle();
 
-      await removerImagemProdutoCatalogo(
+        await removerImagemProdutoCatalogo(
+          supabase,
+          atualImagem?.catalogo_imagem_path
+        );
+        imagemPath = null;
+      }
+
+      const enviado = await enviarImagemProdutoCatalogo(
         supabase,
-        atualImagem?.catalogo_imagem_path
+        empresaId,
+        produtoId,
+        catalogo.imagem
       );
-      imagemPath = null;
-    }
 
-    const enviado = await enviarImagemProdutoCatalogo(
-      supabase,
-      empresaId,
-      produtoId,
-      catalogo.imagem
-    );
-
-    if (enviado) {
-      imagemPath = enviado;
+      if (enviado) {
+        imagemPath = enviado;
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        erro:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível atualizar a imagem.",
+      };
     }
-  } catch (error) {
-    return {
-      ok: false,
-      erro:
-        error instanceof Error
-          ? error.message
-          : "Não foi possível atualizar a imagem.",
-    };
   }
 
   const { error } = await supabase
@@ -866,7 +917,7 @@ export async function editarProduto(
       unidade_medida: dados.unidade,
       preco_custo: dados.precoCusto,
       preco_venda: dados.precoVenda,
-      ...payloadCatalogoProduto(catalogo, imagemPath),
+      ...(catalogo ? payloadCatalogoProduto(catalogo, imagemPath) : {}),
     })
     .eq("empresa_id", empresaId)
     .eq("id", produtoId);
@@ -911,6 +962,21 @@ export async function atualizarPublicacaoCatalogo(
   publicado: boolean
 ): Promise<ResultadoProduto> {
   const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirRecursoEmpresa({
+      empresaId: String(empresaId),
+      recurso: "catalogo",
+      origem: "atualizarPublicacaoCatalogo",
+    });
+    await exigirProduto(
+      empresaId,
+      "editar",
+      "atualizarPublicacaoCatalogo"
+    );
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
   const ids = Array.from(
     new Set(
       produtoIds.filter(
@@ -973,17 +1039,17 @@ async function contarUsoProduto(
 export async function excluirOuInativarProduto(
   produtoId: string
 ): Promise<ResultadoProduto> {
-  try {
-    await exigirPermissao({ modulo: "produtos", acao: "excluir" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      return { ok: false, erro: error.message };
-    }
-    throw error;
-  }
-
   const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(
+      empresaId,
+      "excluir",
+      "excluirOuInativarProduto"
+    );
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
   const id = String(produtoId ?? "").trim();
 
   if (!id) {
@@ -1102,6 +1168,12 @@ export async function reativarProduto(
   produtoId: string
 ): Promise<ResultadoProduto> {
   const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "reativarProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
   const id = String(produtoId ?? "").trim();
 
   if (!id) {
@@ -1156,6 +1228,17 @@ async function cadastrarRelacionadoRapido(
 ): Promise<ResultadoRapido> {
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(
+      empresaId,
+      "criar",
+      `cadastrar${tabela === "categorias" ? "Categoria" : "Marca"}Rapida`
+    );
+  } catch (error) {
+    const negacao = resultadoNegacaoProduto(error);
+    return { ok: false, erro: negacao.erro };
+  }
 
   const nome = nomeRecebido.trim();
 
@@ -1271,6 +1354,18 @@ async function salvarNovoRelacionado(
   const { supabase, empresaId } =
     await getContexto();
 
+  try {
+    await exigirProduto(
+      empresaId,
+      "criar",
+      `cadastrar${tabela === "categorias" ? "Categoria" : "Marca"}`
+    );
+  } catch (error) {
+    redirecionarNegacaoProduto(error, (mensagem) =>
+      redirect(`${caminho}?erro=${encodeURIComponent(mensagem)}`)
+    );
+  }
+
   const nome = String(
     formData.get("nome") ?? ""
   ).trim();
@@ -1321,6 +1416,18 @@ async function editarRelacionado(
 ) {
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(
+      empresaId,
+      "editar",
+      `editar${tabela === "categorias" ? "Categoria" : "Marca"}`
+    );
+  } catch (error) {
+    redirecionarNegacaoProduto(error, (mensagem) =>
+      redirect(`${caminho}?erro=${encodeURIComponent(mensagem)}`)
+    );
+  }
 
   const id = String(
     formData.get("id") ?? ""
@@ -1382,6 +1489,18 @@ async function excluirOuDesativarRelacionado(
 ) {
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(
+      empresaId,
+      "excluir",
+      `excluir${tabela === "categorias" ? "Categoria" : "Marca"}`
+    );
+  } catch (error) {
+    redirecionarNegacaoProduto(error, (mensagem) =>
+      redirect(`${caminho}?erro=${encodeURIComponent(mensagem)}`)
+    );
+  }
 
   const id = String(
     formData.get("id") ?? ""
@@ -1829,6 +1948,12 @@ export async function cadastrarGrupoFiscal(
   const { supabase, empresaId } =
     await getContexto();
 
+  try {
+    await exigirProduto(empresaId, "criar", "cadastrarGrupoFiscal");
+  } catch (error) {
+    redirecionarNegacaoProduto(error, erroGrupoFiscal);
+  }
+
   const nome = String(
     formData.get("nome") ?? ""
   ).trim();
@@ -1898,6 +2023,12 @@ export async function editarGrupoFiscal(
 ) {
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "editarGrupoFiscal");
+  } catch (error) {
+    redirecionarNegacaoProduto(error, erroGrupoFiscal);
+  }
 
   const id = String(
     formData.get("id") ?? ""
@@ -1977,6 +2108,12 @@ export async function excluirGrupoFiscal(
 ) {
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "excluir", "excluirGrupoFiscal");
+  } catch (error) {
+    redirecionarNegacaoProduto(error, erroGrupoFiscal);
+  }
 
   const id = String(
     formData.get("id") ?? ""
@@ -2081,6 +2218,12 @@ export async function salvarFiscalProduto(
 ) {
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "salvarFiscalProduto");
+  } catch (error) {
+    redirecionarNegacaoProduto(error, voltarErro);
+  }
 
   const produtoId = String(
     formData.get("produto_id") ?? ""

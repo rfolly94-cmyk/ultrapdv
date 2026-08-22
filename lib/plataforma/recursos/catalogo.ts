@@ -1,3 +1,10 @@
+/**
+ * Catálogo comercial do plano (entitlement da empresa).
+ * Documentação: docs/entitlements-map.md
+ * Permissões de usuário (camada distinta): docs/permissoes-usuarios-map.md
+ * Combinar as camadas: lib/plataforma/entitlements/
+ * Rollout atual: ver `RECURSOS_COM_ENFORCEMENT`.
+ */
 export const CATEGORIAS_RECURSO = [
   "comercial",
   "fiscal",
@@ -73,6 +80,13 @@ export const CATALOGO_RECURSOS: RecursoCatalogo[] = [
     descricao: "Relatórios operacionais.",
     categoria: "comercial",
     ordem: 70,
+  },
+  {
+    chave: "catalogo",
+    nome: "Catálogo online",
+    descricao: "Loja pública, publicação de produtos e pedidos online.",
+    categoria: "comercial",
+    ordem: 80,
   },
   {
     chave: "nfce",

@@ -1,24 +1,34 @@
 "use client";
 
 import { ModuleTabs } from "@/components/ui/module-tabs";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
+import { usePermissoesUi } from "@/lib/permissoes/contexto-ui";
+import { temPermissao } from "@/lib/permissoes/tem-permissao";
 
 export function VendasModuleTabs({
   pedidosNovos = 0,
 }: {
   pedidosNovos?: number;
 }) {
-  return (
-    <ModuleTabs
-      tabs={[
-        { label: "Vendas", href: "/vendas", exact: true },
-        {
-          label:
-            pedidosNovos > 0
-              ? `Pedidos Online · ${pedidosNovos}`
-              : "Pedidos Online",
-          href: "/vendas/pedidos",
-        },
-      ]}
-    />
-  );
+  const permissoes = usePermissoesUi();
+  const catalogoNoPlano = useRecursoLiberado("catalogo");
+  const pedidosPermitidos =
+    catalogoNoPlano && temPermissao(permissoes, "catalogo", "pedidos");
+
+  const tabs = [
+    { label: "Vendas", href: "/vendas", exact: true },
+    ...(pedidosPermitidos
+      ? [
+          {
+            label:
+              pedidosNovos > 0
+                ? `Pedidos Online · ${pedidosNovos}`
+                : "Pedidos Online",
+            href: "/vendas/pedidos",
+          },
+        ]
+      : []),
+  ];
+
+  return <ModuleTabs tabs={tabs} />;
 }

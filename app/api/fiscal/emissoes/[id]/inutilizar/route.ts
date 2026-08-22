@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { inutilizarNumeracaoFiscal } from "@/lib/fiscal/inutilizar-numeracao";
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  capturaErroAutorizacaoFiscal,
+  exigirInutilizacaoFiscal,
+} from "@/lib/fiscal/acesso-operacao";
 
 export const runtime = "nodejs";
 
@@ -50,10 +52,14 @@ export async function POST(
     }
 
     try {
-      await exigirPermissao({ modulo: "fiscal", acao: "inutilizar" });
+      await exigirInutilizacaoFiscal({
+        empresaId: String(vinculo.empresa_id),
+        origem: "inutilizar-numeracao",
+      });
     } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return json({ ok: false, erro: error.message }, error.status);
+      const authz = capturaErroAutorizacaoFiscal(error);
+      if (authz) {
+        return json({ ok: false, erro: authz.mensagem }, authz.status);
       }
       throw error;
     }

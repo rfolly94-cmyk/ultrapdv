@@ -23,9 +23,10 @@ export async function executarDestinoImpressao(input: {
   destino: DestinoImpressaoAutomatica;
   configs: ConfiguracaoImpressao[];
   forcar?: boolean;
+  conectorPermitido?: boolean;
 }) {
-  const { destino, configs, forcar = false } = input;
-  if (destino.tipo === "nenhum") {
+  const { destino, configs, forcar = false, conectorPermitido } = input;
+  if (conectorPermitido === false || destino.tipo === "nenhum") {
     return { ok: true as const, pulou: true as const };
   }
 

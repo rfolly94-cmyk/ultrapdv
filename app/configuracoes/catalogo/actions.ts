@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import {
+  exigirOperacaoCatalogo,
+  resultadoNegacaoCatalogo,
+} from "@/lib/catalogo/acesso-operacao";
 import { createClient } from "@/lib/supabase/server";
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 import {
   normalizarWhatsapp,
   validarSlug,
@@ -79,17 +81,21 @@ async function enviarImagemConfig(
 export async function salvarCatalogoConfig(
   formData: FormData
 ): Promise<Resultado> {
+  const { supabase, empresaId } = await getContexto();
+
   try {
-    await exigirPermissao({ modulo: "catalogo", acao: "configurar" });
+    await exigirOperacaoCatalogo({
+      empresaId: String(empresaId),
+      acao: "configurar",
+      origem: "configuracoes/catalogo",
+    });
   } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      return { ok: false, erro: error.message };
+    const negacao = resultadoNegacaoCatalogo(error);
+    if (negacao) {
+      return negacao;
     }
     throw error;
   }
-
-  const { supabase, empresaId } = await getContexto();
 
   const ativo = formData.get("ativo") === "1";
   const nome = String(formData.get("nome_exibido") ?? "").trim();

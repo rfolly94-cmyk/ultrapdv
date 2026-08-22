@@ -10,6 +10,10 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
+import {
+  exigirOperacaoVenda,
+  respostaNegacaoVenda,
+} from "@/lib/vendas/acesso-operacao";
 
 type RouteContext = {
   params: Promise<{
@@ -129,6 +133,20 @@ export async function PATCH(
         },
         403
       );
+    }
+
+    try {
+      await exigirOperacaoVenda({
+        empresaId: String(vinculo.empresa_id),
+        acao: "editar",
+        origem: "api/vendas/editar",
+      });
+    } catch (error) {
+      const negacao = respostaNegacaoVenda(error);
+      if (negacao) {
+        return negacao;
+      }
+      throw error;
     }
 
     let body: Body;

@@ -4,9 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import {
+  exigirOperacaoCarteira,
+} from "@/lib/carteira/acesso-operacao";
+import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
 import { createClient } from "@/lib/supabase/server";
 import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 
 type ReceberInput = {
   clienteId: string;
@@ -131,20 +134,24 @@ export async function receberCarteira(
   input: ReceberInput
 ): Promise<Resultado> {
   try {
-    await exigirPermissao({ modulo: "clientes", acao: "receber_carteira" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      return { ok: false, erro: error.message };
-    }
-    throw error;
-  }
-
-  try {
     const {
       supabase,
       empresaId,
     } =
       await getContexto();
+
+    try {
+      await exigirOperacaoCarteira({
+        empresaId,
+        acao: "receber_carteira",
+        origem: "receberCarteira",
+      });
+    } catch (error) {
+      if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+        return { ok: false, erro: error.message };
+      }
+      throw error;
+    }
 
     if (
       !uuidValido(
@@ -353,16 +360,20 @@ export async function estornarRecebimentoCarteira(
   input: EstornarInput
 ): Promise<Resultado> {
   try {
-    await exigirPermissao({ modulo: "clientes", acao: "receber_carteira" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      return { ok: false, erro: error.message };
-    }
-    throw error;
-  }
-
-  try {
     const { supabase, empresaId } = await getContexto();
+
+    try {
+      await exigirOperacaoCarteira({
+        empresaId,
+        acao: "receber_carteira",
+        origem: "estornarRecebimentoCarteira",
+      });
+    } catch (error) {
+      if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+        return { ok: false, erro: error.message };
+      }
+      throw error;
+    }
 
     if (!uuidValido(input.clienteId) || !uuidValido(input.recebimentoId)) {
       return { ok: false, erro: "Recebimento inválido." };

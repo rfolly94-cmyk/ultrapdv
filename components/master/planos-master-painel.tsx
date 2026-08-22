@@ -7,23 +7,26 @@ import { AppModal } from "@/components/ui/app-modal";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { masterSalvarPlano } from "@/lib/master/acoes";
 import type { PlanoMasterResumo } from "@/lib/master/planos";
+import { alertasCombinacaoPlano } from "@/lib/plataforma/recursos/alertas-plano";
 import {
   CATALOGO_RECURSOS,
-  ROTULOS_CATEGORIA_RECURSO,
   ROTULOS_LIMITE,
   ROTULOS_NIVEL_SUPORTE,
-  recursosDaCategoria,
-  type CategoriaRecurso,
+  recursoDoCatalogo,
   type NivelSuporte,
 } from "@/lib/plataforma/recursos/catalogo";
+import {
+  GRUPOS_COMERCIAIS_PLANO,
+  classificarRecursosDoPlano,
+  resumoDoGrupoComercial,
+  type GrupoComercialPlano,
+} from "@/lib/plataforma/recursos/grupos-comerciais";
 import { formatarMoeda } from "@/lib/relatorios/formatacao";
 
 const ABAS = [
   { id: "geral", label: "Geral" },
   { id: "limites", label: "Limites" },
   { id: "recursos", label: "Recursos" },
-  { id: "fiscal", label: "Fiscal" },
-  { id: "integracoes", label: "Integrações" },
 ] as const;
 
 type Aba = (typeof ABAS)[number]["id"];
@@ -43,6 +46,22 @@ function parseDinheiro(valor: string) {
   return Number(limpo.replace(/\./g, "").replace(",", "."));
 }
 
+function rotuloLimiteCard(
+  chave: "usuarios" | "filiais",
+  valor: number | null | undefined
+) {
+  if (chave === "usuarios") {
+    if (valor == null) {
+      return "Usuários ilimitados";
+    }
+    return `${valor} ${valor === 1 ? "usuário" : "usuários"}`;
+  }
+  if (valor == null) {
+    return "Filiais ilimitadas";
+  }
+  return `${valor} ${valor === 1 ? "filial" : "filiais"}`;
+}
+
 function PlanoCard({
   plano,
   onEditar,
@@ -50,6 +69,8 @@ function PlanoCard({
   plano: PlanoMasterResumo;
   onEditar: () => void;
 }) {
+  const { incluidos, naoIncluidos } = classificarRecursosDoPlano(plano.recursos);
+
   return (
     <article className="flex flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -71,29 +92,38 @@ function PlanoCard({
           {plano.textoDestaque}
         </p>
       ) : null}
+      {plano.descricao ? (
+        <p className="mt-2 text-sm text-zinc-500">{plano.descricao}</p>
+      ) : null}
       <ul className="mt-4 space-y-1 text-sm text-zinc-600">
         <li>
-          {plano.empresas} {plano.empresas === 1 ? "empresa" : "empresas"}
+          {plano.empresas} {plano.empresas === 1 ? "empresa usando este plano" : "empresas usando este plano"}
         </li>
-        <li>
-          {plano.limites.usuarios == null
-            ? "Usuários ilimitados"
-            : `${plano.limites.usuarios} ${
-                plano.limites.usuarios === 1 ? "usuário" : "usuários"
-              }`}
-        </li>
-        <li>
-          {plano.limites.filiais == null
-            ? "Filiais ilimitadas"
-            : `${plano.limites.filiais} ${
-                plano.limites.filiais === 1 ? "filial" : "filiais"
-              }`}
-        </li>
-        <li>
-          {plano.recursosHabilitados}{" "}
-          {plano.recursosHabilitados === 1 ? "recurso" : "recursos"}
-        </li>
+        <li>{rotuloLimiteCard("usuarios", plano.limites.usuarios)}</li>
+        <li>{rotuloLimiteCard("filiais", plano.limites.filiais)}</li>
       </ul>
+      <div className="mt-4 space-y-3">
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Recursos incluídos
+          </h3>
+          <p className="mt-1 text-sm text-zinc-700">
+            {incluidos.length === 0
+              ? "Nenhum recurso marcado."
+              : incluidos.map((item) => item.nome).join(", ")}
+          </p>
+        </section>
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Recursos não incluídos
+          </h3>
+          <p className="mt-1 text-sm text-zinc-700">
+            {naoIncluidos.length === 0
+              ? "Nenhum. Todos os recursos do catálogo estão ligados."
+              : naoIncluidos.map((item) => item.nome).join(", ")}
+          </p>
+        </section>
+      </div>
       <button
         type="button"
         onClick={onEditar}
@@ -132,37 +162,66 @@ function SwitchRecurso({
   );
 }
 
-function GrupoRecursos({
-  categoria,
+function GrupoComercialRecursos({
+  grupo,
   recursos,
+  abertoPadrao,
   onToggle,
+  onToggleGrupo,
 }: {
-  categoria: CategoriaRecurso;
+  grupo: GrupoComercialPlano;
   recursos: Record<string, boolean>;
+  abertoPadrao: boolean;
   onToggle: (chave: string, valor: boolean) => void;
+  onToggleGrupo: (valor: boolean) => void;
 }) {
-  const itens = recursosDaCategoria(categoria);
-  if (itens.length === 0) {
-    return null;
-  }
+  const resumo = resumoDoGrupoComercial(grupo, recursos);
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        {ROTULOS_CATEGORIA_RECURSO[categoria]}
-      </h3>
-      <div className="grid gap-2">
-        {itens.map((item) => (
-          <SwitchRecurso
-            key={item.chave}
-            titulo={item.nome}
-            descricao={item.descricao}
-            checked={Boolean(recursos[item.chave])}
-            onChange={(valor) => onToggle(item.chave, valor)}
+    <details
+      className="rounded-xl border border-zinc-200 bg-zinc-50/60"
+      open={abertoPadrao}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5">
+        <span>
+          <span className="block text-sm font-semibold text-zinc-950">
+            {grupo.rotulo}
+          </span>
+          <span className="mt-0.5 block text-xs text-zinc-500">
+            {resumo.ligados}/{resumo.total}{" "}
+            {resumo.total === 1 ? "recurso ligado" : "recursos ligados"}
+          </span>
+        </span>
+        <label
+          className="flex items-center gap-2 text-xs text-zinc-600"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={resumo.todos}
+            onChange={(event) => onToggleGrupo(event.target.checked)}
           />
-        ))}
+          Grupo
+        </label>
+      </summary>
+      <div className="grid gap-2 border-t border-zinc-200 px-3 py-3">
+        {grupo.chaves.map((chave) => {
+          const item = recursoDoCatalogo(chave);
+          if (!item) {
+            return null;
+          }
+          return (
+            <SwitchRecurso
+              key={chave}
+              titulo={item.nome}
+              descricao={item.descricao}
+              checked={Boolean(recursos[chave])}
+              onChange={(valor) => onToggle(chave, valor)}
+            />
+          );
+        })}
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -204,6 +263,7 @@ export function PlanosMasterPainel({
   const [pending, startTransition] = useTransition();
 
   const tituloEditor = planoId ? `Editar plano ${nome || ""}`.trim() : "Novo plano";
+  const alertas = useMemo(() => alertasCombinacaoPlano(recursos), [recursos]);
 
   function abrir(plano?: PlanoMasterResumo) {
     setAba("geral");
@@ -273,9 +333,16 @@ export function PlanosMasterPainel({
         return;
       }
 
-      setMensagem({ tipo: "sucesso", texto: "Plano salvo com sucesso." });
+      const avisos = alertasCombinacaoPlano(recursos);
+      setMensagem({
+        tipo: "sucesso",
+        texto:
+          avisos.length > 0
+            ? `Plano salvo com sucesso. Atenção: ${avisos.map((item) => item.mensagem).join(" ")}`
+            : "Plano salvo com sucesso.",
+      });
       router.refresh();
-      window.setTimeout(() => setAberto(false), 400);
+      window.setTimeout(() => setAberto(false), avisos.length > 0 ? 1400 : 400);
     });
   }
 
@@ -285,8 +352,8 @@ export function PlanosMasterPainel({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-950">Planos</h1>
           <p className="mt-1 max-w-2xl text-sm text-zinc-500">
-            Configure preços, limites e recursos disponíveis para cada assinatura do
-            UltraPDV.
+            Organize o catálogo comercial por grupos. Cada recurso técnico continua
+            configurável individualmente e o enforcement segue as chaves já ativas.
           </p>
         </div>
         <button
@@ -353,6 +420,22 @@ export function PlanosMasterPainel({
             >
               {mensagem.texto}
             </p>
+          ) : null}
+
+          {alertas.length > 0 ? (
+            <div className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                Combinação a revisar
+              </p>
+              {alertas.map((alerta) => (
+                <p key={alerta.codigo} className="text-sm text-amber-900">
+                  {alerta.mensagem}
+                </p>
+              ))}
+              <p className="text-xs text-amber-700">
+                Isto não impede salvar. Os recursos continuam individuais.
+              </p>
+            </div>
           ) : null}
 
           <div className="flex gap-1 overflow-x-auto border-b border-zinc-200">
@@ -539,42 +622,32 @@ export function PlanosMasterPainel({
           ) : null}
 
           {aba === "recursos" ? (
-            <GrupoRecursos
-              categoria="comercial"
-              recursos={recursos}
-              onToggle={(chave, valor) =>
-                setRecursos((atual) => ({ ...atual, [chave]: valor }))
-              }
-            />
-          ) : null}
-
-          {aba === "fiscal" ? (
-            <div className="space-y-5">
-              <GrupoRecursos
-                categoria="fiscal"
-                recursos={recursos}
-                onToggle={(chave, valor) =>
-                  setRecursos((atual) => ({ ...atual, [chave]: valor }))
-                }
-              />
-              <GrupoRecursos
-                categoria="contabilidade"
-                recursos={recursos}
-                onToggle={(chave, valor) =>
-                  setRecursos((atual) => ({ ...atual, [chave]: valor }))
-                }
-              />
+            <div className="space-y-3">
+              <p className="text-xs text-zinc-500">
+                Os grupos são só organização comercial. Expandir um grupo para ligar
+                ou desligar cada chave técnica.
+              </p>
+              {GRUPOS_COMERCIAIS_PLANO.map((grupo, indice) => (
+                <GrupoComercialRecursos
+                  key={grupo.id}
+                  grupo={grupo}
+                  recursos={recursos}
+                  abertoPadrao={indice === 0}
+                  onToggle={(chave, valor) =>
+                    setRecursos((atual) => ({ ...atual, [chave]: valor }))
+                  }
+                  onToggleGrupo={(valor) =>
+                    setRecursos((atual) => {
+                      const proximo = { ...atual };
+                      for (const chave of grupo.chaves) {
+                        proximo[chave] = valor;
+                      }
+                      return proximo;
+                    })
+                  }
+                />
+              ))}
             </div>
-          ) : null}
-
-          {aba === "integracoes" ? (
-            <GrupoRecursos
-              categoria="integracoes"
-              recursos={recursos}
-              onToggle={(chave, valor) =>
-                setRecursos((atual) => ({ ...atual, [chave]: valor }))
-              }
-            />
           ) : null}
         </div>
       </AppModal>

@@ -179,6 +179,15 @@ test("exportação respeita filtro e empresa ativa", () => {
   );
   assert.equal(Buffer.isBuffer(buffer), true);
   assert.match(fonte("app/api/relatorios/exportar/route.ts"), /obterContextoRelatorio/);
+  const exportarRota = fonte("app/api/relatorios/exportar/route.ts");
+  const corpoExportar = exportarRota.slice(
+    exportarRota.indexOf("export async function GET")
+  );
+  assert.match(corpoExportar, /exigirOperacaoRelatorio/);
+  assert.ok(
+    corpoExportar.indexOf("exigirOperacaoRelatorio") <
+      corpoExportar.indexOf("carregarRelatorio")
+  );
   assert.match(fonte("lib/relatorios/contexto.ts"), /buscarVinculoEmpresaAtiva/);
   assert.doesNotMatch(fonte("app/api/relatorios/exportar/route.ts"), /empresa_id.*searchParams/);
 });
@@ -205,13 +214,25 @@ test("período padrão do relatório é o mês corrente", () => {
   assert.equal(janela.inicio.toISOString().startsWith("2026-08-01"), true);
 });
 
-test("menu Relatórios não cria permissão nova", () => {
+test("menu Relatórios usa permissão e plano, sem misturar com o Conector", () => {
   assert.match(fonte("lib/permissoes/menu.ts"), /href: "\/relatorios"/);
-  assert.match(fonte("lib/permissoes/menu.ts"), /visivel: \(\) => true/);
-  assert.doesNotMatch(
+  assert.match(
+    fonte("lib/permissoes/menu.ts"),
+    /temAcessoModulo\(p, "relatorios"\)/
+  );
+  assert.match(
     fonte("lib/permissoes/tipos.ts"),
-    /MODULOS_PERMISSAO = \[[^\]]*relatorios/
+    /relatorios: \["acessar", "exportar"\]/
   );
   assert.match(fonte("components/layout/app-sidebar.tsx"), /Relatórios/);
-  assert.match(fonte("lib/permissoes/rotas.ts"), /\/relatorios/);
+  assert.match(fonte("components/layout/app-sidebar.tsx"), /useRecursoLiberado\("relatorios"\)/);
+  assert.match(fonte("lib/permissoes/rotas.ts"), /modulo: "relatorios"/);
+  assert.doesNotMatch(
+    fonte("app/api/relatorios/exportar/route.ts"),
+    /impressao_automatica/
+  );
+  assert.doesNotMatch(
+    fonte("lib/relatorios/carregar.ts"),
+    /exigirRecursoEmpresa|exigirOperacaoRelatorio/
+  );
 });

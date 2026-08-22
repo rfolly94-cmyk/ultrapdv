@@ -1,6 +1,11 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import {
+  lojaPublicaIndisponivel,
+  planoCatalogoPublicoPermitido,
+  resolverEmpresaCatalogoPorSlug,
+} from "@/lib/catalogo/acesso-publico";
 import type { CatalogoPublicoResposta } from "@/lib/catalogo/tipos";
 import { validarSlug } from "@/lib/catalogo/regras";
 
@@ -11,6 +16,19 @@ export async function carregarCatalogoPublico(
 
   if (!validado.ok) {
     return { status: "nao_encontrado" };
+  }
+
+  const loja = await resolverEmpresaCatalogoPorSlug(validado.slug);
+  if (!loja) {
+    return { status: "nao_encontrado" };
+  }
+
+  const permitido = await planoCatalogoPublicoPermitido(loja.empresaId);
+  if (!permitido) {
+    return lojaPublicaIndisponivel({
+      nomeExibido: loja.nomeExibido,
+      slug: loja.slug,
+    });
   }
 
   const supabase = await createClient();

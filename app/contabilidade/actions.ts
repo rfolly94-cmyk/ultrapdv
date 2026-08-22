@@ -7,7 +7,8 @@ import { auditarCompetencia } from "@/lib/contabilidade/auditoria";
 import { parseCompetencia } from "@/lib/contabilidade/competencia";
 import { obterContextoContabilidade } from "@/lib/contabilidade/contexto";
 import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import { exigirOperacaoContabilidade } from "@/lib/contabilidade/acesso-operacao";
+import { resultadoErroEntitlement } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { registrarEventoContabilidade } from "@/lib/contabilidade/eventos";
 import { gerarSnapshotInventario } from "@/lib/contabilidade/inventario";
 
@@ -17,6 +18,23 @@ function voltar(caminho: string, tipo: "erro" | "sucesso", mensagem: string): ne
 
 export async function definirEmpresaAtiva(formData: FormData) {
   const ctx = await obterContextoContabilidade();
+
+  try {
+    await exigirOperacaoContabilidade({
+      empresaId: ctx.empresaId,
+      acao: "acessar",
+      origem: "definirEmpresaAtiva",
+    });
+  } catch (error) {
+    const entitlement = resultadoErroEntitlement(error);
+    if (entitlement) {
+      voltar("/contabilidade", "erro", entitlement.erro);
+    }
+    if (error instanceof ErroPermissao) {
+      voltar("/contabilidade", "erro", error.message);
+    }
+    throw error;
+  }
   const empresaId = String(formData.get("empresa_id") ?? "");
   const destino = String(formData.get("destino") ?? "/contabilidade");
 
@@ -50,8 +68,16 @@ export async function liberarCompetenciaAction(formData: FormData) {
   const ctx = await obterContextoContabilidade();
 
   try {
-    await exigirPermissao({ modulo: "contabilidade", acao: "fechamento" });
+    await exigirOperacaoContabilidade({
+      empresaId: ctx.empresaId,
+      acao: "fechamento",
+      origem: "liberarCompetenciaAction",
+    });
   } catch (error) {
+    const entitlement = resultadoErroEntitlement(error);
+    if (entitlement) {
+      voltar("/contabilidade/competencias", "erro", entitlement.erro);
+    }
     if (error instanceof ErroPermissao) {
       voltar("/contabilidade/competencias", "erro", error.message);
     }
@@ -128,8 +154,16 @@ export async function gerarInventarioAction(formData: FormData) {
   const ctx = await obterContextoContabilidade();
 
   try {
-    await exigirPermissao({ modulo: "contabilidade", acao: "inventario" });
+    await exigirOperacaoContabilidade({
+      empresaId: ctx.empresaId,
+      acao: "inventario",
+      origem: "gerarInventarioAction",
+    });
   } catch (error) {
+    const entitlement = resultadoErroEntitlement(error);
+    if (entitlement) {
+      voltar("/contabilidade/inventario", "erro", entitlement.erro);
+    }
     if (error instanceof ErroPermissao) {
       voltar("/contabilidade/inventario", "erro", error.message);
     }

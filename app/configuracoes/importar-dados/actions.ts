@@ -6,7 +6,11 @@ import { redirect } from "next/navigation";
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
 import { createClient } from "@/lib/supabase/server";
 import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  exigirAcessoOperacao,
+  exigirRecursoEmpresa,
+  resultadoErroEntitlement,
+} from "@/lib/plataforma/entitlements/exigir-recurso";
 import { classificarLinhasClientes } from "@/lib/importacao/clientes";
 import {
   executarLinhasClientes,
@@ -59,6 +63,16 @@ async function getContexto() {
     perfil: String(vinculo.perfil ?? ""),
     empresaNome: String(empresa?.nome_fantasia ?? ""),
   };
+}
+
+async function getContextoImportador() {
+  const contexto = await getContexto();
+  await exigirRecursoEmpresa({
+    empresaId: contexto.empresaId,
+    recurso: "importador",
+    origem: "configuracoes/importar-dados",
+  });
+  return contexto;
 }
 
 async function carregarTabela<T>(
@@ -176,9 +190,9 @@ function sanitizarConfig(config: ConfiguracaoImportacao): ConfiguracaoImportacao
 export async function previaImportacaoAction(
   configBruta: ConfiguracaoImportacao,
   linhas: LinhaPlanilha[]
-): Promise<{ ok: true; previa: ResultadoPreviaImportacao } | { ok: false; erro: string }> {
+): Promise<{ ok: true; previa: ResultadoPreviaImportacao } | { ok: false; erro: string; codigo?: "RECURSO_NAO_CONTRATADO" }> {
   try {
-    const { supabase, empresaId } = await getContexto();
+    const { supabase, empresaId } = await getContextoImportador();
     const config = sanitizarConfig(configBruta);
 
     if (!Array.isArray(linhas) || linhas.length > LIMITES_IMPORTACAO.maxLinhas) {
@@ -276,10 +290,15 @@ export async function previaImportacaoAction(
       }),
     };
   } catch (error) {
-    return {
-      ok: false,
-      erro: error instanceof Error ? error.message : "Falha ao revisar a importação.",
-    };
+    return (
+      resultadoErroEntitlement(error) ?? {
+        ok: false as const,
+        erro:
+          error instanceof Error
+            ? error.message
+            : "Falha ao revisar a importação.",
+      }
+    );
   }
 }
 
@@ -296,30 +315,28 @@ export async function confirmarImportacaoAction(
       erros: number;
       empresaNome: string;
     }
-  | { ok: false; erro: string }
+  | { ok: false; erro: string; codigo?: "RECURSO_NAO_CONTRATADO" }
 > {
-  const { supabase, empresaId, usuarioId, perfil, empresaNome } =
-    await getContexto();
-
   try {
-    await exigirPermissao({
+    const { supabase, empresaId, usuarioId, perfil, empresaNome } =
+      await getContexto();
+
+    await exigirAcessoOperacao({
+      empresaId,
+      recurso: "importador",
       modulo: "importacao_dados",
       acao:
         configBruta.tipo === "clientes"
           ? "importar_clientes"
           : "importar_produtos",
+      origem: "confirmarImportacaoAction",
     });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      return { ok: false, erro: error.message };
-    }
-    throw error;
-  }
-  const config = sanitizarConfig(configBruta);
-  let importacaoId: string | null = null;
 
-  try {
-    const previa = await previaImportacaoAction(config, linhas);
+    const config = sanitizarConfig(configBruta);
+    let importacaoId: string | null = null;
+
+    try {
+      const previa = await previaImportacaoAction(config, linhas);
     if (!previa.ok) {
       return previa;
     }
@@ -439,13 +456,23 @@ export async function confirmarImportacaoAction(
       erro: error instanceof Error ? error.message : "Falha ao confirmar a importação.",
     };
   }
+  } catch (error) {
+    const entitlement = resultadoErroEntitlement(error);
+    if (entitlement) {
+      return entitlement;
+    }
+    if (error instanceof ErroPermissao) {
+      return { ok: false, erro: error.message };
+    }
+    throw error;
+  }
 }
 
 export async function errosImportacaoAction(
   importacaoId: string
-): Promise<{ ok: true; erros: ErroHistoricoImportacao[] } | { ok: false; erro: string }> {
+): Promise<{ ok: true; erros: ErroHistoricoImportacao[] } | { ok: false; erro: string; codigo?: "RECURSO_NAO_CONTRATADO" }> {
   try {
-    const { supabase, empresaId } = await getContexto();
+    const { supabase, empresaId } = await getContextoImportador();
     const { data, error } = await supabase
       .from("importacoes_dados_erros")
       .select("id, numero_linha, erro, dados")
@@ -471,9 +498,11 @@ export async function errosImportacaoAction(
       })),
     };
   } catch (error) {
-    return {
-      ok: false,
-      erro: error instanceof Error ? error.message : "Falha ao carregar erros.",
-    };
+    return (
+      resultadoErroEntitlement(error) ?? {
+        ok: false as const,
+        erro: error instanceof Error ? error.message : "Falha ao carregar erros.",
+      }
+    );
   }
 }

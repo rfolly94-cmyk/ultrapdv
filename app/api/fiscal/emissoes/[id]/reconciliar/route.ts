@@ -4,9 +4,11 @@ export const runtime = "nodejs";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  capturaErroAutorizacaoFiscal,
+  exigirReconciliacaoDocumentoFiscal,
+} from "@/lib/fiscal/acesso-operacao";
 import { reconciliarEmissaoFiscal } from "@/lib/fiscal/reconciliar-emissao";
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 
 type RouteContext = {
   params: Promise<{
@@ -49,11 +51,29 @@ export async function POST(
       );
     }
 
+    const { data: emissao } = await admin
+      .from("fiscal_emissoes")
+      .select("modelo, status, resposta_resumo")
+      .eq("empresa_id", vinculo.empresa_id)
+      .eq("id", emissaoId)
+      .maybeSingle();
+
+    if (!emissao) {
+      return json({ ok: false, erro: "Emissão fiscal não encontrada." }, 404);
+    }
+
     try {
-      await exigirPermissao({ modulo: "fiscal", acao: "reconciliar" });
+      await exigirReconciliacaoDocumentoFiscal({
+        empresaId: String(vinculo.empresa_id),
+        modelo: emissao.modelo,
+        status: emissao.status,
+        resposta_resumo: emissao.resposta_resumo,
+        origem: "reconciliar-emissao",
+      });
     } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return json({ ok: false, erro: error.message }, error.status);
+      const authz = capturaErroAutorizacaoFiscal(error);
+      if (authz) {
+        return json({ ok: false, erro: authz.mensagem }, authz.status);
       }
       throw error;
     }

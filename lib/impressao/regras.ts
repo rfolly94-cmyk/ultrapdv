@@ -185,7 +185,12 @@ export function decidirDestinoImpressaoAutomatica(input: {
     emissaoId?: string | null;
     danfeDisponivel?: boolean;
   } | null;
+  conectorPermitido?: boolean;
 }): DestinoImpressaoAutomatica {
+  if (input.conectorPermitido === false) {
+    return { tipo: "nenhum" };
+  }
+
   const destino = decidirDocumentoImpressao(input);
   if (destino.tipo === "nenhum") {
     return destino;

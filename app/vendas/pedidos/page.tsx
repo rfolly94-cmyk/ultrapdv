@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { PedidosOnlineWorkspace } from "@/components/vendas/pedidos-online-workspace";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { createClient } from "@/lib/supabase/server";
 import type { CatalogoPedido } from "@/lib/catalogo/tipos";
 
@@ -29,6 +32,25 @@ export default async function PedidosOnlinePage() {
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const empresaId = String(vinculo.empresa_id);
+  const plano = await planoPermiteRecursoEmpresa(empresaId, "catalogo");
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(empresaId);
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Pedidos online"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. A administração de pedidos do catálogo online está disponível em planos que incluem este recurso. Pedidos já recebidos não são apagados."
+            planoNome={entitlements.planoNome}
+            voltarHref="/vendas"
+            voltarLabel="Voltar para Vendas"
+          />
+        </div>
+      </main>
+    );
   }
 
   const { data: pedidos, error } = await supabase

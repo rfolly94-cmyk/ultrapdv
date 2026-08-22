@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 import { imprimirUrlPdfNoUltraPdvConector } from "@/lib/impressao/imprimir-pdf";
-import { MENSAGEM_CONECTOR_AUSENTE } from "@/lib/impressao/mensagens";
+import { MENSAGEM_CONECTOR_AUSENTE, MENSAGEM_CONECTOR_NAO_CONTRATADO } from "@/lib/impressao/mensagens";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type Props = {
   pdfUrl: string;
@@ -30,8 +31,16 @@ export function BotaoImprimirConector({
     "idle"
   );
   const [mensagem, setMensagem] = useState<string | null>(null);
+  const conectorLiberado = useRecursoLiberado("impressao_automatica");
 
   async function imprimir() {
+    if (!conectorLiberado) {
+      setStatus("falha");
+      setMensagem(MENSAGEM_CONECTOR_NAO_CONTRATADO);
+      onResultado?.(false, MENSAGEM_CONECTOR_NAO_CONTRATADO);
+      return;
+    }
+
     setStatus("imprimindo");
     setMensagem(null);
     const resultado = await imprimirUrlPdfNoUltraPdvConector({

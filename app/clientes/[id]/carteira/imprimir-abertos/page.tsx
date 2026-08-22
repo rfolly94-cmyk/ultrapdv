@@ -1,8 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 
 import { ControlesImpressao } from "@/components/impressao/controles-impressao";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { itensEmAbertoParaImpressao } from "@/lib/carteira/cancelar-itens";
 import { dataDaVendaCarteira } from "@/lib/carteira/periodo";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +55,29 @@ export default async function ImprimirItensAbertosCarteiraPage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "carteira"
+  );
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Carteira"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. A impressão de itens em aberto da carteira faz parte deste recurso."
+            planoNome={entitlements.planoNome}
+            voltarHref="/clientes"
+            voltarLabel="Voltar para clientes"
+          />
+        </div>
+      </main>
+    );
   }
 
   const [

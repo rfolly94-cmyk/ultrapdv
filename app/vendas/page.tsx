@@ -17,6 +17,9 @@ import {
   resolverPeriodoListaVendas,
   vendaNoPeriodoLista,
 } from "@/lib/vendas/periodo-lista";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { resolverOrigemVendaComercial } from "@/lib/vendas/resolver-rota-edicao-venda";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +82,29 @@ export default async function VendasPage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "vendas"
+  );
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Vendas"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. Lista, detalhe, edição e cancelamento humanos de vendas estão disponíveis em planos que incluem este recurso. O PDV continua finalizando vendas, e estoque, pagamentos, carteira e emissão fiscal seguem pelos recursos correspondentes. As vendas já registradas não são apagadas."
+            planoNome={entitlements.planoNome}
+            voltarHref="/pdv"
+            voltarLabel="Ir ao PDV"
+          />
+        </div>
+      </main>
+    );
   }
 
   const { data: fiscalEmpresa } = await supabase

@@ -4,6 +4,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type ProdutoOption = {
   id: string;
@@ -62,6 +63,7 @@ export function EmissaoTesteClient({
         produtoId,
       ]
     );
+  const nfceLiberada = useRecursoLiberado("nfce");
 
   function selecionarProduto(
     novoProdutoId: string
@@ -302,19 +304,25 @@ export function EmissaoTesteClient({
         </div>
       </div>
 
-      <button
-        type="button"
-        disabled={
-          carregando ||
-          !produtoId
-        }
-        onClick={emitir}
-        className="rounded-lg bg-black px-5 py-3 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {carregando
-          ? "Transmitindo..."
-          : "Emitir NFC-e em homologação"}
-      </button>
+      {nfceLiberada ? (
+        <button
+          type="button"
+          disabled={
+            carregando ||
+            !produtoId
+          }
+          onClick={emitir}
+          className="rounded-lg bg-black px-5 py-3 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {carregando
+            ? "Transmitindo..."
+            : "Emitir NFC-e em homologação"}
+        </button>
+      ) : (
+        <p className="text-sm text-zinc-600">
+          A emissão de NFC-e não está incluída no plano atual da sua empresa.
+        </p>
+      )}
 
       {idempotencia ? (
         <div

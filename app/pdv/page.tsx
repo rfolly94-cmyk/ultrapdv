@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { PdvIndisponivelAssinatura } from "@/components/assinatura/pdv-indisponivel";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { createClient } from "@/lib/supabase/server";
 import { PdvShell } from "@/components/pdv/pdv-shell";
 import { carregarPedidoParaPdv } from "@/lib/catalogo/carregar-pedido-pdv";
@@ -11,6 +12,8 @@ import {
   classificarIntegracaoPix,
   pixConfigPublicoPdv,
 } from "@/lib/pagamentos/pix/modo-ativo";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { filtrarFormasPagamentoCheckoutPdv } from "@/lib/pdv/formas-pagamento-checkout";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import { resolverAssinaturaEmpresa } from "@/lib/assinatura/resolver-assinatura-empresa";
@@ -69,6 +72,29 @@ export default async function PdvPage({
   const assinatura = await resolverAssinaturaEmpresa(String(vinculo.empresa_id));
   if (!assinatura.operacional) {
     return <PdvIndisponivelAssinatura />;
+  }
+
+  const planoPdv = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "pdv"
+  );
+  if (!planoPdv.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="PDV"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. O caixa, a finalização e a edição de venda pelo PDV estão disponíveis em planos que incluem este recurso. Vendas já registradas, estoque, carteira, PIX, impressão e emissão fiscal continuam nos recursos correspondentes."
+            planoNome={entitlements.planoNome}
+            voltarHref="/painel"
+            voltarLabel="Voltar ao início"
+          />
+        </div>
+      </main>
+    );
   }
 
   const empresa =
@@ -217,6 +243,15 @@ export default async function PdvPage({
       )
     : null;
 
+  const planoPix = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "pix_integrado"
+  );
+  const planoNfce = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "nfce"
+  );
+
   const usuarioNome =
     String(usuarioResult.data?.nome ?? "").trim() ||
     (await obterRotuloUsuarioSessao());
@@ -252,7 +287,10 @@ export default async function PdvPage({
       pixConfig={pixConfigPublicoPdv(
         classificarIntegracaoPix(pixResult.data)
       )}
-      emitirNfceAutomaticoPdv={emitirNfceAutomaticoPdv}
+      pixIntegradoLiberado={planoPix.permitido}
+      emitirNfceAutomaticoPdv={
+        emitirNfceAutomaticoPdv && planoNfce.permitido
+      }
       ambienteFiscal={ambienteFiscal}
     />
   );

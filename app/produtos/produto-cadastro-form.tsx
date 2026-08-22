@@ -19,6 +19,7 @@ import {
   cadastrarProduto,
 } from "./actions";
 import { ProdutoCatalogoCampos } from "./produto-catalogo-campos";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import {
   ORIGENS_MERCADORIA,
 } from "@/lib/fiscal/tabelas-fiscais";
@@ -136,6 +137,7 @@ export function ProdutoFormCampos({
   const unidadeInicial =
     produto?.unidade_medida || UNIDADE_MEDIDA_PADRAO;
   const [unidade, setUnidade] = useState(unidadeInicial);
+  const catalogoNoPlano = useRecursoLiberado("catalogo");
 
   const unidades = useMemo(() => {
     if (
@@ -303,7 +305,7 @@ export function ProdutoFormCampos({
           </div>
         )}
 
-      <ProdutoCatalogoCampos produto={produto} />
+      {catalogoNoPlano ? <ProdutoCatalogoCampos produto={produto} /> : null}
 
       <details
         className="md:col-span-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4"

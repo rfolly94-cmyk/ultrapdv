@@ -12,6 +12,7 @@ export const MODULOS_PERMISSAO = [
   "usuarios",
   "catalogo",
   "importacao_dados",
+  "relatorios",
 ] as const;
 
 export type ModuloPermissao = (typeof MODULOS_PERMISSAO)[number];
@@ -58,6 +59,7 @@ export const ACOES_POR_MODULO = {
   usuarios: ["acessar", "criar", "editar", "desativar", "alterar_permissoes"],
   catalogo: ["acessar", "configurar", "pedidos"],
   importacao_dados: ["acessar", "importar_produtos", "importar_clientes"],
+  relatorios: ["acessar", "exportar"],
 } as const;
 
 export type AcaoDoModulo<M extends ModuloPermissao> =
@@ -93,6 +95,7 @@ export const MODULO_LABEL: Record<ModuloPermissao, string> = {
   usuarios: "Usuários",
   catalogo: "Catálogo Online",
   importacao_dados: "Importação de dados",
+  relatorios: "Relatórios",
 };
 
 export const ACAO_LABEL: Record<string, string> = {
@@ -131,6 +134,7 @@ export const ACAO_LABEL: Record<string, string> = {
   pedidos: "Pedidos",
   importar_produtos: "Importar produtos",
   importar_clientes: "Importar clientes",
+  exportar: "Exportar",
 };
 
 export function ehModuloPermissao(valor: string): valor is ModuloPermissao {

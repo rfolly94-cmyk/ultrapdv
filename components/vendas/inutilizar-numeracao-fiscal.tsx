@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type Props = {
   emissaoId: string;
@@ -41,6 +42,7 @@ export function InutilizarNumeracaoFiscal({
   eventoPendente = false,
 }: Props) {
   const router = useRouter();
+  const inutilizacaoLiberada = useRecursoLiberado("inutilizacao_fiscal");
   const [aberto, setAberto] = useState(false);
   const [justificativa, setJustificativa] = useState(
     "Numeração descartada antes da autorização fiscal."
@@ -190,17 +192,19 @@ export function InutilizarNumeracaoFiscal({
               {enviando ? "Consultando..." : "Consultar inutilização"}
             </button>
           )}
-          <button
-            type="button"
-            disabled={enviando || eventoPendente}
-            onClick={() => {
-              setAberto(true);
-              setToast(null);
-            }}
-            className="inline-flex h-10 items-center justify-center rounded-xl bg-violet-800 px-4 text-sm font-semibold text-white hover:bg-violet-900 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Inutilizar numeração
-          </button>
+          {inutilizacaoLiberada ? (
+            <button
+              type="button"
+              disabled={enviando || eventoPendente}
+              onClick={() => {
+                setAberto(true);
+                setToast(null);
+              }}
+              className="inline-flex h-10 items-center justify-center rounded-xl bg-violet-800 px-4 text-sm font-semibold text-white hover:bg-violet-900 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Inutilizar numeração
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -224,7 +228,7 @@ export function InutilizarNumeracaoFiscal({
         </div>
       )}
 
-      {aberto && (
+      {aberto && inutilizacaoLiberada && (
         <div className="mt-4 rounded-xl border border-violet-300 bg-white p-4">
           <p className="font-semibold text-zinc-950">
             Inutilizar {nome} nº {numero}, série {serie}?

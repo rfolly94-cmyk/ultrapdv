@@ -10,6 +10,10 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
+import {
+  capturaErroAutorizacaoFiscal,
+  exigirEmissaoNfe,
+} from "@/lib/fiscal/acesso-operacao";
 
 import {
   montarItemGeranet,
@@ -215,6 +219,19 @@ export async function POST(
         "Empresa ativa não encontrada.",
         403
       );
+    }
+
+    try {
+      await exigirEmissaoNfe({
+        empresaId: String(vinculo.empresa_id),
+        origem: "nfe55-emitir",
+      });
+    } catch (error) {
+      const authz = capturaErroAutorizacaoFiscal(error);
+      if (authz) {
+        return erro(authz.mensagem, authz.status);
+      }
+      throw error;
     }
 
     const empresaId =

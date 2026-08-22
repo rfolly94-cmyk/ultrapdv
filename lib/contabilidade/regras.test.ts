@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { perfilUsuarioValido } from "../usuarios/perfis";
+import { presetDoPerfil } from "../permissoes/presets";
+import { temPermissao } from "../permissoes/tem-permissao";
 import {
   ehContador,
   podeAcessarContabilidade,
@@ -28,7 +30,7 @@ import { montarItensInventario } from "./inventario";
 import { criarZip } from "./zip";
 
 test("A. administrador acessa contabilidade da própria empresa", () => {
-  assert.equal(podeAcessarContabilidade("administrador"), true);
+  assert.equal(podeAcessarContabilidade(presetDoPerfil("administrador")), true);
   assert.equal(ehContador("administrador"), false);
 });
 
@@ -39,13 +41,13 @@ test("perfil contador é lowercase e válido no TypeScript", () => {
 });
 
 test("B. contador vinculado acessa o módulo", () => {
-  assert.equal(podeAcessarContabilidade("contador"), true);
+  assert.equal(podeAcessarContabilidade(presetDoPerfil("contador")), true);
   assert.equal(ehContador("contador"), true);
 });
 
-test("C/D. acesso depende do vínculo explícito e do perfil", () => {
-  assert.equal(podeAcessarContabilidade("vendedor"), false);
-  assert.equal(podeAcessarContabilidade(""), false);
+test("C/D. acesso depende da permissão do vínculo, não do nome do perfil", () => {
+  assert.equal(podeAcessarContabilidade(presetDoPerfil("vendedor")), false);
+  assert.equal(podeAcessarContabilidade(null), false);
 });
 
 test("L. contador não opera PDV, estoque, caixa, emissão ou cancelamento", () => {
@@ -68,9 +70,9 @@ test("L. contador não opera PDV, estoque, caixa, emissão ou cancelamento", () 
     false
   );
   assert.equal(rotaPermitidaContador("/api/fiscal/geranet/nfe-emitir"), false);
-  assert.equal(podeLiberarCompetencia("contador"), false);
-  assert.equal(podeGerarInventario("contador"), false);
-  assert.equal(podeLiberarCompetencia("administrador"), true);
+  assert.equal(podeLiberarCompetencia(presetDoPerfil("contador")), true);
+  assert.equal(podeGerarInventario(presetDoPerfil("contador")), true);
+  assert.equal(podeLiberarCompetencia(presetDoPerfil("administrador")), true);
 });
 
 test("competência Agosto/2026 usa o mês civil em America/Sao_Paulo", () => {
@@ -170,11 +172,17 @@ test("F. recuperação de XML ausente usa obterDocumentoFiscal e nunca /nfe/emit
   assert.doesNotMatch(fonte, /nfe\/emitir|nfce-emitir|nfe55-emitir/);
 });
 
-test("K. só admin/gerente libera competência e registra usuário", () => {
-  assert.equal(podeLiberarCompetencia("administrador"), true);
-  assert.equal(podeLiberarCompetencia("gerente"), true);
-  assert.equal(podeLiberarCompetencia("contador"), false);
-  assert.equal(podeLiberarCompetencia("fiscal"), false);
+test("K. fechamento e inventário seguem a matriz de permissões", () => {
+  assert.equal(podeLiberarCompetencia(presetDoPerfil("administrador")), true);
+  assert.equal(podeLiberarCompetencia(presetDoPerfil("gerente")), true);
+  assert.equal(podeLiberarCompetencia(presetDoPerfil("contador")), true);
+  assert.equal(podeLiberarCompetencia(presetDoPerfil("vendedor")), false);
+  assert.equal(
+    temPermissao(presetDoPerfil("caixa"), "contabilidade", "fechamento"),
+    false
+  );
+  assert.equal(podeGerarInventario(presetDoPerfil("gerente")), true);
+  assert.equal(podeGerarInventario(presetDoPerfil("caixa")), false);
 });
 
 test("ZIP gerado é arquivo PK e não inclui certificado", () => {

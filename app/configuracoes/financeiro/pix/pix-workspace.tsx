@@ -18,6 +18,7 @@ import {
   ambientesSuportadosDoProvedor,
 } from "@/lib/pagamentos/pix/provedores";
 import type { CobrancaPixPublica, ModoPix } from "@/lib/pagamentos/pix/types";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { salvarConfiguracaoPix } from "./actions";
 import { PixLocalPanel } from "./pix-local-panel";
 
@@ -27,6 +28,7 @@ type FlagsCredenciais = Record<
 >;
 
 type Props = {
+  pixIntegradoLiberado?: boolean;
   integracao: {
     modo: ModoPix;
     provedor: string | null;
@@ -53,7 +55,11 @@ type RespostaApi = {
   txid?: string;
 };
 
-export function PixGeranetWorkspace({ integracao, cobrancas }: Props) {
+export function PixGeranetWorkspace({
+  pixIntegradoLiberado = true,
+  integracao,
+  cobrancas,
+}: Props) {
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -78,9 +84,12 @@ export function PixGeranetWorkspace({ integracao, cobrancas }: Props) {
   const [arquivosLocais, setArquivosLocais] = useState<Record<string, string>>(
     {}
   );
-  const [modo, setModo] = useState<ModoPix>(
-    integracao?.modo === "local_manual" ? "local_manual" : "geranet"
-  );
+  const [modo, setModo] = useState<ModoPix>(() => {
+    if (!pixIntegradoLiberado) {
+      return "local_manual";
+    }
+    return integracao?.modo === "local_manual" ? "local_manual" : "geranet";
+  });
 
   const formulario = useMemo(
     () => formularioCredenciaisProvedor(provedor, ambiente),
@@ -216,7 +225,12 @@ export function PixGeranetWorkspace({ integracao, cobrancas }: Props) {
               type="radio"
               name="modo_pix_ui"
               checked={modo === "geranet"}
-              onChange={() => setModo("geranet")}
+              disabled={!pixIntegradoLiberado}
+              onChange={() => {
+                if (pixIntegradoLiberado) {
+                  setModo("geranet");
+                }
+              }}
               className="mt-1"
             />
             <span>
@@ -229,6 +243,12 @@ export function PixGeranetWorkspace({ integracao, cobrancas }: Props) {
             </span>
           </label>
         </div>
+        {!pixIntegradoLiberado ? (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+            PIX Integrado não está incluído no plano atual. O PIX Local / Manual
+            continua disponível.
+          </p>
+        ) : null}
       </section>
 
       {modo === "local_manual" ? (
@@ -241,7 +261,7 @@ export function PixGeranetWorkspace({ integracao, cobrancas }: Props) {
             setSucesso(ok);
           }}
         />
-      ) : (
+      ) : pixIntegradoLiberado ? (
         <>
       <form
         onSubmit={salvar}
@@ -618,6 +638,13 @@ export function PixGeranetWorkspace({ integracao, cobrancas }: Props) {
         </section>
       )}
         </>
+      ) : (
+        <RecursoNaoContratado
+          titulo="PIX integrado"
+          descricao="Este recurso não está disponível no plano atual da sua empresa. O PIX Local / Manual continua disponível."
+          voltarHref="/configuracoes/financeiro/pix"
+          voltarLabel="Usar PIX Local"
+        />
       )}
     </div>
   );

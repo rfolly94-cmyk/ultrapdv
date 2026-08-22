@@ -18,6 +18,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EstoqueModuleTabs } from "@/components/estoque/estoque-module-tabs";
 import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 import {
   atualizarLimitesEstoque,
@@ -147,6 +148,7 @@ export function EstoqueWorkspace({
   const router = useRouter();
   const podeMovimentar = useTemPermissao("estoque", "movimentar");
   const podeAjustar = useTemPermissao("estoque", "ajustar");
+  const importadorNoPlano = useRecursoLiberado("importador");
   const ehAdmin = podeMovimentar || podeAjustar;
 
   const [busca, setBusca] = useState("");
@@ -396,12 +398,14 @@ export function EstoqueWorkspace({
           .filter(Boolean)
           .join(" · ")}
         actions={
-          <a
-            href="/configuracoes/importar-dados?tipo=produtos"
-            className="updv-btn updv-btn-ghost"
-          >
-            Importar produtos
-          </a>
+          importadorNoPlano ? (
+            <a
+              href="/configuracoes/importar-dados?tipo=produtos"
+              className="updv-btn updv-btn-ghost"
+            >
+              Importar produtos
+            </a>
+          ) : null
         }
       />
       <EstoqueModuleTabs />

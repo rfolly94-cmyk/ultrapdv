@@ -14,6 +14,7 @@ import { PageAlert } from "@/components/ui/page-alert";
 import { PageHeader } from "@/components/ui/page-header";
 import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 
 type PageProps = {
   searchParams: Promise<{
@@ -50,6 +51,14 @@ export default async function GruposFiscaisPage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "produtos"
+  );
+  if (!plano.permitido) {
+    return null;
   }
 
   const {

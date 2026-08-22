@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { createClient } from "@/lib/supabase/server";
 import { EstoqueWorkspace } from "../../components/estoque/estoque-workspace";
 
@@ -40,6 +41,14 @@ export default async function EstoquePage() {
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "estoque"
+  );
+  if (!plano.permitido) {
+    return null;
   }
 
   const empresa =

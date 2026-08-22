@@ -5,6 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { carenciaValida } from "@/lib/assinatura/empresa-pode-operar";
 import { resolverAssinaturaEmpresaAtiva } from "@/lib/assinatura/resolver-assinatura-empresa";
 import { obterIdentidadeEmpresaSessao } from "@/lib/empresa/identidade-sessao";
+import { mapaRecursosLiberadosEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import {
   obterPerfilSessao,
@@ -44,6 +45,10 @@ export default async function RootLayout({
     obterPermissoesSessao(),
   ]);
 
+  const recursosLiberados = sessaoPermissoes?.empresaId
+    ? await mapaRecursosLiberadosEmpresa(sessaoPermissoes.empresaId)
+    : null;
+
   let assinaturaSessao = null;
   let falhaAssinatura = false;
   try {
@@ -69,6 +74,7 @@ export default async function RootLayout({
           identidade={identidade}
           usuario={usuario}
           permissoes={sessaoPermissoes?.permissoes ?? null}
+          recursosLiberados={recursosLiberados}
           assinaturaOperacional={
             falhaAssinatura ? false : (assinaturaSessao?.operacional ?? true)
           }

@@ -9,6 +9,10 @@ import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacio
 import { exigirEmpresaOperacional } from "@/lib/assinatura/exigir-empresa-operacional";
 import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 import { ErroPermissao } from "@/lib/permissoes/erro";
+import {
+  exigirOperacaoPdv,
+  resultadoNegacaoPdv,
+} from "@/lib/pdv/acesso-operacao";
 
 type FinalizarVendaPdvInput = {
   idempotencyKey: string;
@@ -40,6 +44,7 @@ type FinalizarVendaPdvResultado =
   | {
       ok: false;
       erro: string;
+      codigo?: "RECURSO_NAO_CONTRATADO";
     };
 
 function uuidValido(
@@ -102,10 +107,15 @@ export async function finalizarVendaPdv(
     }
 
     try {
-      await exigirPermissao({ modulo: "pdv", acao: "finalizar_venda" });
+      await exigirOperacaoPdv({
+        empresaId: String(vinculo.empresa_id),
+        acao: "finalizar_venda",
+        origem: "finalizarVendaPdv",
+      });
     } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return { ok: false, erro: error.message };
+      const negacao = resultadoNegacaoPdv(error);
+      if (negacao) {
+        return negacao;
       }
       throw error;
     }

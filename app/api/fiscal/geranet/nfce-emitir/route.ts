@@ -17,6 +17,10 @@ import {
 import { obterLogomarcaFiscalHex } from "@/lib/empresa/obter-logomarca-fiscal-hex";
 import { resolverDestinatarioFiscalNfe } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
 import { aplicarContingenciaContratoGeranet } from "@/lib/fiscal/geranet/contingencia-contrato";
+import {
+  capturaErroAutorizacaoFiscal,
+  exigirEmissaoNfce,
+} from "@/lib/fiscal/acesso-operacao";
 
 import {
   montarItemGeranet,
@@ -283,8 +287,16 @@ export async function POST(
     }
 
     try {
+      await exigirEmissaoNfce({
+        empresaId: String(vinculo.empresa_id),
+        origem: "nfce-emitir",
+      });
       await exigirEmpresaOperacional(String(vinculo.empresa_id));
     } catch (error) {
+      const authz = capturaErroAutorizacaoFiscal(error);
+      if (authz) {
+        return erro(authz.mensagem, authz.status);
+      }
       if (error instanceof ErroAssinaturaRestrita) {
         return erro(error.message, 403);
       }

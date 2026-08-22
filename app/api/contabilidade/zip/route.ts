@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { podeAcessarContabilidade } from "@/lib/contabilidade/acesso";
+import {
+  exigirOperacaoContabilidade,
+  respostaNegacaoContabilidade,
+} from "@/lib/contabilidade/acesso-operacao";
 import { parseCompetencia } from "@/lib/contabilidade/competencia";
 import { obterContextoContabilidade } from "@/lib/contabilidade/contexto";
 import { registrarEventoContabilidade } from "@/lib/contabilidade/eventos";
@@ -13,8 +16,18 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const ctx = await obterContextoContabilidade();
 
-  if (!podeAcessarContabilidade(ctx.perfil)) {
-    return NextResponse.json({ erro: "Acesso negado." }, { status: 403 });
+  try {
+    await exigirOperacaoContabilidade({
+      empresaId: ctx.empresaId,
+      acao: "baixar_xml",
+      origem: "GET /api/contabilidade/zip",
+    });
+  } catch (error) {
+    const negacao = respostaNegacaoContabilidade(error);
+    if (negacao) {
+      return negacao;
+    }
+    throw error;
   }
 
   const competencia = parseCompetencia(

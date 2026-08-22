@@ -9,6 +9,7 @@ import {
 import {
   useRouter,
 } from "next/navigation";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type Props = {
   vendaId: string;
@@ -30,6 +31,7 @@ export function EmitirNfceContingenciaButton({
 }: Props) {
   const router =
     useRouter();
+  const nfceLiberada = useRecursoLiberado("nfce");
 
   const [
     aberto,
@@ -72,6 +74,10 @@ export function EmitirNfceContingenciaButton({
     useState<
       string | null
     >(null);
+
+  if (!nfceLiberada) {
+    return null;
+  }
 
   if (!habilitada) {
     return (

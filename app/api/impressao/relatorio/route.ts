@@ -1,6 +1,12 @@
+import { NextResponse } from "next/server";
+
 import { linhasRelatorioPdf } from "@/lib/impressao/linhas-relatorio";
 import { gerarPdfSimples } from "@/lib/impressao/pdf-simples";
 import { respostaPdf } from "@/lib/impressao/resposta-pdf";
+import {
+  exigirOperacaoRelatorio,
+  respostaNegacaoRelatorio,
+} from "@/lib/relatorios/acesso";
 import { carregarRelatorio } from "@/lib/relatorios/carregar";
 import { parseFiltrosRelatorio, obterContextoRelatorio } from "@/lib/relatorios/contexto";
 import { resolverPeriodoRelatorio } from "@/lib/relatorios/periodo";
@@ -14,6 +20,21 @@ export async function GET(request: Request) {
   params.exportar = "1";
   const filtros = parseFiltrosRelatorio(params);
   const ctx = await obterContextoRelatorio();
+
+  try {
+    await exigirOperacaoRelatorio({
+      empresaId: ctx.empresaId,
+      acao: "acessar",
+      origem: "GET /api/impressao/relatorio",
+    });
+  } catch (error) {
+    const negacao = respostaNegacaoRelatorio(error);
+    if (negacao) {
+      return negacao;
+    }
+    throw error;
+  }
+
   const janela = resolverPeriodoRelatorio(filtros.periodo, filtros.de, filtros.ate);
   const relatorio = await carregarRelatorio(filtros);
   const pdf = gerarPdfSimples({

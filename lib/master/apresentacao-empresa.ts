@@ -9,6 +9,9 @@ export const ROTULOS_EVENTO_EMPRESA: Record<string, string> = {
   plano_alterado: "Plano alterado",
   assinatura_cancelada: "Assinatura cancelada",
   vencimento_alterado: "Assinatura alterada",
+  plano_criado: "Plano criado",
+  plano_atualizado: "Plano atualizado",
+  plano_desativado: "Plano desativado",
 };
 
 export function formatarCnpjMaster(valor: string) {
@@ -50,10 +53,13 @@ export function detalheEventoAuditoriaEmpresa(dados: Record<string, unknown>) {
   const planoDe = textoCurto(dados.plano_de);
   const planoPara = textoCurto(dados.plano_para);
   const motivo = textoCurto(dados.motivo);
+  const nomePlano = textoCurto(dados.nome);
   const partes: string[] = [];
 
   if (planoDe || planoPara) {
     partes.push(`${planoDe || "—"} → ${planoPara || "—"}`);
+  } else if (nomePlano) {
+    partes.push(nomePlano);
   }
   if (motivo) {
     partes.push(`Motivo: ${motivo}`);

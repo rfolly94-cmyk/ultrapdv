@@ -6,6 +6,8 @@ import { gerarPixEstatico } from "@/lib/pagamentos/pix/brcode";
 import { gerarTxidPixLocal } from "@/lib/pagamentos/pix/brcode/txid";
 import { coletarNovosSegredosDoFormulario } from "@/lib/pagamentos/pix/coletar-segredos";
 import { exigirAdministradorPix } from "@/lib/pagamentos/pix/contexto";
+import { exigirPixIntegradoEmpresa } from "@/lib/pagamentos/pix/acesso-operacao";
+import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
 import {
   exigirPixLocalAtivo,
   garantirTrocaModoPixPermitida,
@@ -164,6 +166,18 @@ export async function salvarConfiguracaoPix(formData: FormData) {
   }
 
   const { supabase, empresaId } = await exigirAdministradorPix();
+
+  try {
+    await exigirPixIntegradoEmpresa({
+      empresaId,
+      origem: "salvarConfiguracaoPix",
+    });
+  } catch (error) {
+    if (error instanceof ErroEntitlement) {
+      return { ok: false as const, erro: error.message };
+    }
+    throw error;
+  }
 
   const provedor = texto(formData.get("provedor"));
   const ambiente = texto(formData.get("ambiente"));

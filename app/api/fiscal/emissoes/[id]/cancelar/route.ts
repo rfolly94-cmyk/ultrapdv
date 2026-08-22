@@ -27,8 +27,10 @@ import {
 } from "@/lib/fiscal/politica-cancelamento";
 
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  capturaErroAutorizacaoFiscal,
+  exigirCancelamentoDocumentoFiscal,
+} from "@/lib/fiscal/acesso-operacao";
 import {
   bloqueioCancelamentoDevolucaoFornecedor,
 } from "@/lib/fiscal/entrada/devolucao-status";
@@ -211,15 +213,6 @@ export async function POST(
       );
     }
 
-    try {
-      await exigirPermissao({ modulo: "fiscal", acao: "cancelar_nota" });
-    } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return erro(error.message, error.status);
-      }
-      throw error;
-    }
-
     const empresaId =
       vinculo.empresa_id;
 
@@ -304,6 +297,20 @@ export async function POST(
           "Emissão fiscal não encontrada.",
         404
       );
+    }
+
+    try {
+      await exigirCancelamentoDocumentoFiscal({
+        empresaId: String(empresaId),
+        modelo: emissao.modelo,
+        origem: "cancelar-documento-fiscal",
+      });
+    } catch (error) {
+      const authz = capturaErroAutorizacaoFiscal(error);
+      if (authz) {
+        return erro(authz.mensagem, authz.status);
+      }
+      throw error;
     }
 
     if (

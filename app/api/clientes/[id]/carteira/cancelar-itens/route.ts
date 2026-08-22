@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  exigirCancelamentoItensCarteira,
+  respostaNegacaoCarteira,
+} from "@/lib/carteira/acesso-operacao";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -65,12 +67,14 @@ async function contexto(clienteId: string) {
   }
 
   try {
-    await exigirPermissao({ modulo: "vendas", acao: "cancelar" });
+    await exigirCancelamentoItensCarteira({
+      empresaId: String(vinculo.empresa_id),
+      origem: "API /api/clientes/[id]/carteira/cancelar-itens",
+    });
   } catch (error) {
-    if (error instanceof ErroPermissao) {
-      return {
-        erro: resposta({ ok: false, erro: error.message }, error.status),
-      };
+    const negacao = respostaNegacaoCarteira(error);
+    if (negacao) {
+      return { erro: negacao };
     }
     throw error;
   }

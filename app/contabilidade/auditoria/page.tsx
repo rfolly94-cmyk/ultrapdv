@@ -5,7 +5,7 @@ import {
   chaveCompetencia,
   parseCompetencia,
 } from "@/lib/contabilidade/competencia";
-import { obterContextoContabilidade } from "@/lib/contabilidade/contexto";
+import { obterContextoContabilidade, planoContabilidadePermitidoNaSessao } from "@/lib/contabilidade/contexto";
 
 export const metadata = {
   title: "Auditoria fiscal",
@@ -19,6 +19,10 @@ export default async function ContabilidadeAuditoriaPage({
   searchParams,
 }: PageProps) {
   const params = await searchParams;
+  const plano = await planoContabilidadePermitidoNaSessao();
+  if (!plano.permitido) {
+    return null;
+  }
   const ctx = await obterContextoContabilidade();
   const competencia = parseCompetencia(params.competencia);
   const resultado = await auditarCompetencia(

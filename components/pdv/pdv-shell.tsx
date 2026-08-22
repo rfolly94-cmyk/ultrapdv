@@ -57,6 +57,8 @@ import {
 import { nomeProvedorPix } from "@/lib/pagamentos/pix/provedores-geranet";
 import type { PedidoPdvInicial } from "@/lib/catalogo/tipos";
 import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
+import { MENSAGEM_CONECTOR_NAO_CONTRATADO } from "@/lib/impressao/mensagens";
 import {
   decidirQrAposMudancaValorGeranet,
   MENSAGEM_PIX_GERANET_AGUARDANDO,
@@ -193,6 +195,7 @@ type Props = {
   formasPagamento: FormaPagamento[];
   pedidoInicial?: PedidoPdvInicial | null;
   pixConfig?: PixConfigPdv;
+  pixIntegradoLiberado?: boolean;
   emitirNfceAutomaticoPdv?: boolean;
   ambienteFiscal?: 1 | 2;
 };
@@ -383,12 +386,14 @@ export function PdvShell({
   formasPagamento,
   pedidoInicial = null,
   pixConfig = null,
+  pixIntegradoLiberado = true,
   emitirNfceAutomaticoPdv = false,
   ambienteFiscal = 2,
 }: Props) {
   const router = useRouter();
   const podeDesconto = useTemPermissao("pdv", "aplicar_desconto");
   const podeFiado = useTemPermissao("pdv", "usar_fiado");
+  const conectorLiberado = useRecursoLiberado("impressao_automatica");
   const [
     busca,
     setBusca,
@@ -597,12 +602,25 @@ export function PdvShell({
     fiscal: FiscalUltimaVenda | null,
     forcar = false
   ) {
+    if (!conectorLiberado) {
+      if (forcar) {
+        setImpressaoPos({
+          status: "falha",
+          erro: MENSAGEM_CONECTOR_NAO_CONTRATADO,
+          mensagem: null,
+          destino: { tipo: "nenhum" },
+        });
+      }
+      return false;
+    }
+
     const destino = forcar
       ? decidirDocumentoImpressao({ vendaId, fiscal })
       : decidirDestinoImpressaoAutomatica({
           configs: configsImpressao,
           vendaId,
           fiscal,
+          conectorPermitido: true,
         });
     if (destino.tipo === "nenhum") {
       return false;
@@ -620,6 +638,7 @@ export function PdvShell({
         destino,
         configs: configsImpressao,
         forcar: true,
+        conectorPermitido: conectorLiberado,
       });
       if ("pulou" in resultado && resultado.pulou) {
         setImpressaoPos({
@@ -870,7 +889,8 @@ export function PdvShell({
 
   const pixLocalAtivo = pixConfig?.modo === "local_manual";
 
-  const pixGeranetAtivo = pixConfig?.modo === "geranet";
+  const pixGeranetAtivo =
+    pixConfig?.modo === "geranet" && pixIntegradoLiberado;
   const pixProvedorNome =
     pixGeranetAtivo && pixConfig.provedor
       ? nomeProvedorPix(pixConfig.provedor)

@@ -55,6 +55,8 @@ test("PDV reutiliza a rota existente de NFC-e 65 após o sucesso comercial", () 
   assert.match(paginaPdv, /fiscal_nfce_config/);
   assert.match(paginaPdv, /registroPertenceAEmpresaAtiva/);
   assert.match(paginaPdv, /emitirNfceAutomaticoPdv/);
+  assert.match(paginaPdv, /planoPermiteRecursoEmpresa/);
+  assert.match(paginaPdv, /"nfce"/);
 });
 
 test("navegação: PDV, Nova NF-e, Estoque → Nota de Entrada e sem item Fiscal no menu", () => {

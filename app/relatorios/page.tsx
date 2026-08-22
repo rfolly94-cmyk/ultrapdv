@@ -1,16 +1,21 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { redirect } from "next/navigation";
+
 import { RelatorioAcoes } from "@/components/relatorios/relatorio-acoes";
 import { RelatorioConteudo } from "@/components/relatorios/relatorio-conteudo";
 import { RelatorioFiltros } from "@/components/relatorios/relatorio-filtros";
 import { RelatorioImpressaoCabecalho } from "@/components/relatorios/relatorio-impressao-cabecalho";
 import { RelatorioResumo } from "@/components/relatorios/relatorio-resumo";
 import { RelatoriosAbas } from "@/components/relatorios/relatorios-abas";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { PageShell } from "@/components/layout/page-shell";
 import { DashboardBarChart } from "@/components/dashboard/dashboard-chart";
 import { DashboardSection } from "@/components/dashboard/dashboard-section";
 import { obterIdentidadeEmpresaSessao } from "@/lib/empresa/identidade-sessao";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { carregarRelatorio } from "@/lib/relatorios/carregar";
 import { parseFiltrosRelatorio } from "@/lib/relatorios/contexto";
 import { resolverPeriodoRelatorio } from "@/lib/relatorios/periodo";
@@ -44,12 +49,38 @@ function hrefComParams(
 
 export default async function RelatoriosPage({ searchParams }: PageProps) {
   const params = await searchParams;
+  const identidade = await obterIdentidadeEmpresaSessao();
+  if (!identidade?.empresaId) {
+    redirect("/login");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    identidade.empresaId,
+    "relatorios"
+  );
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(identidade.empresaId);
+    return (
+      <PageShell
+        title="Relatórios"
+        description="Acompanhe os resultados da empresa."
+      >
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Relatórios"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. Os relatórios gerenciais estão disponíveis em planos que incluem este recurso."
+            planoNome={entitlements.planoNome}
+            voltarHref="/painel"
+            voltarLabel="Voltar ao início"
+          />
+        </div>
+      </PageShell>
+    );
+  }
+
   const filtros = parseFiltrosRelatorio(params);
   const janela = resolverPeriodoRelatorio(filtros.periodo, filtros.de, filtros.ate);
-  const [relatorio, identidade] = await Promise.all([
-    carregarRelatorio(filtros),
-    obterIdentidadeEmpresaSessao(),
-  ]);
+  const relatorio = await carregarRelatorio(filtros);
 
   const totalPaginas = Math.max(
     1,

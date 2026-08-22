@@ -1,25 +1,26 @@
-export const PERFIS_CONTABILIDADE = [
-  "administrador",
-  "gerente",
-  "contador",
-] as const;
+import { temAcessoModulo, temPermissao } from "@/lib/permissoes/tem-permissao";
+import type { PermissoesEfetivas } from "@/lib/permissoes/tipos";
 
-export function podeAcessarContabilidade(perfil: string) {
-  return PERFIS_CONTABILIDADE.includes(
-    perfil as (typeof PERFIS_CONTABILIDADE)[number]
-  );
+export function podeAcessarContabilidade(
+  permissoes: PermissoesEfetivas | null | undefined
+) {
+  return temAcessoModulo(permissoes, "contabilidade");
+}
+
+export function podeLiberarCompetencia(
+  permissoes: PermissoesEfetivas | null | undefined
+) {
+  return temPermissao(permissoes, "contabilidade", "fechamento");
+}
+
+export function podeGerarInventario(
+  permissoes: PermissoesEfetivas | null | undefined
+) {
+  return temPermissao(permissoes, "contabilidade", "inventario");
 }
 
 export function ehContador(perfil: string) {
-  return perfil === "contador";
-}
-
-export function podeLiberarCompetencia(perfil: string) {
-  return perfil === "administrador" || perfil === "gerente";
-}
-
-export function podeGerarInventario(perfil: string) {
-  return perfil === "administrador" || perfil === "gerente";
+  return String(perfil ?? "").trim().toLowerCase() === "contador";
 }
 
 export function podeOperarErp(perfil: string) {

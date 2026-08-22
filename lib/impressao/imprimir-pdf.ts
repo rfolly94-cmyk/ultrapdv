@@ -1,3 +1,4 @@
+import { autorizarUsoConectorImpressaoAction } from "@/app/configuracoes/impressao/actions";
 import {
   baixarPdfComoBase64,
   enviarImpressaoAgente,
@@ -14,6 +15,7 @@ export type ResultadoImpressaoConector =
   | {
       ok: false;
       erro: string;
+      codigo?: "RECURSO_NAO_CONTRATADO";
     };
 
 export async function imprimirPdfNoUltraPdvConector(input: {
@@ -23,6 +25,15 @@ export async function imprimirPdfNoUltraPdvConector(input: {
   copias?: number;
   impressora?: string | null;
 }): Promise<ResultadoImpressaoConector> {
+  const autorizado = await autorizarUsoConectorImpressaoAction();
+  if (!autorizado.ok) {
+    return {
+      ok: false,
+      erro: autorizado.erro,
+      codigo: autorizado.codigo,
+    };
+  }
+
   const resultado = await enviarImpressaoAgente({
     tipoDocumento: String(input.tipoDocumento ?? "recibo").trim() || "recibo",
     impressora: String(input.impressora ?? "").trim(),
@@ -50,6 +61,15 @@ export async function imprimirUrlPdfNoUltraPdvConector(input: {
   copias?: number;
   impressora?: string | null;
 }): Promise<ResultadoImpressaoConector> {
+  const autorizado = await autorizarUsoConectorImpressaoAction();
+  if (!autorizado.ok) {
+    return {
+      ok: false,
+      erro: autorizado.erro,
+      codigo: autorizado.codigo,
+    };
+  }
+
   try {
     const pdfBase64 = await baixarPdfComoBase64(input.url);
     return imprimirPdfNoUltraPdvConector({

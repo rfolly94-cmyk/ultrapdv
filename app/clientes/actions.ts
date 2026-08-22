@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import { exigirOperacaoCliente } from "@/lib/clientes/acesso-operacao";
 import { createClient } from "@/lib/supabase/server";
 import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import type { AcaoDoModulo } from "@/lib/permissoes/tipos";
+import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
 
 async function getContexto() {
   const supabase = await createClient();
@@ -37,6 +39,28 @@ async function getContexto() {
     empresaId: vinculo.empresa_id,
     perfil: vinculo.perfil,
   };
+}
+
+async function exigirCliente(
+  empresaId: string,
+  acao: AcaoDoModulo<"clientes">,
+  origem: string
+) {
+  await exigirOperacaoCliente({
+    empresaId: String(empresaId),
+    acao,
+    origem,
+  });
+}
+
+function redirecionarNegacaoCliente(error: unknown): never {
+  if (error instanceof ErroPermissao && error.status === 401) {
+    redirect("/login");
+  }
+  if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+    voltarErro(error.message);
+  }
+  throw error;
 }
 
 function texto(
@@ -395,18 +419,14 @@ function validarCliente(
 export async function cadastrarCliente(
   formData: FormData
 ) {
-  try {
-    await exigirPermissao({ modulo: "clientes", acao: "criar" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      voltarErro(error.message);
-    }
-    throw error;
-  }
-
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirCliente(empresaId, "criar", "cadastrarCliente");
+  } catch (error) {
+    redirecionarNegacaoCliente(error);
+  }
 
   const dados =
     lerClienteForm(formData);
@@ -455,18 +475,14 @@ export async function cadastrarCliente(
 export async function editarCliente(
   formData: FormData
 ) {
-  try {
-    await exigirPermissao({ modulo: "clientes", acao: "editar" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      voltarErro(error.message);
-    }
-    throw error;
-  }
-
   const { supabase, empresaId } =
     await getContexto();
+
+  try {
+    await exigirCliente(empresaId, "editar", "editarCliente");
+  } catch (error) {
+    redirecionarNegacaoCliente(error);
+  }
 
   const id =
     texto(formData.get("id"));
@@ -523,20 +539,16 @@ export async function editarCliente(
 export async function excluirCliente(
   formData: FormData
 ) {
-  try {
-    await exigirPermissao({ modulo: "clientes", acao: "excluir" });
-  } catch (error) {
-    if (error instanceof ErroPermissao) {
-      if (error.status === 401) redirect("/login");
-      voltarErro(error.message);
-    }
-    throw error;
-  }
-
   const {
     supabase,
     empresaId,
   } = await getContexto();
+
+  try {
+    await exigirCliente(empresaId, "excluir", "excluirCliente");
+  } catch (error) {
+    redirecionarNegacaoCliente(error);
+  }
 
   const id =
     texto(formData.get("id"));

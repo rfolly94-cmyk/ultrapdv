@@ -1,11 +1,18 @@
 import { NextRequest } from "next/server";
 
+import { exigirPixIntegradoEmpresa } from "@/lib/pagamentos/pix/acesso-operacao";
+import { resolverEmpresaPix } from "@/lib/pagamentos/pix/contexto";
 import { emitirCobrancaPixPdv } from "@/lib/pagamentos/pix/geranet-pdv";
 import { rejeitarModoAdulteradoNoCliente } from "@/lib/pagamentos/pix/modo-ativo";
 import { erroPix, jsonPix } from "../../_shared";
 
 export async function POST(request: NextRequest) {
   try {
+    const { empresaId } = await resolverEmpresaPix();
+    await exigirPixIntegradoEmpresa({
+      empresaId,
+      origem: "POST /api/pagamentos/pix/geranet/pdv/emitir",
+    });
     const body = (await request.json()) as Record<string, unknown>;
     rejeitarModoAdulteradoNoCliente(body);
 

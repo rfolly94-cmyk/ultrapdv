@@ -9,6 +9,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { DocumentoFiscalContabil } from "@/lib/contabilidade/documentos";
 import { modeloFiscalRotulo } from "@/lib/contabilidade/regras";
+import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
 
 const moeda = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -31,6 +32,7 @@ export function ContabilidadeDocumentosLista({
   const [busca, setBusca] = useState("");
   const [modelo, setModelo] = useState("");
   const [status, setStatus] = useState("");
+  const podeBaixarXml = useTemPermissao("contabilidade", "baixar_xml");
 
   const filtrados = useMemo(() => {
     return documentos.filter((item) => {
@@ -129,7 +131,7 @@ export function ContabilidadeDocumentosLista({
                 <td>
                   <RowActions
                     extra={
-                      podeArquivo ? (
+                      podeBaixarXml && podeArquivo ? (
                         <a
                           href={`/api/fiscal/emissoes/${doc.id}/arquivo?tipo=xml&download=1`}
                           className="updv-btn-row"
@@ -147,7 +149,7 @@ export function ContabilidadeDocumentosLista({
                       {
                         label: "Baixar XML",
                         href: `/api/fiscal/emissoes/${doc.id}/arquivo?tipo=xml&download=1`,
-                        hidden: !podeArquivo,
+                        hidden: !podeArquivo || !podeBaixarXml,
                       },
                       {
                         label: "XML de cancelamento",

@@ -34,9 +34,12 @@ import {
 import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
 import { consolidarEvidencia539 } from "@/lib/fiscal/geranet/cstat";
 import { ultimaTentativaFiscal } from "@/lib/fiscal/emissao-tentativas";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { nomeProvedorPix } from "@/lib/pagamentos/pix/provedores-geranet";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import {
   conferenciaFinanceiraVenda,
   filtrarPagamentosFinanceiros,
@@ -164,6 +167,29 @@ export default async function VendaDetalhePage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "vendas"
+  );
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Vendas"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. A visualização do histórico comercial de vendas está disponível em planos que incluem este recurso. As vendas já registradas não são apagadas. Emissão fiscal, recibo e DANFE continuam nos recursos fiscais correspondentes, e o PDV segue independente."
+            planoNome={entitlements.planoNome}
+            voltarHref="/pdv"
+            voltarLabel="Ir ao PDV"
+          />
+        </div>
+      </main>
+    );
   }
 
   const {

@@ -11,8 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacional";
 import { exigirEmpresaOperacional } from "@/lib/assinatura/exigir-empresa-operacional";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
-import { ErroPermissao } from "@/lib/permissoes/erro";
+import { exigirEdicaoPdv, resultadoNegacaoPdv } from "@/lib/pdv/acesso-operacao";
 
 type Resultado =
   | {
@@ -24,6 +23,7 @@ type Resultado =
   | {
       ok: false;
       erro: string;
+      codigo?: "RECURSO_NAO_CONTRATADO";
     };
 
 function uuidValido(valor: string) {
@@ -103,10 +103,14 @@ export async function editarVendaPdv(
     }
 
     try {
-      await exigirPermissao({ modulo: "vendas", acao: "editar" });
+      await exigirEdicaoPdv({
+        empresaId: String(vinculo.empresa_id),
+        origem: "editarVendaPdv",
+      });
     } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return { ok: false, erro: error.message };
+      const negacao = resultadoNegacaoPdv(error);
+      if (negacao) {
+        return negacao;
       }
       throw error;
     }

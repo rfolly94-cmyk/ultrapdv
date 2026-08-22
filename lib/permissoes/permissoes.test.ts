@@ -50,6 +50,7 @@ test("caixa acessa PDV", () => {
   assert.equal(temPermissao(caixa, "pdv", "finalizar_venda"), true);
   assert.equal(temPermissao(caixa, "clientes", "receber_carteira"), true);
   assert.equal(temAcessoModulo(caixa, "configuracoes"), false);
+  assert.equal(temAcessoModulo(caixa, "relatorios"), false);
 });
 
 test("contador não acessa PDV por padrão e acessa Contabilidade", () => {
@@ -58,6 +59,8 @@ test("contador não acessa PDV por padrão e acessa Contabilidade", () => {
   assert.equal(temAcessoModulo(contador, "contabilidade"), true);
   assert.equal(temPermissao(contador, "contabilidade", "baixar_xml"), true);
   assert.equal(temPermissao(contador, "contabilidade", "inventario"), true);
+  assert.equal(temPermissao(contador, "relatorios", "acessar"), true);
+  assert.equal(temPermissao(contador, "relatorios", "exportar"), true);
 });
 
 test("permissão personalizada sobrescreve preset do perfil", () => {
@@ -129,6 +132,10 @@ test("sidebar esconde módulo sem acesso", () => {
   assert.ok(hrefs.includes("/vendas"));
   assert.equal(hrefs.includes("/configuracoes"), false);
   assert.equal(hrefs.includes("/contabilidade"), false);
+  assert.ok(hrefs.includes("/relatorios"));
+
+  const caixa = hrefsMenuPermitidos(presetDoPerfil("caixa"));
+  assert.equal(caixa.includes("/relatorios"), false);
 
   const sidebar = fonte("components/layout/app-sidebar.tsx");
   assert.match(sidebar, /hrefsMenuPermitidos|permissoes/);
@@ -157,12 +164,30 @@ test("digitar rota diretamente sem permissão é bloqueado", () => {
     modulo: "produtos",
     acao: "acessar",
   });
+
+  const relatoriosCaixa = decidirAcessoRota({
+    pathname: "/relatorios",
+    permissoes: presetDoPerfil("caixa"),
+  });
+  assert.equal(relatoriosCaixa.ok, false);
+
+  const relatoriosGerente = decidirAcessoRota({
+    pathname: "/relatorios",
+    permissoes: presetDoPerfil("gerente"),
+  });
+  assert.equal(relatoriosGerente.ok, true);
+
+  assert.deepEqual(resolverExigenciaRota("/api/relatorios/exportar"), {
+    tipo: "permissao",
+    modulo: "relatorios",
+    acao: "exportar",
+  });
 });
 
 test("Server Action sem permissão é bloqueada", () => {
   const produtos = fonte("app/produtos/actions.ts");
-  assert.match(produtos, /exigirPermissao/);
-  assert.match(produtos, /modulo:\s*"produtos"/);
+  assert.match(produtos, /exigirOperacaoProduto|exigirProduto/);
+  assert.match(produtos, /acao: "criar"|\"criar\"/);
 
   const pdv = fonte("app/pdv/actions.ts");
   assert.match(pdv, /exigirPermissao/);
@@ -263,4 +288,11 @@ test("migration de permissões isola por usuario e empresa", () => {
   assert.match(sql, /UNIQUE \(usuario_id, empresa_id, modulo\)/);
   assert.match(sql, /tem_acesso_empresa\(empresa_id\)/);
   assert.match(sql, /usuario_id = auth.uid\(\)/);
+
+  const incremento = fonte(
+    "supabase/migrations/20260821200000_permissoes_modulo_relatorios.sql"
+  );
+  assert.match(incremento, /usuarios_permissoes_empresas_modulo_check/);
+  assert.match(incremento, /'relatorios'/);
+  assert.doesNotMatch(incremento, /INSERT INTO public\.usuarios_permissoes_empresas/);
 });

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { imprimirUrlPdfNoUltraPdvConector } from "@/lib/impressao/imprimir-pdf";
-import { MENSAGEM_CONECTOR_AUSENTE } from "@/lib/impressao/mensagens";
+import { MENSAGEM_CONECTOR_AUSENTE, MENSAGEM_CONECTOR_NAO_CONTRATADO } from "@/lib/impressao/mensagens";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type Props = {
   autoPrint?: boolean;
@@ -24,8 +25,15 @@ export function ControlesImpressao({
     "idle"
   );
   const [mensagem, setMensagem] = useState<string | null>(null);
+  const conectorLiberado = useRecursoLiberado("impressao_automatica");
 
   async function imprimir() {
+    if (!conectorLiberado) {
+      setStatus("falha");
+      setMensagem(MENSAGEM_CONECTOR_NAO_CONTRATADO);
+      return;
+    }
+
     setStatus("imprimindo");
     setMensagem(null);
     const resultado = await imprimirUrlPdfNoUltraPdvConector({
@@ -43,7 +51,7 @@ export function ControlesImpressao({
   }
 
   useEffect(() => {
-    if (!autoPrint) {
+    if (!autoPrint || !conectorLiberado) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -52,7 +60,7 @@ export function ControlesImpressao({
     return () => window.clearTimeout(timer);
     // autoPrint dispara uma vez ao montar a pré-visualização.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoPrint]);
+  }, [autoPrint, conectorLiberado]);
 
   return (
     <div className="print:hidden mb-5 flex flex-col items-center gap-2">

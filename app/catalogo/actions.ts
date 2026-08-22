@@ -2,6 +2,11 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  mensagemCatalogoPublicoIndisponivel,
+  planoCatalogoPublicoPermitido,
+  resolverEmpresaCatalogoPorSlug,
+} from "@/lib/catalogo/acesso-publico";
+import {
   CATALOGO_ITENS_MAX,
   CATALOGO_OBS_MAX,
   validarQuantidadeCatalogo,
@@ -43,6 +48,16 @@ export async function criarPedidoCatalogo(input: {
 
   if (!slug.ok) {
     return { ok: false, erro: "Catálogo não encontrado." };
+  }
+
+  const loja = await resolverEmpresaCatalogoPorSlug(slug.slug);
+  if (!loja) {
+    return { ok: false, erro: "Catálogo não encontrado." };
+  }
+
+  const permitido = await planoCatalogoPublicoPermitido(loja.empresaId);
+  if (!permitido) {
+    return { ok: false, erro: mensagemCatalogoPublicoIndisponivel() };
   }
 
   const nome = String(input.clienteNome ?? "").trim();

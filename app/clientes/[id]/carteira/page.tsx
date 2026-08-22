@@ -11,6 +11,9 @@ import {
   CarteiraClienteWorkspace,
 } from "@/components/clientes/carteira/CarteiraClienteWorkspace";
 import { ClienteNavegacao } from "@/components/clientes/cliente-navegacao";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 
 type Props = {
   params: Promise<{
@@ -68,6 +71,29 @@ export default async function CarteiraClientePage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "carteira"
+  );
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Carteira"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. A carteira do cliente, extrato e recebimentos estão disponíveis em planos que incluem este recurso. Vendas fiado no PDV continuam funcionando."
+            planoNome={entitlements.planoNome}
+            voltarHref="/clientes"
+            voltarLabel="Voltar para clientes"
+          />
+        </div>
+      </main>
+    );
   }
 
   const [

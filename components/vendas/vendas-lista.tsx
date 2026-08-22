@@ -17,6 +17,7 @@ import { DocumentoFiscalBotoes } from "@/components/vendas/documento-fiscal-boto
 import { VendasModuleTabs } from "@/components/vendas/vendas-module-tabs";
 import { VendasPeriodoFiltro } from "@/components/vendas/vendas-periodo-filtro";
 import { imprimirUrlPdfNoUltraPdvConector } from "@/lib/impressao/imprimir-pdf";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import {
   montarHrefListaVendas,
   type FiltrosListaVendas,
@@ -223,6 +224,7 @@ export function VendasLista({
   dataHojeIso,
 }: Props) {
   const router = useRouter();
+  const nfeLiberada = useRecursoLiberado("nfe");
   const [
     busca,
     setBusca,
@@ -387,9 +389,11 @@ export function VendasLista({
             <Link href="/pdv" className="updv-btn updv-btn-primary">
               PDV
             </Link>
-            <Link href="/fiscal/nfe/nova" className="updv-btn updv-btn-ghost">
-              Nova NF-e
-            </Link>
+            {nfeLiberada ? (
+              <Link href="/fiscal/nfe/nova" className="updv-btn updv-btn-ghost">
+                Nova NF-e
+              </Link>
+            ) : null}
           </>
         }
       />

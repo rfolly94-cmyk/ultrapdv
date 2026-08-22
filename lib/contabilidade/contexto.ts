@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import {
   ehContador,
 } from "@/lib/contabilidade/acesso";
+import { obterIdentidadeEmpresaSessao } from "@/lib/empresa/identidade-sessao";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temAcessoModulo } from "@/lib/permissoes/tem-permissao";
 
@@ -28,6 +30,23 @@ export type ContextoContabilidade = {
   empresas: EmpresaContabilidade[];
   ehContador: boolean;
 };
+
+export async function planoContabilidadePermitidoNaSessao() {
+  const identidade = await obterIdentidadeEmpresaSessao();
+  if (!identidade?.empresaId) {
+    redirect("/login");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    identidade.empresaId,
+    "contabilidade"
+  );
+
+  return {
+    empresaId: identidade.empresaId,
+    permitido: plano.permitido,
+  };
+}
 
 export async function obterContextoContabilidade(): Promise<ContextoContabilidade> {
   const supabase = await createClient();
@@ -76,7 +95,7 @@ export async function obterContextoContabilidade(): Promise<ContextoContabilidad
 
   const sessao = await obterPermissoesSessao();
   if (!temAcessoModulo(sessao?.permissoes, "contabilidade")) {
-    redirect("/painel");
+    redirect("/acesso-negado");
   }
 
   const { data: fiscal } = await supabase

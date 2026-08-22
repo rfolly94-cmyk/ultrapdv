@@ -11,6 +11,11 @@ import { PageAlert } from "@/components/ui/page-alert";
 import { PageHeader } from "@/components/ui/page-header";
 import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
+import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
+import { temPermissao } from "@/lib/permissoes/tem-permissao";
 
 type PageProps = {
   searchParams: Promise<{
@@ -103,6 +108,42 @@ export default async function ClientesPage({
   if (!vinculo) {
     redirect("/onboarding");
   }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "clientes"
+  );
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(
+      String(vinculo.empresa_id)
+    );
+    return (
+      <main className="updv-page">
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Clientes"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. O cadastro de clientes está disponível em planos que incluem este recurso. PDV, vendas, fiscal e carteira continuam usando clientes já cadastrados."
+            planoNome={entitlements.planoNome}
+            voltarHref="/painel"
+            voltarLabel="Voltar ao início"
+          />
+        </div>
+      </main>
+    );
+  }
+
+  const importadorNoPlano = (
+    await planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "importador")
+  ).permitido;
+  const [carteiraNoPlano, sessaoPermissoes] = await Promise.all([
+    planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "carteira").then(
+      (plano) => plano.permitido
+    ),
+    obterPermissoesSessao(),
+  ]);
+  const podeAcessarCarteira =
+    carteiraNoPlano &&
+    temPermissao(sessaoPermissoes?.permissoes, "clientes", "acessar_carteira");
 
   let query = supabase
     .from("clientes")
@@ -201,12 +242,14 @@ export default async function ClientesPage({
         count={clientes?.length ?? 0}
         actions={
           <div className="flex flex-wrap gap-2">
-            <a
-              href="/configuracoes/importar-dados?tipo=clientes"
-              className="updv-btn updv-btn-ghost"
-            >
-              Importar clientes
-            </a>
+            {importadorNoPlano ? (
+              <a
+                href="/configuracoes/importar-dados?tipo=clientes"
+                className="updv-btn updv-btn-ghost"
+              >
+                Importar clientes
+              </a>
+            ) : null}
             <a href="/clientes?novo=1" className="updv-btn updv-btn-primary">
               Novo cliente
             </a>
@@ -534,6 +577,7 @@ export default async function ClientesPage({
                         {
                           label: "Carteira",
                           href: `/clientes/${cliente.id}/carteira`,
+                          hidden: !podeAcessarCarteira,
                         },
                       ]}
                     />

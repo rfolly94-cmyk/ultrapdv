@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { NfeEmissaoForm } from "@/components/fiscal/nfe55/nfe-emissao-form";
 import { PageHeader } from "@/components/ui/page-header";
 import { carregarFormularioNfeEmissao } from "@/lib/fiscal/nfe55/carregar-formulario-nfe";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { createClient } from "@/lib/supabase/server";
 
 export async function NfeEmissaoPagina({
@@ -27,6 +28,14 @@ export async function NfeEmissaoPagina({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "nfe"
+  );
+  if (!plano.permitido) {
+    return null;
   }
 
   const formulario = await carregarFormularioNfeEmissao({

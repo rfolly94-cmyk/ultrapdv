@@ -2,7 +2,10 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { ConfiguracoesModuleTabs } from "@/components/configuracoes/configuracoes-module-tabs";
+import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { PageShell } from "@/components/layout/page-shell";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { createClient } from "@/lib/supabase/server";
 import { normalizarSlug } from "@/lib/catalogo/regras";
 import type { CatalogoConfigFormulario } from "@/lib/catalogo/tipos";
@@ -37,6 +40,33 @@ export default async function CatalogoConfigPage() {
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const empresaId = String(vinculo.empresa_id);
+  const plano = await planoPermiteRecursoEmpresa(empresaId, "catalogo");
+  if (!plano.permitido) {
+    const entitlements = await carregarEntitlementsEmpresa(empresaId);
+    return (
+      <PageShell
+        title="Catálogo"
+        description="Loja e pedidos online."
+        breadcrumb={[
+          { label: "Configurações", href: "/configuracoes" },
+          { label: "Catálogo Online" },
+        ]}
+        tabs={<ConfiguracoesModuleTabs />}
+      >
+        <div className="px-4 py-6">
+          <RecursoNaoContratado
+            titulo="Catálogo online"
+            descricao="Este recurso não está disponível no plano atual da sua empresa. A loja pública, a publicação de produtos no catálogo e os pedidos online estão disponíveis em planos que incluem este recurso. Produtos, configurações e pedidos já existentes não são apagados."
+            planoNome={entitlements.planoNome}
+            voltarHref="/configuracoes"
+            voltarLabel="Voltar para Configurações"
+          />
+        </div>
+      </PageShell>
+    );
   }
 
   const empresa = Array.isArray(vinculo.empresas)

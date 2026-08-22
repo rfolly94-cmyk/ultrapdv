@@ -11,6 +11,7 @@ import { PageAlert } from "@/components/ui/page-alert";
 import { PageHeader } from "@/components/ui/page-header";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
+import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 
 type PageProps = {
   searchParams: Promise<{
@@ -68,6 +69,14 @@ export default async function ProdutosPage({
 
   if (!vinculo) {
     redirect("/onboarding");
+  }
+
+  const plano = await planoPermiteRecursoEmpresa(
+    String(vinculo.empresa_id),
+    "produtos"
+  );
+  if (!plano.permitido) {
+    return null;
   }
 
   const [
@@ -179,12 +188,17 @@ export default async function ProdutosPage({
     (item) => item.ativo
   );
   const sessao = await obterPermissoesSessao();
+  const importadorNoPlano = (
+    await planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "importador")
+  ).permitido;
   const podeInformarEstoqueInicial = temPermissao(
     sessao?.permissoes,
     "estoque",
     "ajustar"
   );
-  const podeImportar = temPermissao(sessao?.permissoes, "produtos", "importar");
+  const podeImportar =
+    importadorNoPlano &&
+    temPermissao(sessao?.permissoes, "produtos", "importar");
   const podeCriar = temPermissao(sessao?.permissoes, "produtos", "criar");
 
   const produtoFiscal = params.fiscal

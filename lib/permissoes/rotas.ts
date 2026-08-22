@@ -55,8 +55,25 @@ export function resolverExigenciaRota(
 
   const metodo = method.toUpperCase();
 
-  if (pathname.startsWith("/relatorios") || pathname.startsWith("/api/relatorios")) {
-    return { tipo: "autenticado" };
+  if (pathname.startsWith("/api/relatorios/exportar")) {
+    return { tipo: "permissao", modulo: "relatorios", acao: "exportar" };
+  }
+
+  if (
+    pathname.startsWith("/api/impressao/carteira-abertos")
+  ) {
+    return {
+      tipo: "permissao",
+      modulo: "clientes",
+      acao: "acessar_carteira",
+    };
+  }
+
+  if (
+    pathname.startsWith("/relatorios") ||
+    pathname.startsWith("/api/impressao/relatorio")
+  ) {
+    return { tipo: "permissao", modulo: "relatorios", acao: "acessar" };
   }
 
   if (pathname === "/assinatura" || pathname.startsWith("/assinatura/")) {
@@ -131,7 +148,18 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "estoque", acao: "acessar" };
   }
 
-  if (pathname.startsWith("/contabilidade")) {
+  if (pathname.startsWith("/api/contabilidade/zip")) {
+    return { tipo: "permissao", modulo: "contabilidade", acao: "baixar_xml" };
+  }
+
+  if (pathname.startsWith("/api/contabilidade/relatorio")) {
+    return { tipo: "permissao", modulo: "contabilidade", acao: "relatorios" };
+  }
+
+  if (
+    pathname.startsWith("/contabilidade") ||
+    pathname.startsWith("/api/contabilidade")
+  ) {
     return { tipo: "permissao", modulo: "contabilidade", acao: "acessar" };
   }
 
@@ -236,10 +264,7 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "fiscal", acao: "emitir_nfce" };
   }
 
-  if (pathname.startsWith("/api/fiscal") || pathname.startsWith("/api/contabilidade")) {
-    if (pathname.startsWith("/api/contabilidade")) {
-      return { tipo: "permissao", modulo: "contabilidade", acao: "acessar" };
-    }
+  if (pathname.startsWith("/api/fiscal")) {
     return { tipo: "permissao", modulo: "fiscal", acao: "acessar" };
   }
 

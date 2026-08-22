@@ -16,8 +16,10 @@ import {
   createAdminClient,
 } from "@/lib/supabase/admin";
 import { obterLogomarcaFiscalHex } from "@/lib/empresa/obter-logomarca-fiscal-hex";
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  capturaErroAutorizacaoFiscal,
+  exigirEmissaoNfe,
+} from "@/lib/fiscal/acesso-operacao";
 import {
   ErroAssinaturaRestrita,
   exigirEmpresaOperacional,
@@ -372,11 +374,15 @@ export async function POST(
     }
 
     try {
-      await exigirPermissao({ modulo: "fiscal", acao: "emitir_nfe" });
+      await exigirEmissaoNfe({
+        empresaId: String(vinculo.empresa_id),
+        origem: "nfe-emitir",
+      });
       await exigirEmpresaOperacional(String(vinculo.empresa_id));
     } catch (error) {
-      if (error instanceof ErroPermissao) {
-        return erro(error.message, error.status);
+      const authz = capturaErroAutorizacaoFiscal(error);
+      if (authz) {
+        return erro(authz.mensagem, authz.status);
       }
       if (error instanceof ErroAssinaturaRestrita) {
         return erro(error.message, 403);

@@ -11,7 +11,7 @@ import {
   parseCompetencia,
   rotuloCompetencia,
 } from "@/lib/contabilidade/competencia";
-import { obterContextoContabilidade } from "@/lib/contabilidade/contexto";
+import { obterContextoContabilidade, planoContabilidadePermitidoNaSessao } from "@/lib/contabilidade/contexto";
 import { carregarVisaoGeral } from "@/lib/contabilidade/visao";
 
 export const metadata = {
@@ -30,6 +30,10 @@ export default async function ContabilidadeCompetenciasPage({
   searchParams,
 }: PageProps) {
   const params = await searchParams;
+  const plano = await planoContabilidadePermitidoNaSessao();
+  if (!plano.permitido) {
+    return null;
+  }
   const ctx = await obterContextoContabilidade();
   const competencia = parseCompetencia(params.competencia);
   const sessaoPermissoes = await obterPermissoesSessao();

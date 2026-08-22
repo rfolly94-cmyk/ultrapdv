@@ -7,6 +7,7 @@ import {
 import {
   useRouter,
 } from "next/navigation";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 type Props = {
   emissaoId: string;
@@ -47,6 +48,7 @@ export function CartaCorrecaoNfe({
 }: Props) {
   const router =
     useRouter();
+  const cceLiberada = useRecursoLiberado("cce");
 
   const [
     aberto,
@@ -194,6 +196,10 @@ export function CartaCorrecaoNfe({
     } finally {
       setEnviando(false);
     }
+  }
+
+  if (!cceLiberada) {
+    return null;
   }
 
   if (!aberto) {

@@ -10,8 +10,10 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  exigirOperacaoVenda,
+  respostaNegacaoVenda,
+} from "@/lib/vendas/acesso-operacao";
 
 type RouteContext = {
   params: Promise<{
@@ -118,15 +120,15 @@ async function contexto() {
   }
 
   try {
-    await exigirPermissao({ modulo: "vendas", acao: "cancelar" });
+    await exigirOperacaoVenda({
+      empresaId: String(vinculo.empresa_id),
+      acao: "cancelar",
+      origem: "api/vendas/cancelar",
+    });
   } catch (error) {
-    if (error instanceof ErroPermissao) {
-      return {
-        erro: json(
-          { ok: false, erro: error.message },
-          error.status
-        ),
-      };
+    const negacao = respostaNegacaoVenda(error);
+    if (negacao) {
+      return { erro: negacao };
     }
     throw error;
   }

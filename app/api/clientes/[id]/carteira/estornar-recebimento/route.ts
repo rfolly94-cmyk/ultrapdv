@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { ErroPermissao } from "@/lib/permissoes/erro";
-import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
+import {
+  exigirOperacaoCarteira,
+  respostaNegacaoCarteira,
+} from "@/lib/carteira/acesso-operacao";
 import { createClient } from "@/lib/supabase/server";
 
 type Context = {
@@ -41,10 +43,15 @@ export async function POST(request: NextRequest, context: Context) {
   }
 
   try {
-    await exigirPermissao({ modulo: "clientes", acao: "receber_carteira" });
+    await exigirOperacaoCarteira({
+      empresaId: String(vinculo.empresa_id),
+      acao: "receber_carteira",
+      origem: "POST /api/clientes/[id]/carteira/estornar-recebimento",
+    });
   } catch (error) {
-    if (error instanceof ErroPermissao) {
-      return resposta({ ok: false, erro: error.message }, error.status);
+    const negacao = respostaNegacaoCarteira(error);
+    if (negacao) {
+      return negacao;
     }
     throw error;
   }

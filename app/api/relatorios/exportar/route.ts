@@ -4,6 +4,10 @@ import { carregarRelatorio } from "@/lib/relatorios/carregar";
 import { parseFiltrosRelatorio, obterContextoRelatorio } from "@/lib/relatorios/contexto";
 import { montarPlanilhaRelatorio, nomeArquivoRelatorio } from "@/lib/relatorios/exportar";
 import { resolverPeriodoRelatorio } from "@/lib/relatorios/periodo";
+import {
+  exigirOperacaoRelatorio,
+  respostaNegacaoRelatorio,
+} from "@/lib/relatorios/acesso";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +17,21 @@ export async function GET(request: Request) {
   params.exportar = "1";
   const filtros = parseFiltrosRelatorio(params);
   const ctx = await obterContextoRelatorio();
+
+  try {
+    await exigirOperacaoRelatorio({
+      empresaId: ctx.empresaId,
+      acao: "exportar",
+      origem: "GET /api/relatorios/exportar",
+    });
+  } catch (error) {
+    const negacao = respostaNegacaoRelatorio(error);
+    if (negacao) {
+      return negacao;
+    }
+    throw error;
+  }
+
   const janela = resolverPeriodoRelatorio(filtros.periodo, filtros.de, filtros.ate);
   const relatorio = await carregarRelatorio(filtros);
   const buffer = montarPlanilhaRelatorio(

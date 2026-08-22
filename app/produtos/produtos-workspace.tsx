@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import { rotuloUnidadeMedida } from "@/lib/produtos/unidades-medida";
 
 import { AppModal } from "@/components/ui/app-modal";
@@ -93,6 +94,7 @@ export function ProdutosWorkspace({
   const [toast, setToast] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const catalogoNoPlano = useRecursoLiberado("catalogo");
 
   const filtrados = useMemo(() => {
     const termo = normalizar(busca);
@@ -234,7 +236,7 @@ export function ProdutosWorkspace({
           </select>
         }
         actions={
-          selecionados.length > 0 ? (
+          catalogoNoPlano && selecionados.length > 0 ? (
             <div className="flex items-center gap-2">
               <button
                 type="button"

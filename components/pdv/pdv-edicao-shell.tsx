@@ -147,6 +147,7 @@ type Props = {
   formasPagamento: FormaPagamento[];
   vendaEdicao?: VendaEdicaoPdv | null;
   pixConfig?: PixConfigPdv;
+  pixIntegradoLiberado?: boolean;
 };
 
 function paraCentavos(
@@ -322,6 +323,7 @@ export function PdvEdicaoShell({
   formasPagamento,
   vendaEdicao = null,
   pixConfig = null,
+  pixIntegradoLiberado = true,
 }: Props) {
   const router = useRouter();
   const modoEdicao =
@@ -699,7 +701,8 @@ export function PdvEdicaoShell({
   const restanteCentavos = avaliacaoPagamentos.restanteCentavos;
 
   const pixLocalAtivo = pixConfig?.modo === "local_manual";
-  const pixGeranetAtivo = pixConfig?.modo === "geranet";
+  const pixGeranetAtivo =
+    pixConfig?.modo === "geranet" && pixIntegradoLiberado;
   const pixProvedorNome =
     pixGeranetAtivo && pixConfig.provedor
       ? nomeProvedorPix(pixConfig.provedor)

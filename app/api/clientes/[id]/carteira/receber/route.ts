@@ -4,6 +4,10 @@ import {
 } from "next/server";
 
 import {
+  exigirOperacaoCarteira,
+  respostaNegacaoCarteira,
+} from "@/lib/carteira/acesso-operacao";
+import {
   createClient,
 } from "@/lib/supabase/server";
 
@@ -108,6 +112,20 @@ export async function POST(
       },
       403
     );
+  }
+
+  try {
+    await exigirOperacaoCarteira({
+      empresaId: String(vinculo.empresa_id),
+      acao: "receber_carteira",
+      origem: "POST /api/clientes/[id]/carteira/receber",
+    });
+  } catch (error) {
+    const negacao = respostaNegacaoCarteira(error);
+    if (negacao) {
+      return negacao;
+    }
+    throw error;
   }
 
   const {

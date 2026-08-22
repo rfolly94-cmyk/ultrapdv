@@ -4,7 +4,7 @@ import { PageAlert } from "@/components/ui/page-alert";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
-import { obterContextoContabilidade } from "@/lib/contabilidade/contexto";
+import { obterContextoContabilidade, planoContabilidadePermitidoNaSessao } from "@/lib/contabilidade/contexto";
 import { carregarProdutosEscrituracao } from "@/lib/contabilidade/inventario";
 
 export const metadata = {
@@ -27,6 +27,10 @@ export default async function ContabilidadeInventarioPage({
   searchParams,
 }: PageProps) {
   const params = await searchParams;
+  const plano = await planoContabilidadePermitidoNaSessao();
+  if (!plano.permitido) {
+    return null;
+  }
   const ctx = await obterContextoContabilidade();
   const sessaoPermissoes = await obterPermissoesSessao();
   const podeGerar = Boolean(

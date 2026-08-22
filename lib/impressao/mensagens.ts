@@ -1,6 +1,9 @@
 export const MENSAGEM_CONECTOR_AUSENTE =
   "UltraPDV Conector não encontrado.\n\nVerifique se o Conector está instalado e em execução neste computador.";
 
+export const MENSAGEM_CONECTOR_NAO_CONTRATADO =
+  "Impressão pelo UltraPDV Conector não está disponível no plano atual.\nVocê ainda pode visualizar ou baixar o documento.";
+
 export const MENSAGEM_IMPRESSORA_CONECTOR =
   "Nenhuma impressora disponível/configurada no UltraPDV Conector.\n\nAbra o UltraPDV Conector e selecione uma impressora.";
 

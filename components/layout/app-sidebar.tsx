@@ -5,9 +5,11 @@ import { usePathname } from "next/navigation";
 import { LogoEmpresa } from "@/components/empresa/logo-empresa";
 import type { IdentidadeEmpresaPublica } from "@/lib/empresa/logo";
 import { logoUrlUtilizavel } from "@/lib/empresa/logo-url";
+import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import { usePermissoesUi } from "@/lib/permissoes/contexto-ui";
 import { hrefsMenuPermitidos } from "@/lib/permissoes/menu";
 import { primeiraRotaPermitida } from "@/lib/permissoes/rotas";
+import { temAcessoModulo } from "@/lib/permissoes/tem-permissao";
 import {
   PERFIS_USUARIO_LABEL,
   type PerfilUsuario,
@@ -128,8 +130,43 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   const permissoes = usePermissoesUi();
+  const relatoriosNoPlano = useRecursoLiberado("relatorios");
+  const contabilidadeNoPlano = useRecursoLiberado("contabilidade");
+  const produtosNoPlano = useRecursoLiberado("produtos");
+  const clientesNoPlano = useRecursoLiberado("clientes");
+  const estoqueNoPlano = useRecursoLiberado("estoque");
+  const vendasNoPlano = useRecursoLiberado("vendas");
+  const pdvNoPlano = useRecursoLiberado("pdv");
   const permitidos = new Set(hrefsMenuPermitidos(permissoes));
-  const itens = menu.filter((item) => permitidos.has(item.href));
+  const itens = menu.filter((item) => {
+    if (!permitidos.has(item.href)) {
+      return false;
+    }
+    if (item.href === "/relatorios") {
+      return relatoriosNoPlano;
+    }
+    if (item.href === "/contabilidade") {
+      return contabilidadeNoPlano;
+    }
+    if (item.href === "/produtos") {
+      return produtosNoPlano;
+    }
+    if (item.href === "/clientes") {
+      return clientesNoPlano;
+    }
+    if (item.href === "/estoque") {
+      return estoqueNoPlano;
+    }
+    if (item.href === "/vendas") {
+      if (vendasNoPlano) {
+        return true;
+      }
+      return Boolean(
+        pdvNoPlano && permissoes && temAcessoModulo(permissoes, "pdv")
+      );
+    }
+    return true;
+  });
   const itensRodape = menuRodape.filter((item) => permitidos.has(item.href));
   const home = permissoes ? primeiraRotaPermitida(permissoes) : "/painel";
   const logoUrl = logoUrlUtilizavel(identidade?.logoUrl);
@@ -137,11 +174,13 @@ export function AppSidebar({
   function linkMenu(item: MenuItem) {
     const Icon = item.icon;
     const estaAtivo = ativo(pathname, item);
+    const href =
+      item.href === "/vendas" && !vendasNoPlano ? "/pdv" : item.href;
 
     return (
       <Link
         key={item.href}
-        href={item.href}
+        href={href}
         onClick={onNavigate}
         title={item.label}
         data-active={estaAtivo}

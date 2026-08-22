@@ -14,6 +14,11 @@ import {
 import {
   transmitirContingenciaNfce,
 } from "@/lib/fiscal/contingencia/transmitir-contingencia";
+import {
+  capturaErroAutorizacaoFiscal,
+} from "@/lib/fiscal/acesso-operacao";
+import { ErroPermissao } from "@/lib/permissoes/erro";
+import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 
 type Context = {
   params: Promise<{
@@ -94,6 +99,22 @@ export async function POST(
       },
       403
     );
+  }
+
+  try {
+    const sessao = await exigirPermissao({
+      modulo: "fiscal",
+      acao: "emitir_nfce",
+    });
+    if (sessao.empresaId !== String(vinculo.empresa_id).trim()) {
+      throw new ErroPermissao("Empresa da sessão não confere.", 403);
+    }
+  } catch (error) {
+    const authz = capturaErroAutorizacaoFiscal(error);
+    if (authz) {
+      return json({ ok: false, erro: authz.mensagem }, authz.status);
+    }
+    throw error;
   }
 
   const {

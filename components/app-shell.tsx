@@ -8,6 +8,7 @@ import { LogoEmpresa } from "@/components/empresa/logo-empresa";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AssistenteFlutuante } from "@/components/suporte/assistente-flutuante";
 import type { IdentidadeEmpresaPublica } from "@/lib/empresa/logo";
+import { EntitlementsUiProvider } from "@/lib/plataforma/entitlements/contexto-ui";
 import { PermissoesUiProvider } from "@/lib/permissoes/contexto-ui";
 import type { PermissoesEfetivas } from "@/lib/permissoes/tipos";
 
@@ -17,6 +18,7 @@ export function AppShell({
   identidade,
   usuario,
   permissoes = null,
+  recursosLiberados = null,
   assinaturaOperacional = true,
   carenciaAte = null,
   assinaturaSuspensa = false,
@@ -26,6 +28,7 @@ export function AppShell({
   identidade?: IdentidadeEmpresaPublica | null;
   usuario?: string | null;
   permissoes?: PermissoesEfetivas | null;
+  recursosLiberados?: Record<string, boolean> | null;
   assinaturaOperacional?: boolean;
   carenciaAte?: string | null;
   assinaturaSuspensa?: boolean;
@@ -123,7 +126,9 @@ export function AppShell({
 
   return (
     <PermissoesUiProvider value={permissoes}>
-      {conteudo}
+      <EntitlementsUiProvider value={recursosLiberados}>
+        {conteudo}
+      </EntitlementsUiProvider>
     </PermissoesUiProvider>
   );
 }
