@@ -11,6 +11,7 @@ import {
   CarteiraClienteWorkspace,
 } from "@/components/clientes/carteira/CarteiraClienteWorkspace";
 import { ClienteNavegacao } from "@/components/clientes/cliente-navegacao";
+import { parseAbaCarteiraCliente } from "@/lib/clientes/navegacao";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
@@ -19,15 +20,21 @@ type Props = {
   params: Promise<{
     id: string;
   }>;
+  searchParams: Promise<{
+    aba?: string;
+  }>;
 };
 
 export default async function CarteiraClientePage({
   params,
+  searchParams,
 }: Props) {
   const {
     id: clienteId,
   } =
     await params;
+  const queryCarteira = await searchParams;
+  const abaInicial = parseAbaCarteiraCliente(queryCarteira.aba);
 
   const supabase =
     await createClient();
@@ -466,6 +473,7 @@ export default async function CarteiraClientePage({
         }
       />
     <CarteiraClienteWorkspace
+      abaInicial={abaInicial}
       cliente={
         cliente
       }

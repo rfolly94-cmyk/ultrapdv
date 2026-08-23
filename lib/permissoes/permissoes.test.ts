@@ -182,6 +182,10 @@ test("digitar rota diretamente sem permissão é bloqueado", () => {
     modulo: "relatorios",
     acao: "exportar",
   });
+
+  assert.deepEqual(resolverExigenciaRota("/api/pdv/finalizar", "POST"), {
+    tipo: "autenticado",
+  });
 });
 
 test("Server Action sem permissão é bloqueada", () => {

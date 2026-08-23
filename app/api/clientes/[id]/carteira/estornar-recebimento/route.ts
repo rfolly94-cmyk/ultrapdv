@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { aplicarCors, respostaOptions } from "@/lib/api/cors-mobile";
 import {
   exigirOperacaoCarteira,
   respostaNegacaoCarteira,
 } from "@/lib/carteira/acesso-operacao";
+import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 
 type Context = {
@@ -13,7 +15,11 @@ type Context = {
 };
 
 function resposta(body: unknown, status = 200) {
-  return NextResponse.json(body, { status });
+  return aplicarCors(NextResponse.json(body, { status }), "POST, OPTIONS");
+}
+
+export async function OPTIONS() {
+  return respostaOptions("POST, OPTIONS");
 }
 
 export async function POST(request: NextRequest, context: Context) {
@@ -21,7 +27,7 @@ export async function POST(request: NextRequest, context: Context) {
   const supabase = await createClient();
 
   const { data: claimsData, error: authError } =
-    await supabase.auth.getClaims();
+    await obterClaimsSessao(supabase);
 
   if (authError || !claimsData?.claims?.sub) {
     return resposta({ ok: false, erro: "Não autenticado." }, 401);

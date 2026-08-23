@@ -20,6 +20,7 @@ export type ProvedorPixGeranet = {
   aliases?: string[];
   ativo: boolean;
   configuracaoDisponivel: boolean;
+  selecionavel: boolean;
   usaChavePix: boolean;
   chavePixObrigatoria: boolean;
   incluirChavePixPublica: boolean;
@@ -34,6 +35,30 @@ export type ProvedorPixGeranet = {
 };
 
 const DOC_GERANET = "https://nfe.geranet.net/api-v1-openapi.json";
+
+export const CAMPOS_OFICIAIS_CREDENCIAIS_GERANET = [
+  "clienteId",
+  "clienteSegredo",
+  "chaveUsuario",
+  "chavePix",
+  "escopo",
+  "token",
+  "tokenAcesso",
+  "certificadoPemHexadecimal",
+  "chavePrivadaPemHexadecimal",
+  "certificadoPfxHexadecimal",
+  "senhaCertificadoPfx",
+] as const;
+
+export const CODIGOS_PIX_SELECIONAVEIS = [
+  "efibank",
+  "sicredi",
+  "inter",
+  "mercadopago",
+] as const;
+
+const MOTIVO_NAO_LIBERADO =
+  "Provedor catalogado na Geranet, mas ainda não liberado no UltraPDV. Os campos oficiais por banco não estão comprovados o suficiente para configuração.";
 
 function campoTexto(
   chave: string,
@@ -124,7 +149,8 @@ function perfilMapeado(
     codigo,
     nome,
     ativo: true,
-    configuracaoDisponivel: true,
+    configuracaoDisponivel: extra.configuracaoDisponivel ?? true,
+    selecionavel: extra.selecionavel ?? false,
     usaChavePix,
     chavePixObrigatoria: extra.chavePixObrigatoria ?? usaChavePix,
     incluirChavePixPublica: usaChavePix,
@@ -148,6 +174,7 @@ function perfilBloqueado(
     nome,
     ativo: true,
     configuracaoDisponivel: false,
+    selecionavel: false,
     usaChavePix: true,
     chavePixObrigatoria: false,
     incluirChavePixPublica: true,
@@ -168,11 +195,12 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
     "OAuth2 + PFX",
     CAMPOS_OAUTH_PFX,
     {
+      selecionavel: true,
       aliases: ["gerencianet"],
       documentacaoInstituicao:
         "https://dev.efipay.com.br/docs/api-pix/credenciais/",
       observacoes:
-        "Gerencianet rebatizada para Efí. Homologação e produção usam pares distintos de Client ID/Secret.",
+        "Gerencianet rebatizada para Efí. Homologação e produção usam pares distintos de Client ID/Secret. Campos oficiais Geranet: clienteId, clienteSegredo, certificadoPfxHexadecimal, senhaCertificadoPfx e chavePix.",
     }
   ),
   gerencianet: perfilMapeado(
@@ -185,7 +213,7 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       documentacaoInstituicao:
         "https://dev.efipay.com.br/docs/api-pix/credenciais/",
       observacoes:
-        "Código histórico na Geranet para o mesmo PSP da Efí. Credenciais idênticas; o código enviado continua gerencianet.",
+        "Código histórico na Geranet para o mesmo PSP da Efí. Permanece mapeado para cobranças já salvas; a tela oferece só Efí Bank.",
     }
   ),
   sicredi: perfilMapeado(
@@ -213,8 +241,11 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       return campo;
     }),
     {
+      selecionavel: true,
       documentacaoInstituicao:
         "https://developers.sicredi.com.br/public/docs/getting-started-pix",
+      observacoes:
+        "Campos oficiais Geranet: clienteId, clienteSegredo, certificadoPemHexadecimal, chavePrivadaPemHexadecimal e chavePix.",
     }
   ),
   inter: perfilMapeado(
@@ -241,8 +272,11 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       return campo;
     }),
     {
+      selecionavel: true,
       documentacaoInstituicao:
         "https://developers.inter.co/docs/introducao/como-criar-uma-aplicacao",
+      observacoes:
+        "Campos oficiais Geranet: clienteId, clienteSegredo, certificadoPemHexadecimal, chavePrivadaPemHexadecimal e chavePix.",
     }
   ),
   bancodobrasil: perfilMapeado(
@@ -276,6 +310,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       ),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao: "https://developers.bb.com.br/",
       observacoes:
         "Sandbox do BB não exige mTLS. Produção exige certificado cadastrado no portal.",
@@ -305,6 +341,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       return campo;
     }),
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao:
         "https://devportal.itau.com.br/autenticacao-documentacao",
     }
@@ -333,6 +371,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       ),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao: "https://developer.santander.com.br/",
     }
   ),
@@ -370,6 +410,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       ),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao: "https://developers.sicoob.com.br/",
     }
   ),
@@ -379,6 +421,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
     "OAuth2 + mTLS",
     CAMPOS_OAUTH_MTLS,
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao: "https://developers.bradesco.com.br/",
       observacoes:
         "Sandbox aceita certificado autoassinado. Produção exige A1 de AC reconhecida.",
@@ -397,6 +441,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       }),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao:
         "https://developers.banrisul.com.br/pages/docs/clientes-banrisul/api-pix-v2.8.1.html",
       observacoes:
@@ -427,6 +473,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       return campo;
     }),
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       suportaHomologacao: false,
       documentacaoInstituicao: "https://www.c6bank.com.br/apis-integracao/",
       observacoes:
@@ -457,23 +505,31 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       ),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       documentacaoInstituicao: "https://developercielo.github.io/manual/apipix",
     }
   ),
   mercadopago: perfilMapeado(
     "mercadopago",
     "Mercado Pago",
-    "Access Token",
+    "Access Token + Chave PIX",
     [
+      campoTexto("chavePix", "Chave PIX", {
+        ajuda: "Chave PIX cadastrada no Mercado Pago. A Geranet exige credenciais.chavePix.",
+      }),
       campoSenha("tokenAcesso", "Access Token", {
         ajuda: "Access Token de produção ou teste em Suas integrações.",
       }),
     ],
     {
-      usaChavePix: false,
-      chavePixObrigatoria: false,
+      selecionavel: true,
+      usaChavePix: true,
+      chavePixObrigatoria: true,
       documentacaoInstituicao:
         "https://www.mercadopago.com.br/developers/pt/docs/credentials",
+      observacoes:
+        "A Geranet exige credenciais.chavePix e credenciais.tokenAcesso para mercadopago.",
     }
   ),
   pagseguro: perfilMapeado(
@@ -486,6 +542,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       }),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       usaChavePix: false,
       chavePixObrigatoria: false,
       documentacaoInstituicao: "https://developer.pagbank.com.br/v1/reference/autenticacao",
@@ -503,6 +561,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       campoSenha("chaveUsuario", "Access Key"),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       usaChavePix: false,
       chavePixObrigatoria: false,
       documentacaoInstituicao: "https://docs.shipay.com.br/setup.html",
@@ -521,6 +581,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       }),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       usaChavePix: false,
       chavePixObrigatoria: false,
       documentacaoInstituicao: "https://pixpdv.com.br/api/index.html",
@@ -539,6 +601,8 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       }),
     ],
     {
+      configuracaoDisponivel: false,
+      motivoBloqueio: MOTIVO_NAO_LIBERADO,
       usaChavePix: true,
       chavePixObrigatoria: false,
       documentacaoInstituicao: "https://docs.gate2all.com.br/",
@@ -575,7 +639,7 @@ export const PROVEDORES_PIX_GERANET = Object.values(provedoresPixGeranet).sort(
 );
 
 export const PROVEDORES_PIX_SELECIONAVEIS = PROVEDORES_PIX_GERANET.filter(
-  (item) => item.configuracaoDisponivel
+  (item) => item.selecionavel && item.configuracaoDisponivel
 );
 
 export type CodigoProvedorPix = keyof typeof provedoresPixGeranet;
@@ -590,6 +654,25 @@ export function obterProvedorPixGeranet(codigo: string) {
   return ehProvedorPixGeranet(codigo)
     ? provedoresPixGeranet[codigo]
     : null;
+}
+
+export function ehProvedorPixSelecionavel(valor: unknown): boolean {
+  return (
+    typeof valor === "string" &&
+    Boolean(obterProvedorPixGeranet(valor)?.selecionavel)
+  );
+}
+
+export function codigoProvedorPixParaTela(
+  codigo: string | null | undefined
+): string {
+  if (codigo === "gerencianet") {
+    return "efibank";
+  }
+  if (codigo && ehProvedorPixSelecionavel(codigo)) {
+    return codigo;
+  }
+  return "efibank";
 }
 
 export function nomeProvedorPix(codigo: string) {

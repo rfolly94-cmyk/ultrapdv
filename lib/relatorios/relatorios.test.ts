@@ -236,3 +236,17 @@ test("menu Relatórios usa permissão e plano, sem misturar com o Conector", () 
     /exigirRecursoEmpresa|exigirOperacaoRelatorio/
   );
 });
+
+test("API mobile de relatórios autentica, resolve empresa e reutiliza o loader oficial", () => {
+  const rota = fonte("app/api/relatorios/mobile/route.ts");
+  assert.match(rota, /resolverContextoEmpresaAtiva/);
+  assert.match(rota, /exigirOperacaoRelatorio/);
+  assert.match(rota, /carregarRelatorio/);
+  assert.ok(
+    rota.indexOf("exigirOperacaoRelatorio") < rota.indexOf("carregarRelatorio")
+  );
+  assert.doesNotMatch(rota, /createAdminClient|SUPABASE_SECRET_KEY/);
+  assert.doesNotMatch(rota, /searchParams.get\("empresa_id"\)|dados\.empresa_id/);
+  assert.match(fonte("lib/relatorios/contexto.ts"), /obterClaimsSessao/);
+  assert.match(fonte("lib/permissoes/rotas.ts"), /\/api\/relatorios\/mobile/);
+});

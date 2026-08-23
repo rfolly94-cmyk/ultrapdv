@@ -1,14 +1,7 @@
-import { chamarGeranetBanking } from "@/lib/geranet/cliente";
 import { exigirPixIntegradoEmpresa } from "@/lib/pagamentos/pix/acesso-operacao";
-import {
-  carregarApiKeyGeranet,
-  carregarIntegracaoPix,
-  exigirAdministradorPix,
-  montarCredenciaisGeranetPix,
-} from "@/lib/pagamentos/pix/contexto";
+import { exigirAdministradorPix } from "@/lib/pagamentos/pix/contexto";
+import { testarConexaoPixGeranet } from "@/lib/pagamentos/pix/geranet";
 import { exigirPixGeranetAtivo } from "@/lib/pagamentos/pix/modo-ativo-servidor";
-import { obterProvedorPixGeranet } from "@/lib/pagamentos/pix/provedores-geranet";
-import type { AmbientePixGeranet } from "@/lib/pagamentos/pix/types";
 import { erroPix, jsonPix } from "../_shared";
 
 export async function POST() {
@@ -19,58 +12,24 @@ export async function POST() {
       origem: "POST /api/pagamentos/pix/geranet/testar",
     });
     await exigirPixGeranetAtivo(empresaId);
-    const [apiKey, integracao] = await Promise.all([
-      carregarApiKeyGeranet(empresaId),
-      carregarIntegracaoPix(empresaId),
-    ]);
-
-    const resultado = await chamarGeranetBanking({
-      apiKey,
-      endpoint: "/api/v1/user",
-      method: "GET",
-    });
-
-    let credenciaisOk = false;
-    let credenciaisMensagem =
-      "Nenhuma integração PIX salva para validar o provedor.";
-
-    if (integracao?.provedor) {
-      const meta = obterProvedorPixGeranet(integracao.provedor);
-      if (!meta?.configuracaoDisponivel) {
-        credenciaisMensagem =
-          "Configuração deste provedor ainda não foi mapeada no UltraPDV.";
-      } else {
-        try {
-          await montarCredenciaisGeranetPix({
-            empresaId,
-            provedor: integracao.provedor,
-            ambiente: integracao.ambiente as AmbientePixGeranet,
-            chavePixPublica: integracao.chave_pix,
-          });
-          credenciaisOk = true;
-          credenciaisMensagem =
-            "Credenciais do provedor salvo estão presentes no cofre.";
-        } catch (error) {
-          credenciaisMensagem =
-            error instanceof Error
-              ? error.message
-              : "Credenciais do provedor incompletas.";
-        }
-      }
-    }
+    const resultado = await testarConexaoPixGeranet(empresaId);
 
     return jsonPix({
-      ok: resultado.httpOk,
+      ok: resultado.ok,
+      resultado: resultado.resultado,
       http_status: resultado.httpStatus,
-      geranet_ok: resultado.httpOk,
-      integracao_configurada: Boolean(integracao?.ativo),
-      provedor: integracao?.provedor ?? null,
-      ambiente: integracao?.ambiente ?? null,
-      credenciais_configuradas: credenciaisOk,
-      cobranca_emitida: false,
-      mensagem: resultado.httpOk
-        ? `Conexão Geranet autenticada. ${credenciaisMensagem} Nenhuma cobrança PIX foi emitida.`
-        : String(resultado.dados.mensagem ?? "A Geranet recusou a API Key."),
+      geranet_ok: resultado.resultado === "sucesso",
+      integracao_configurada: true,
+      provedor: resultado.provedor,
+      ambiente: resultado.ambiente,
+      credenciais_configuradas: resultado.credenciaisConfiguradas,
+      cobranca_emitida: resultado.cobrancaEmitida,
+      metodo_teste: resultado.metodoTeste,
+      provedor_autenticado: resultado.provedorAutenticado,
+      mensagem: resultado.mensagem,
+      limitacao: resultado.limitacao,
+      resposta: resultado.respostaSanitizada,
+      payload_enviado: resultado.payloadEnviado,
     });
   } catch (error) {
     return erroPix(error);

@@ -59,8 +59,13 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "relatorios", acao: "exportar" };
   }
 
+  if (pathname.startsWith("/api/relatorios/mobile")) {
+    return { tipo: "autenticado" };
+  }
+
   if (
-    pathname.startsWith("/api/impressao/carteira-abertos")
+    pathname.startsWith("/api/impressao/carteira-abertos") ||
+    pathname.startsWith("/api/impressao/carteira-recebimento")
   ) {
     return {
       tipo: "permissao",
@@ -82,6 +87,14 @@ export function resolverExigenciaRota(
 
   if (pathname === "/painel" || pathname.startsWith("/painel/")) {
     return { tipo: "permissao", modulo: "inicio", acao: "acessar" };
+  }
+
+  if (pathname.startsWith("/api/pdv/finalizar")) {
+    return { tipo: "autenticado" };
+  }
+
+  if (pathname.startsWith("/api/produtos")) {
+    return { tipo: "autenticado" };
   }
 
   if (pathname.startsWith("/pdv")) {
@@ -130,6 +143,21 @@ export function resolverExigenciaRota(
       modulo: "clientes",
       acao: "receber_carteira",
     };
+  }
+
+  if (
+    pathname.startsWith("/api/clientes/") &&
+    pathname.includes("/carteira")
+  ) {
+    return {
+      tipo: "permissao",
+      modulo: "clientes",
+      acao: "acessar_carteira",
+    };
+  }
+
+  if (pathname.startsWith("/api/clientes")) {
+    return { tipo: "autenticado" };
   }
 
   if (pathname.startsWith("/clientes")) {

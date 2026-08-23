@@ -13,9 +13,11 @@ import {
   rotuloSegredoConfigurado,
 } from "@/lib/pagamentos/pix/formulario-provedor";
 import {
-  PROVEDORES_PIX_GERANET,
+  PROVEDORES_PIX_SELECIONAVEIS,
   ambientePadraoDoProvedor,
   ambientesSuportadosDoProvedor,
+  codigoProvedorPixParaTela,
+  ehProvedorPixSelecionavel,
 } from "@/lib/pagamentos/pix/provedores";
 import type { CobrancaPixPublica, ModoPix } from "@/lib/pagamentos/pix/types";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
@@ -45,10 +47,14 @@ type Props = {
   cobrancas: CobrancaPixPublica[];
 };
 
+type TomAlertaPix = "sucesso" | "inconclusivo" | "erro";
+
 type RespostaApi = {
   ok?: boolean;
+  resultado?: TomAlertaPix;
   erro?: string;
   mensagem?: string;
+  limitacao?: string;
   cobranca?: CobrancaPixPublica;
   resposta?: unknown;
   payload_enviado?: unknown;
@@ -61,20 +67,23 @@ export function PixGeranetWorkspace({
   cobrancas,
 }: Props) {
   const [mensagem, setMensagem] = useState<string | null>(null);
-  const [sucesso, setSucesso] = useState(false);
+  const [tomAlerta, setTomAlerta] = useState<TomAlertaPix>("sucesso");
   const [salvando, setSalvando] = useState(false);
   const [operando, setOperando] = useState(false);
   const [valor, setValor] = useState("1.00");
   const [devedorNome, setDevedorNome] = useState("");
   const [diagnostico, setDiagnostico] = useState<unknown>(null);
   const [lista, setLista] = useState(cobrancas);
-  const [provedor, setProvedor] = useState(() => {
-    const inicial = integracao?.provedor ?? "efibank";
-    const meta = PROVEDORES_PIX_GERANET.find((item) => item.codigo === inicial);
-    return meta?.configuracaoDisponivel ? inicial : "efibank";
-  });
+  const [provedor, setProvedor] = useState(() =>
+    codigoProvedorPixParaTela(integracao?.provedor)
+  );
+  const provedorSalvoForaDoCatalogo = Boolean(
+    integracao?.provedor &&
+      integracao.provedor !== "gerencianet" &&
+      !ehProvedorPixSelecionavel(integracao.provedor)
+  );
   const [ambiente, setAmbiente] = useState(() => {
-    const inicialProvedor = integracao?.provedor ?? "efibank";
+    const inicialProvedor = codigoProvedorPixParaTela(integracao?.provedor);
     const suportados = ambientesSuportadosDoProvedor(inicialProvedor);
     const atual = integracao?.ambiente ?? ambientePadraoDoProvedor(inicialProvedor);
     return suportados.includes(atual as "1" | "2")
@@ -105,8 +114,7 @@ export function PixGeranetWorkspace({
   });
 
   function trocarProvedor(proximo: string) {
-    const meta = PROVEDORES_PIX_GERANET.find((item) => item.codigo === proximo);
-    if (!meta?.configuracaoDisponivel) {
+    if (!ehProvedorPixSelecionavel(proximo)) {
       return;
     }
     setProvedor(proximo);
@@ -133,7 +141,7 @@ export function PixGeranetWorkspace({
       const resultado = await salvarConfiguracaoPix(
         new FormData(event.currentTarget)
       );
-      setSucesso(Boolean(resultado.ok));
+      setTomAlerta(resultado.ok ? "sucesso" : "erro");
       setMensagem(
         resultado.ok
           ? "Configuração PIX Geranet salva. Credenciais foram para o cofre."
@@ -143,7 +151,7 @@ export function PixGeranetWorkspace({
         setArquivosLocais({});
       }
     } catch (error) {
-      setSucesso(false);
+      setTomAlerta("erro");
       setMensagem(
         error instanceof Error ? error.message : "Falha ao salvar o PIX."
       );
@@ -166,8 +174,20 @@ export function PixGeranetWorkspace({
         body: JSON.stringify(body),
       });
       const data = (await response.json()) as RespostaApi;
-      setSucesso(Boolean(data.ok));
-      setMensagem(data.erro ?? data.mensagem ?? (data.ok ? "Operação concluída." : "Falha PIX."));
+      const tom: TomAlertaPix =
+        data.resultado === "sucesso" ||
+        data.resultado === "inconclusivo" ||
+        data.resultado === "erro"
+          ? data.resultado
+          : data.ok
+            ? "sucesso"
+            : "erro";
+      setTomAlerta(tom);
+      setMensagem(
+        [data.erro ?? data.mensagem ?? (data.ok ? "Operação concluída." : "Falha PIX."), data.limitacao]
+          .filter(Boolean)
+          .join(" ")
+      );
       setDiagnostico(data.resposta ?? data);
       if (data.cobranca) {
         setLista((atual) => {
@@ -176,7 +196,7 @@ export function PixGeranetWorkspace({
         });
       }
     } catch (error) {
-      setSucesso(false);
+      setTomAlerta("erro");
       setMensagem(
         error instanceof Error ? error.message : "Falha de rede no PIX."
       );
@@ -190,9 +210,11 @@ export function PixGeranetWorkspace({
       {mensagem && (
         <div
           className={`rounded-md border px-4 py-3 text-sm ${
-            sucesso
+            tomAlerta === "sucesso"
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-800"
+              : tomAlerta === "inconclusivo"
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-red-200 bg-red-50 text-red-800"
           }`}
         >
           {mensagem}
@@ -258,7 +280,7 @@ export function PixGeranetWorkspace({
           recebedorCidade={integracao?.recebedor_cidade ?? ""}
           onMensagem={(texto, ok) => {
             setMensagem(texto);
-            setSucesso(ok);
+            setTomAlerta(ok ? "sucesso" : "erro");
           }}
         />
       ) : pixIntegradoLiberado ? (
@@ -311,21 +333,23 @@ export function PixGeranetWorkspace({
               onChange={(event) => trocarProvedor(event.target.value)}
               className="updv-select mt-1 w-full"
             >
-              {PROVEDORES_PIX_GERANET.map((item) => (
-                <option
-                  key={item.codigo}
-                  value={item.codigo}
-                  disabled={!item.configuracaoDisponivel}
-                >
-                  {item.configuracaoDisponivel
-                    ? item.nome
-                    : `${item.nome} — Em validação`}
+              {PROVEDORES_PIX_SELECIONAVEIS.map((item) => (
+                <option key={item.codigo} value={item.codigo}>
+                  {item.nome}
                 </option>
               ))}
             </select>
           </label>
 
-          {formulario.usaChavePix && (
+          {provedorSalvoForaDoCatalogo && (
+            <p className="md:col-span-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+              O provedor salvo anteriormente não está disponível nesta versão.
+              Selecione um dos bancos suportados para continuar.
+            </p>
+          )}
+
+          {formulario.usaChavePix &&
+            !formulario.campos.some((campo) => campo.chave === "chavePix") && (
             <label className="text-[13px] font-medium text-zinc-700">
               Chave PIX
               <input
@@ -481,6 +505,12 @@ export function PixGeranetWorkspace({
             Testar conexão
           </button>
         </div>
+        <p className="mt-2 text-[12px] text-zinc-500">
+          O teste consulta um TXID sintético, sem emitir cobrança. Só marca
+          sucesso quando a resposta comprova autenticação aceita e erro de
+          cobrança inexistente. Resposta genérica fica inconclusiva; recusa
+          de certificado, token ou credencial é erro.
+        </p>
       </form>
 
       <section className="rounded-md border border-zinc-200 bg-white p-4">

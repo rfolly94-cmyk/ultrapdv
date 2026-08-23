@@ -9,6 +9,7 @@ import {
 } from "@/lib/carteira/acesso-operacao";
 import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
 import { createClient } from "@/lib/supabase/server";
+import { carregarResumoCarteiraListagem } from "@/lib/clientes/carregar-resumo-carteira";
 import { ErroPermissao } from "@/lib/permissoes/erro";
 
 type ReceberInput = {
@@ -346,6 +347,49 @@ export async function receberCarteira(
         error instanceof Error
           ? error.message
           : "Erro inesperado ao receber pagamento.",
+    };
+  }
+}
+
+export async function carregarResumoCarteiraCliente(clienteId: string) {
+  try {
+    const { supabase, empresaId } = await getContexto();
+
+    try {
+      await exigirOperacaoCarteira({
+        empresaId,
+        acao: "acessar_carteira",
+        origem: "carregarResumoCarteiraCliente",
+      });
+    } catch (error) {
+      if (error instanceof ErroEntitlement || error instanceof ErroPermissao) {
+        return { ok: false as const, erro: error.message };
+      }
+      throw error;
+    }
+
+    if (!uuidValido(clienteId)) {
+      return { ok: false as const, erro: "Cliente inválido." };
+    }
+
+    const resumo = await carregarResumoCarteiraListagem({
+      supabase,
+      empresaId,
+      clienteId,
+    });
+
+    if (!resumo) {
+      return { ok: false as const, erro: "Cliente não encontrado." };
+    }
+
+    return { ok: true as const, resumo };
+  } catch (error) {
+    return {
+      ok: false as const,
+      erro:
+        error instanceof Error
+          ? error.message
+          : "Erro ao carregar a carteira do cliente.",
     };
   }
 }

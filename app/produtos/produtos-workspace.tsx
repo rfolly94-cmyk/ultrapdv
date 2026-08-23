@@ -19,7 +19,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import {
   atualizarPublicacaoCatalogo,
   editarProduto,
-  excluirOuInativarProduto,
+  inativarProduto,
   reativarProduto,
 } from "./actions";
 import {
@@ -89,7 +89,7 @@ export function ProdutosWorkspace({
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [produtoEdicao, setProdutoEdicao] =
     useState<ProdutoListagem | null>(null);
-  const [produtoExclusao, setProdutoExclusao] =
+  const [produtoInativacao, setProdutoInativacao] =
     useState<ProdutoListagem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -143,23 +143,22 @@ export function ProdutosWorkspace({
     });
   }
 
-  function confirmarExclusao() {
-    if (!produtoExclusao) {
+  function confirmarInativacao() {
+    if (!produtoInativacao) {
       return;
     }
 
-    const produtoId = produtoExclusao.id;
+    const produtoId = produtoInativacao.id;
 
     startTransition(async () => {
-      const resultado =
-        await excluirOuInativarProduto(produtoId);
+      const resultado = await inativarProduto(produtoId);
 
       if (!resultado.ok) {
         setErro(resultado.erro);
         return;
       }
 
-      setProdutoExclusao(null);
+      setProdutoInativacao(null);
       mostrarToast(resultado.mensagem);
       router.refresh();
     });
@@ -320,17 +319,17 @@ export function ProdutosWorkspace({
                         href: `/produtos?fiscal=${produto.id}`,
                       },
                       {
-                        label: "Reativar",
+                        label: "Reativar produto",
                         hidden: produto.ativo,
                         onClick: () => confirmarReativacao(produto.id),
                       },
                       {
-                        label: "Excluir",
+                        label: "Inativar produto",
                         danger: true,
                         hidden: !produto.ativo,
                         onClick: () => {
                           setErro(null);
-                          setProdutoExclusao(produto);
+                          setProdutoInativacao(produto);
                         },
                       },
                     ]}
@@ -418,35 +417,44 @@ export function ProdutosWorkspace({
       </AppModal>
 
       <AppModal
-        open={Boolean(produtoExclusao)}
-        title="Excluir produto"
-        onClose={() => setProdutoExclusao(null)}
+        open={Boolean(produtoInativacao)}
+        title="Inativar produto"
+        onClose={() => setProdutoInativacao(null)}
         footer={
           <>
             <button
               type="button"
-              onClick={() => setProdutoExclusao(null)}
+              onClick={() => setProdutoInativacao(null)}
               className="updv-btn updv-btn-ghost"
             >
               Cancelar
             </button>
             <button
               type="button"
-              onClick={confirmarExclusao}
+              onClick={confirmarInativacao}
               disabled={isPending}
               className="updv-btn bg-red-600 text-white hover:bg-red-700"
             >
-              {isPending ? "Processando..." : "Excluir"}
+              {isPending ? "Inativando..." : "Inativar produto"}
             </button>
           </>
         }
       >
         <p className="text-sm text-zinc-600">
-          Tem certeza que deseja excluir este produto?
+          O produto sai do PDV, das buscas de nova venda e do catálogo
+          público. Ele permanece no banco e no histórico.
         </p>
         <p className="mt-2 text-sm font-medium text-zinc-900">
-          {produtoExclusao?.nome}
+          {produtoInativacao?.nome}
         </p>
+        {produtoInativacao && produtoInativacao.quantidade > 0 ? (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Este produto possui {quantidadeTexto(produtoInativacao.quantidade)}{" "}
+            {rotuloUnidadeMedida(produtoInativacao.unidade_medida)} em estoque.
+            A inativação não altera o estoque, vendas ou documentos fiscais já
+            registrados.
+          </p>
+        ) : null}
       </AppModal>
 
       {toast && (

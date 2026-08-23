@@ -278,13 +278,22 @@ export function flagsVisiveisDoProvedor(params: {
   credenciaisConfiguradas?: boolean;
   certificadoConfigurado?: boolean;
 }) {
-  const atuais = params.flags[params.provedor]?.[params.ambiente] ?? {};
+  const atuais =
+    params.flags[params.provedor]?.[params.ambiente] ??
+    (params.provedor === "efibank"
+      ? params.flags.gerencianet?.[params.ambiente]
+      : undefined) ??
+    {};
 
   if (Object.keys(atuais).length > 0) {
     return atuais;
   }
 
-  if (params.provedor !== "efibank" || params.provedorSalvo !== "efibank") {
+  const legadoEfi =
+    params.provedor === "efibank" &&
+    (params.provedorSalvo === "efibank" ||
+      params.provedorSalvo === "gerencianet");
+  if (!legadoEfi) {
     return atuais;
   }
 

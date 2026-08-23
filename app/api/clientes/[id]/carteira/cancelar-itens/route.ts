@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { aplicarCors, respostaOptions } from "@/lib/api/cors-mobile";
 import {
   exigirCancelamentoItensCarteira,
   respostaNegacaoCarteira,
 } from "@/lib/carteira/acesso-operacao";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 import {
   conferirItensMesmaVenda,
@@ -23,7 +25,11 @@ type Context = {
 type DestinoRecebido = "DEVOLUCAO" | "CREDITO";
 
 function resposta(body: unknown, status = 200) {
-  return NextResponse.json(body, { status });
+  return aplicarCors(NextResponse.json(body, { status }), "GET, POST, OPTIONS");
+}
+
+export async function OPTIONS() {
+  return respostaOptions("GET, POST, OPTIONS");
 }
 
 function uuidValido(valor: string) {
@@ -43,7 +49,7 @@ function idsDaQuery(request: NextRequest) {
 async function contexto(clienteId: string) {
   const supabase = await createClient();
   const { data: claimsData, error: authError } =
-    await supabase.auth.getClaims();
+    await obterClaimsSessao(supabase);
 
   if (authError || !claimsData?.claims?.sub) {
     return { erro: resposta({ ok: false, erro: "Não autenticado." }, 401) };

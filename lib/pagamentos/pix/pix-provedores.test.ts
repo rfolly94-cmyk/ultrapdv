@@ -12,9 +12,13 @@ import {
 import { formularioCredenciaisProvedor } from "./formulario-provedor";
 import { montarPayloadCobrancaPix } from "./montar-payload";
 import {
+  CAMPOS_OFICIAIS_CREDENCIAIS_GERANET,
+  CODIGOS_PIX_SELECIONAVEIS,
   PROVEDORES_PIX_GERANET,
   PROVEDORES_PIX_SELECIONAVEIS,
   ambientesSuportadosDoProvedor,
+  codigoProvedorPixParaTela,
+  ehProvedorPixSelecionavel,
   filtrarSegredosPorNamespace,
   nomeSegredoBancario,
   prefixoSegredosProvedor,
@@ -191,6 +195,35 @@ test("8. payload contém somente campos daquele provedor", () => {
   ]);
 });
 
+test("payload Mercado Pago envia chavePix e tokenAcesso", () => {
+  const credenciais = filtrarCredenciaisDoProvedor(
+    "mercadopago",
+    misturado,
+    "chave-publica"
+  );
+  const payload = montarPayloadCobrancaPix({
+    ambiente: "2",
+    provedor: "mercadopago",
+    cnpj: "12345678000190",
+    credenciais,
+    recebedor: {
+      nome: "Empresa Teste",
+      cep: "78000000",
+      cidade: "Cuiabá",
+      uf: "MT",
+    },
+    cobranca: { valor: 1 },
+  });
+
+  assert.deepEqual(Object.keys(payload.credenciais).sort(), [
+    "chavePix",
+    "tokenAcesso",
+  ]);
+  assert.equal(payload.credenciais.chavePix, "chave-publica");
+  assert.equal(payload.credenciais.tokenAcesso, "token-mp");
+  assert.equal(payload.provedor, "mercadopago");
+});
+
 test("9. campos vazios são removidos", () => {
   const credenciais = filtrarCredenciaisDoProvedor(
     "efibank",
@@ -266,6 +299,10 @@ test("12. troca de provedor atualiza a UI sem reload completo", () => {
   assert.equal(efi.titulo, "Credenciais Efí Bank");
   assert.equal(sicredi.titulo, "Credenciais Sicredi");
   assert.equal(inter.titulo, "Credenciais Banco Inter");
+  assert.equal(
+    formularioCredenciaisProvedor("mercadopago").titulo,
+    "Credenciais Mercado Pago"
+  );
 });
 
 test("13. provedor não mapeado não inventa campos", () => {
@@ -353,17 +390,48 @@ test("legado Efí não é aplicado a outro provedor", () => {
 test("TODOS_OS_PROVEDORES_DO_SELECT_DEVEM_ESTAR_MAPEADOS", () => {
   for (const item of PROVEDORES_PIX_SELECIONAVEIS) {
     assert.equal(item.configuracaoDisponivel, true, item.codigo);
+    assert.equal(item.selecionavel, true, item.codigo);
     assert.ok(item.nome, item.codigo);
     assert.ok(item.campos.length > 0, item.codigo);
   }
 
+  assert.deepEqual(
+    PROVEDORES_PIX_SELECIONAVEIS.map((item) => item.codigo).sort(),
+    [...CODIGOS_PIX_SELECIONAVEIS].sort()
+  );
+
   const selecionaveis = PROVEDORES_PIX_GERANET.filter(
-    (item) => item.configuracaoDisponivel
+    (item) => item.selecionavel && item.configuracaoDisponivel
   );
   assert.deepEqual(
     selecionaveis.map((item) => item.codigo).sort(),
     PROVEDORES_PIX_SELECIONAVEIS.map((item) => item.codigo).sort()
   );
+});
+
+test("somente Efí, Sicredi, Inter e Mercado Pago entram no select", () => {
+  assert.deepEqual(
+    PROVEDORES_PIX_SELECIONAVEIS.map((item) => item.codigo).sort(),
+    ["efibank", "inter", "mercadopago", "sicredi"]
+  );
+  assert.equal(ehProvedorPixSelecionavel("gerencianet"), false);
+  assert.equal(ehProvedorPixSelecionavel("cielo"), false);
+  assert.equal(ehProvedorPixSelecionavel("bancodobrasil"), false);
+  assert.equal(codigoProvedorPixParaTela("gerencianet"), "efibank");
+  assert.equal(codigoProvedorPixParaTela("cielo"), "efibank");
+  assert.equal(codigoProvedorPixParaTela("sicredi"), "sicredi");
+});
+
+test("provedores prontos usam só campos oficiais da Geranet", () => {
+  const oficiais = new Set<string>(CAMPOS_OFICIAIS_CREDENCIAIS_GERANET);
+  for (const provedor of PROVEDORES_PIX_SELECIONAVEIS) {
+    for (const campo of provedor.campos) {
+      assert.ok(
+        oficiais.has(campo.chave),
+        `${provedor.codigo} inventou ${campo.chave}`
+      );
+    }
+  }
 });
 
 for (const provedor of PROVEDORES_PIX_SELECIONAVEIS) {
@@ -522,8 +590,16 @@ test("Gerencianet e Efí compartilham o mesmo perfil de credenciais", () => {
   assert.equal(provedoresPixGeranet.efibank.codigo, "efibank");
 });
 
-test("Mercado Pago valida Access Token sem exigir Chave PIX", () => {
+test("Mercado Pago exige Chave PIX e Access Token", () => {
+  const form = formularioCredenciaisProvedor("mercadopago");
+  assert.equal(form.titulo, "Credenciais Mercado Pago");
+  assert.deepEqual(
+    form.campos.map((campo) => campo.chave),
+    ["chavePix", "tokenAcesso"]
+  );
+  assert.equal(form.usaChavePix, true);
+  assert.equal(form.chavePixObrigatoria, true);
   const erros = validarCredenciaisDoProvedor("mercadopago", {}, "1");
   assert.ok(erros.some((erro) => erro.includes("Access Token")));
-  assert.equal(erros.some((erro) => erro.includes("Chave PIX")), false);
+  assert.ok(erros.some((erro) => erro.includes("Chave PIX")));
 });

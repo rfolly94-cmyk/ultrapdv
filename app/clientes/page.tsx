@@ -3,15 +3,14 @@ import { redirect } from "next/navigation";
 import { cadastrarCliente, editarCliente } from "./actions";
 
 import { ClienteNavegacao } from "@/components/clientes/cliente-navegacao";
+import { ClientesListagemWorkspace } from "@/components/clientes/clientes-listagem-workspace";
 import { EnderecoViaCepCampos } from "@/components/cadastro/endereco-via-cep-campos";
 import { createClient } from "@/lib/supabase/server";
-import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
-import { ListToolbar } from "@/components/ui/list-toolbar";
 import { PageAlert } from "@/components/ui/page-alert";
 import { PageHeader } from "@/components/ui/page-header";
-import { RowActions } from "@/components/ui/row-actions";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
+import { carregarListagemClientes } from "@/lib/clientes/carregar-listagem";
+import { parseFiltroListagemClientes } from "@/lib/clientes/listagem";
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
@@ -24,53 +23,9 @@ type PageProps = {
     editar?: string;
     novo?: string;
     q?: string;
+    filtro?: string;
   }>;
 };
-
-function dinheiro(
-  valor: number | string | null
-) {
-  return Number(
-    valor ?? 0
-  ).toLocaleString(
-    "pt-BR",
-    {
-      style: "currency",
-      currency: "BRL",
-    }
-  );
-}
-
-function formatarDocumento(
-  tipoPessoa: string,
-  documento: string | null
-) {
-  const digitos =
-    String(documento ?? "")
-      .replace(/\D/g, "");
-
-  if (
-    tipoPessoa === "F" &&
-    digitos.length === 11
-  ) {
-    return digitos.replace(
-      /(\d{3})(\d{3})(\d{3})(\d{2})/,
-      "$1.$2.$3-$4"
-    );
-  }
-
-  if (
-    tipoPessoa === "J" &&
-    digitos.length === 14
-  ) {
-    return digitos.replace(
-      /(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,
-      "$1.$2.$3/$4-$5"
-    );
-  }
-
-  return digitos || "Sem documento";
-}
 
 export default async function ClientesPage({
   searchParams,
@@ -135,96 +90,90 @@ export default async function ClientesPage({
   const importadorNoPlano = (
     await planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "importador")
   ).permitido;
-  const [carteiraNoPlano, sessaoPermissoes] = await Promise.all([
-    planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "carteira").then(
-      (plano) => plano.permitido
-    ),
-    obterPermissoesSessao(),
-  ]);
+  const [carteiraNoPlano, pdvNoPlano, vendasNoPlano, sessaoPermissoes] =
+    await Promise.all([
+      planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "carteira").then(
+        (plano) => plano.permitido
+      ),
+      planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "pdv").then(
+        (plano) => plano.permitido
+      ),
+      planoPermiteRecursoEmpresa(String(vinculo.empresa_id), "vendas").then(
+        (plano) => plano.permitido
+      ),
+      obterPermissoesSessao(),
+    ]);
   const podeAcessarCarteira =
     carteiraNoPlano &&
     temPermissao(sessaoPermissoes?.permissoes, "clientes", "acessar_carteira");
+  const podeReceberCarteira =
+    podeAcessarCarteira &&
+    temPermissao(sessaoPermissoes?.permissoes, "clientes", "receber_carteira");
+  const podeNovaVenda =
+    pdvNoPlano && temPermissao(sessaoPermissoes?.permissoes, "pdv", "acessar");
+  const podeVerVendas =
+    (vendasNoPlano &&
+      temPermissao(sessaoPermissoes?.permissoes, "vendas", "acessar")) ||
+    podeAcessarCarteira;
 
-  let query = supabase
-    .from("clientes")
-    .select(`
-      id,
-      nome,
-      nome_fantasia,
-      tipo_pessoa,
-      cpf_cnpj,
-      inscricao_estadual,
-      contribuinte_icms,
-      indicador_ie_destinatario,
-      consumidor_final,
-      telefone,
-      email,
-      cep,
-      logradouro,
-      numero,
-      complemento,
-      bairro,
-      municipio,
-      codigo_municipio_ibge,
-      uf,
-      limite_credito,
-      saldo_devedor,
-      bloqueado,
-      dia_vencimento,
-      observacao,
-      ativo
-    `)
-    .eq(
-      "empresa_id",
-      vinculo.empresa_id
-    )
-    .order("ativo", {
-      ascending: false,
-    })
-    .order("nome");
+  const busca = String(params.q ?? "").trim();
+  const filtro = parseFiltroListagemClientes(params.filtro);
 
-  const busca =
-    String(params.q ?? "")
-      .trim();
-
-  if (busca) {
-    const buscaSegura =
-      busca
-        .replace(/[%_,()]/g, " ")
-        .trim();
-
-    if (buscaSegura) {
-      query = query.or(
-        [
-          `nome.ilike.%${buscaSegura}%`,
-          `nome_fantasia.ilike.%${buscaSegura}%`,
-          `cpf_cnpj.ilike.%${buscaSegura.replace(/\D/g, "")}%`,
-          `telefone.ilike.%${buscaSegura.replace(/\D/g, "")}%`,
-        ].join(",")
-      );
-    }
-  }
-
-  const {
-    data: clientes,
-    error,
-  } = await query;
-
-  if (error) {
-    throw new Error(
-      error.message
-    );
-  }
-
-  const clienteEdicao =
+  const [listagem, clienteEdicaoResult] = await Promise.all([
+    params.novo
+      ? Promise.resolve({
+          clientes: [],
+          total: 0,
+          contadores: { debito: 0, credito: 0, vencidos: 0 },
+        })
+      : carregarListagemClientes({
+          supabase,
+          empresaId: String(vinculo.empresa_id),
+          busca,
+          filtro,
+        }),
     params.editar
-      ? clientes?.find(
-          (cliente) =>
-            cliente.id ===
-            params.editar
-        )
-      : null;
+      ? supabase
+          .from("clientes")
+          .select(`
+            id,
+            nome,
+            nome_fantasia,
+            tipo_pessoa,
+            cpf_cnpj,
+            inscricao_estadual,
+            contribuinte_icms,
+            indicador_ie_destinatario,
+            consumidor_final,
+            telefone,
+            email,
+            cep,
+            logradouro,
+            numero,
+            complemento,
+            bairro,
+            municipio,
+            codigo_municipio_ibge,
+            uf,
+            limite_credito,
+            saldo_devedor,
+            bloqueado,
+            dia_vencimento,
+            observacao,
+            ativo
+          `)
+          .eq("empresa_id", vinculo.empresa_id)
+          .eq("id", params.editar)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
 
+  if (clienteEdicaoResult.error) {
+    throw new Error(clienteEdicaoResult.error.message);
+  }
+
+  const clientes = listagem.clientes;
+  const clienteEdicao = clienteEdicaoResult.data;
   const mostrarFormulario = Boolean(clienteEdicao || params.novo);
   const mostrarLista = !clienteEdicao && !params.novo;
 
@@ -259,11 +208,17 @@ export default async function ClientesPage({
       )}
 
       {mostrarLista ? (
-      <ListToolbar
-        searchAction="/clientes"
-        searchDefault={busca}
-        searchPlaceholder="Buscar cliente, CPF/CNPJ ou telefone"
-      />
+        <ClientesListagemWorkspace
+          clientesIniciais={clientes}
+          totalInicial={listagem.total}
+          contadoresIniciais={listagem.contadores}
+          filtro={filtro}
+          busca={busca}
+          podeAcessarCarteira={podeAcessarCarteira}
+          podeReceberCarteira={podeReceberCarteira}
+          podeNovaVenda={podeNovaVenda}
+          podeVerVendas={podeVerVendas}
+        />
       ) : null}
 
       <div>
@@ -546,87 +501,6 @@ export default async function ClientesPage({
         </section>
         )}
       </div>
-
-        {mostrarLista ? (
-        <DataTable minWidth={900}>
-          <thead>
-            <tr>
-              <th>Ações</th>
-              <th>Nome</th>
-              <th>Saldo</th>
-              <th>CPF/CNPJ</th>
-              <th>Telefone</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {clientes?.map((cliente) => {
-              const saldo = Number(cliente.saldo_devedor ?? 0);
-              const iniciais = cliente.nome
-                .split(" ")
-                .filter(Boolean)
-                .slice(0, 2)
-                .map((parte: string) => parte[0]?.toUpperCase() ?? "")
-                .join("");
-              return (
-                <tr key={cliente.id}>
-                  <td>
-                    <RowActions
-                      editHref={`/clientes?editar=${cliente.id}`}
-                      items={[
-                        {
-                          label: "Carteira",
-                          href: `/clientes/${cliente.id}/carteira`,
-                          hidden: !podeAcessarCarteira,
-                        },
-                      ]}
-                    />
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-400 text-[10px] font-bold text-white">
-                        {iniciais || "?"}
-                      </span>
-                      <span className="font-medium">{cliente.nome}</span>
-                    </div>
-                  </td>
-                  <td
-                    className={`font-medium ${
-                      saldo > 0 ? "text-red-600" : "text-zinc-700"
-                    }`}
-                  >
-                    {saldo > 0
-                      ? `Saldo: -${dinheiro(saldo)}`
-                      : dinheiro(saldo)}
-                  </td>
-                  <td>
-                    {formatarDocumento(
-                      cliente.tipo_pessoa,
-                      cliente.cpf_cnpj
-                    )}
-                  </td>
-                  <td>{cliente.telefone ?? "—"}</td>
-                  <td>
-                    <StatusBadge
-                      status={cliente.ativo ? "ativo" : "inativo"}
-                    />
-                    {cliente.bloqueado ? (
-                      <span className="ml-1">
-                        <StatusBadge status="bloqueado" />
-                      </span>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-            {!clientes?.length && (
-              <DataTableEmpty colSpan={6}>
-                Nenhum cliente encontrado.
-              </DataTableEmpty>
-            )}
-          </tbody>
-        </DataTable>
-        ) : null}
     </main>
   );
 }

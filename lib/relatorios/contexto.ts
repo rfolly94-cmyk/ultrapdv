@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { buscarVinculoEmpresaAtiva } from "@/lib/empresa/empresa-ativa";
+import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 import {
   ABAS_RELATORIO,
@@ -12,7 +13,7 @@ import { periodoRelatorioValido } from "./periodo";
 
 export async function obterContextoRelatorio() {
   const supabase = await createClient();
-  const { data: claimsData, error } = await supabase.auth.getClaims();
+  const { data: claimsData, error } = await obterClaimsSessao(supabase);
 
   if (error || !claimsData?.claims?.sub) {
     redirect("/login");

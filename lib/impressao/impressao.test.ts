@@ -335,6 +335,14 @@ test("Imprimir no PDV, Vendas, Carteira, CC-e e Relatórios passa pelo Conector"
     /\/api\/impressao\/carteira-abertos/
   );
   assert.match(
+    fonte("components/clientes/carteira/modal-recibo-recebimento.tsx"),
+    /imprimirUrlPdfNoUltraPdvConector/
+  );
+  assert.doesNotMatch(
+    fonte("components/clientes/carteira/modal-recibo-recebimento.tsx"),
+    /window\.print/
+  );
+  assert.match(
     fonte("components/fiscal/emissao-fiscal-acoes.tsx"),
     /Imprimir CC-e/
   );

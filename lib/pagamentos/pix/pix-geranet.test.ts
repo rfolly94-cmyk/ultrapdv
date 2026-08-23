@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { garantirEmpresa, montarPayloadCobrancaPix } from "./montar-payload";
+import {
+  classificarRespostaTestePix,
+  LIMITACAO_TESTE_PIX_GERANET,
+  MENSAGEM_TESTE_MERCADOPAGO_INCONCLUSIVO,
+  METODO_TESTE_PIX_GERANET,
+  TXID_TESTE_CONEXAO_PIX,
+} from "./testar-conexao";
 import { normalizarRespostaPix } from "./normalizar-resposta";
 import { payloadSemCredenciais, sanitizarRespostaPix } from "./sanitizar";
 import { podeCancelarLocalmente, statusAposRespostaHttp } from "./status";
@@ -219,6 +226,112 @@ test("10. PIX pago não pode ser tratado como cancelado localmente", () => {
       operacao: "cancelar",
     }),
     "paga"
+  );
+});
+
+test("teste de conexão não emite cobrança e classifica consulta sintética", () => {
+  const payload = montarPayloadCobrancaPix({
+    ambiente: "2",
+    provedor: "sicredi",
+    cnpj: "12345678000190",
+    credenciais: {
+      clienteId: "cli",
+      clienteSegredo: "segredo",
+      certificadoPemHexadecimal: "aa",
+      chavePrivadaPemHexadecimal: "bb",
+      chavePix: "chave",
+    },
+    recebedor: {
+      nome: "Empresa Teste",
+      cep: "78000000",
+      cidade: "Cuiabá",
+      uf: "MT",
+    },
+    txid: TXID_TESTE_CONEXAO_PIX,
+  });
+
+  assert.equal(payload.txid, TXID_TESTE_CONEXAO_PIX);
+  assert.equal(payload.cobranca, undefined);
+  assert.equal(payload.provedor, "sicredi");
+  assert.equal(METODO_TESTE_PIX_GERANET, "pix_consultar_txid_sintetico");
+
+  const encontrado = classificarRespostaTestePix({
+    httpStatus: 404,
+    situacao: "erro",
+    mensagem: "Cobrança não encontrada",
+  });
+  assert.equal(encontrado.resultado, "sucesso");
+  assert.equal(encontrado.ok, true);
+  assert.equal(encontrado.provedorAutenticado, true);
+  assert.match(encontrado.mensagem, /Autenticação aceita/);
+  assert.match(encontrado.limitacao, /não publica endpoint de teste PIX/);
+
+  const credencial = classificarRespostaTestePix({
+    httpStatus: 401,
+    situacao: "erro",
+    mensagem: "invalid_client",
+  });
+  assert.equal(credencial.resultado, "erro");
+  assert.equal(credencial.ok, false);
+  assert.equal(credencial.provedorAutenticado, false);
+
+  const certificado = classificarRespostaTestePix({
+    httpStatus: 422,
+    situacao: "erro",
+    mensagem: "certificado inválido",
+  });
+  assert.equal(certificado.resultado, "erro");
+  assert.equal(certificado.ok, false);
+
+  const generico = classificarRespostaTestePix({
+    httpStatus: 422,
+    situacao: "erro",
+    mensagem: "Falha ao consultar PIX",
+  });
+  assert.equal(generico.resultado, "inconclusivo");
+  assert.equal(generico.ok, false);
+  assert.equal(generico.provedorAutenticado, false);
+  assert.match(generico.mensagem, /inconclusivo/);
+  assert.equal(generico.limitacao, LIMITACAO_TESTE_PIX_GERANET);
+
+  const http200Ambiguo = classificarRespostaTestePix({
+    httpStatus: 200,
+    situacao: "sucesso",
+    mensagem: "",
+  });
+  assert.equal(http200Ambiguo.resultado, "inconclusivo");
+  assert.equal(http200Ambiguo.ok, false);
+  assert.equal(http200Ambiguo.provedorAutenticado, false);
+
+  const http404Ambiguo = classificarRespostaTestePix({
+    httpStatus: 404,
+    situacao: "erro",
+    mensagem: "",
+  });
+  assert.equal(http404Ambiguo.resultado, "inconclusivo");
+  assert.equal(http404Ambiguo.ok, false);
+
+  const txidFormato = classificarRespostaTestePix({
+    httpStatus: 400,
+    situacao: "erro",
+    mensagem: "txid inválido",
+  });
+  assert.equal(txidFormato.resultado, "inconclusivo");
+  assert.equal(txidFormato.ok, false);
+
+  const mercadoPago500 = classificarRespostaTestePix({
+    httpStatus: 200,
+    situacao: "erro",
+    mensagem: ":",
+    dadosStatus: 500,
+    provedor: "mercadopago",
+  });
+  assert.equal(mercadoPago500.resultado, "inconclusivo");
+  assert.equal(mercadoPago500.ok, false);
+  assert.equal(mercadoPago500.provedorAutenticado, false);
+  assert.equal(
+    mercadoPago500.mensagem,
+    MENSAGEM_TESTE_MERCADOPAGO_INCONCLUSIVO
   );
 });
 

@@ -21,6 +21,7 @@ import { carregarConfiguracaoPixLocal } from "@/lib/pagamentos/pix/local";
 import {
   camposCredencialDoProvedor,
   ehProvedorPixGeranet,
+  ehProvedorPixSelecionavel,
   obterProvedorPixGeranet,
 } from "@/lib/pagamentos/pix/provedores";
 
@@ -181,7 +182,8 @@ export async function salvarConfiguracaoPix(formData: FormData) {
 
   const provedor = texto(formData.get("provedor"));
   const ambiente = texto(formData.get("ambiente"));
-  const chavePix = texto(formData.get("chave_pix"));
+  const chavePix =
+    texto(formData.get("chave_pix")) || texto(formData.get("chavePix"));
   const recebedorNome = texto(formData.get("recebedor_nome"));
   const recebedorCep = texto(formData.get("recebedor_cep")).replace(/\D/g, "");
   const recebedorCidade = texto(formData.get("recebedor_cidade"));
@@ -203,10 +205,13 @@ export async function salvarConfiguracaoPix(formData: FormData) {
   }
 
   const meta = obterProvedorPixGeranet(provedor);
-  if (!meta?.configuracaoDisponivel) {
+  if (
+    !meta?.configuracaoDisponivel ||
+    (!ehProvedorPixSelecionavel(provedor) && provedor !== "gerencianet")
+  ) {
     return {
       ok: false as const,
-      erro: "Este provedor ainda está em validação e não pode ser configurado.",
+      erro: "Este provedor ainda não está disponível para configuração.",
     };
   }
   const { data: atual } = await supabase
@@ -291,9 +296,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
     provedor,
     ambiente,
     ativo: true,
-    chave_pix: formData.has("chave_pix")
-      ? chavePix || null
-      : atual?.chave_pix ?? null,
+    chave_pix: chavePix || atual?.chave_pix || null,
     recebedor_nome: recebedorNome,
     recebedor_cep: recebedorCep || null,
     recebedor_cidade: recebedorCidade,

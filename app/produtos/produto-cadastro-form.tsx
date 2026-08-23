@@ -49,6 +49,7 @@ export type ProdutoFormularioValores = {
   unidade_medida: string;
   preco_custo: number | string | null;
   preco_venda: number | string | null;
+  ativo?: boolean;
   catalogo_publicado?: boolean;
   catalogo_descricao?: string | null;
   catalogo_destaque?: boolean;
@@ -304,6 +305,17 @@ export function ProdutoFormCampos({
             </p>
           </div>
         )}
+
+      <label className="flex items-center gap-2 text-sm font-medium text-zinc-800 md:col-span-3">
+        <input
+          type="checkbox"
+          name="ativo"
+          value="1"
+          defaultChecked={produto?.ativo !== false}
+          className="size-4 rounded border-zinc-300"
+        />
+        Produto ativo
+      </label>
 
       {catalogoNoPlano ? <ProdutoCatalogoCampos produto={produto} /> : null}
 

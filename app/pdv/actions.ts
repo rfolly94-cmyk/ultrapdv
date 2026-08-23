@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { validarPixNaFinalizacaoComercial } from "@/lib/pagamentos/pix/modo-ativo-servidor";
 import { avaliarTetoPagamentosNoServidor } from "@/lib/pdv/validar-teto-servidor";
+import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacional";
 import { exigirEmpresaOperacional } from "@/lib/assinatura/exigir-empresa-operacional";
@@ -13,8 +14,9 @@ import {
   exigirOperacaoPdv,
   resultadoNegacaoPdv,
 } from "@/lib/pdv/acesso-operacao";
+import { mensagemErroFinalizacaoPublica } from "@/lib/pdv/mensagem-erro-publica";
 
-type FinalizarVendaPdvInput = {
+export type FinalizarVendaPdvInput = {
   idempotencyKey: string;
   clienteId: string | null;
   descontoCentavos: number;
@@ -34,7 +36,7 @@ type FinalizarVendaPdvInput = {
   }>;
 };
 
-type FinalizarVendaPdvResultado =
+export type FinalizarVendaPdvResultado =
   | {
       ok: true;
       vendaId: string;
@@ -44,7 +46,10 @@ type FinalizarVendaPdvResultado =
   | {
       ok: false;
       erro: string;
-      codigo?: "RECURSO_NAO_CONTRATADO";
+      codigo?:
+        | "RECURSO_NAO_CONTRATADO"
+        | "NAO_AUTENTICADO"
+        | "SEM_EMPRESA";
     };
 
 function uuidValido(
@@ -64,7 +69,7 @@ function centavosParaDecimal(
   );
 }
 
-export async function finalizarVendaPdv(
+export async function executarFinalizacaoVendaPdv(
   input: FinalizarVendaPdvInput
 ): Promise<FinalizarVendaPdvResultado> {
   try {
@@ -75,13 +80,17 @@ export async function finalizarVendaPdv(
       data: claimsData,
       error: authError,
     } =
-      await supabase.auth.getClaims();
+      await obterClaimsSessao(supabase);
 
     if (
       authError ||
       !claimsData?.claims?.sub
     ) {
-      redirect("/login");
+      return {
+        ok: false,
+        erro: "Não autenticado.",
+        codigo: "NAO_AUTENTICADO",
+      };
     }
 
     const { data: vinculo } =
@@ -94,7 +103,12 @@ export async function finalizarVendaPdv(
         .maybeSingle();
 
     if (!vinculo) {
-      redirect("/onboarding");
+      return {
+        ok: false,
+        erro:
+          "Nenhuma empresa ativa encontrada. Conclua o acesso no UltraPDV web.",
+        codigo: "SEM_EMPRESA",
+      };
     }
 
     try {
@@ -436,9 +450,10 @@ export async function finalizarVendaPdv(
 
       return {
         ok: false,
-        erro:
+        erro: mensagemErroFinalizacaoPublica(
           error.message ||
-          "Não foi possível finalizar a venda.",
+            "Não foi possível finalizar a venda."
+        ),
       };
     }
 
@@ -535,10 +550,23 @@ export async function finalizarVendaPdv(
 
     return {
       ok: false,
-      erro:
-        error instanceof Error
-          ? error.message
-          : "Erro inesperado ao finalizar a venda.",
+      erro: mensagemErroFinalizacaoPublica(error),
     };
   }
+}
+
+export async function finalizarVendaPdv(
+  input: FinalizarVendaPdvInput
+): Promise<FinalizarVendaPdvResultado> {
+  const resultado = await executarFinalizacaoVendaPdv(input);
+
+  if (!resultado.ok && resultado.codigo === "NAO_AUTENTICADO") {
+    redirect("/login");
+  }
+
+  if (!resultado.ok && resultado.codigo === "SEM_EMPRESA") {
+    redirect("/onboarding");
+  }
+
+  return resultado;
 }

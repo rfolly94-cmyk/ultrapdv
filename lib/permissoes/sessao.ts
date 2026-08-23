@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 
 import { buscarVinculoEmpresaAtiva } from "@/lib/empresa/empresa-ativa";
+import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 
 import {
@@ -16,7 +17,7 @@ export { carregarPermissoesDoVinculo };
 
 export const obterPermissoesSessao = cache(async (): Promise<SessaoPermissoes | null> => {
   const supabase = await createClient();
-  const { data: claimsData, error } = await supabase.auth.getClaims();
+  const { data: claimsData, error } = await obterClaimsSessao(supabase);
   const usuarioId = claimsData?.claims?.sub;
 
   if (error || !usuarioId) {

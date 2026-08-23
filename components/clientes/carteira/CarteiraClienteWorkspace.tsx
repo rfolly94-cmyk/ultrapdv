@@ -33,6 +33,7 @@ import { CancelarVendaComercial } from "@/components/vendas/cancelar-venda-comer
 import { CancelarItensCarteira } from "@/components/clientes/carteira/CancelarItensCarteira";
 import { conferirItensMesmaVenda } from "@/lib/carteira/cancelar-itens";
 import { BotaoImprimirConector } from "@/components/impressao/botao-imprimir-conector";
+import { ModalReciboRecebimento } from "@/components/clientes/carteira/modal-recibo-recebimento";
 
 type Cliente = {
   id: string;
@@ -170,6 +171,7 @@ type Aba =
   | "COMPRAS";
 
 type Props = {
+  abaInicial?: Aba;
   cliente: Cliente;
   titulos: Titulo[];
   itens: Item[];
@@ -235,6 +237,7 @@ function classeStatus(status: string) {
 }
 
 export function CarteiraClienteWorkspace({
+  abaInicial = "EM_ABERTO",
   cliente,
   titulos,
   itens,
@@ -248,7 +251,7 @@ export function CarteiraClienteWorkspace({
   fiscais,
 }: Props) {
   const router = useRouter();
-  const [aba, setAba] = useState<Aba>("EM_ABERTO");
+  const [aba, setAba] = useState<Aba>(abaInicial);
   const [periodo, setPeriodo] = useState<PeriodoCarteira>("todos");
   const [inicio, setInicio] = useState("");
   const [fim, setFim] = useState("");
@@ -271,6 +274,7 @@ export function CarteiraClienteWorkspace({
     numeroVenda: string;
     possuiFiscal: boolean;
   } | null>(null);
+  const [reciboImprimir, setReciboImprimir] = useState<Recebimento | null>(null);
   const [avisoFiscalEstornoOk, setAvisoFiscalEstornoOk] = useState(false);
   const [motivoEstorno, setMotivoEstorno] = useState("");
 
@@ -935,6 +939,7 @@ export function CarteiraClienteWorkspace({
                 recebimentos={recebimentos}
                 estornosPorRecebimento={estornosPorRecebimento}
                 alocacoesPorRecebimento={alocacoesPorRecebimento}
+                onImprimir={setReciboImprimir}
                 onCancelar={(recebimento) => {
                   const aloc = alocacoesPorRecebimento.get(recebimento.id)?.[0];
                   const tituloId = aloc
@@ -965,6 +970,12 @@ export function CarteiraClienteWorkspace({
               <ol>
                 {movimentos.map((movimento) => {
                   const debito = movimento.tipo === "DEBITO";
+                  const recebimentoVinculado =
+                    movimento.origem === "RECEBIMENTO" && movimento.recebimento_id
+                      ? recebimentos.find(
+                          (item) => item.id === movimento.recebimento_id
+                        )
+                      : undefined;
                   return (
                     <li
                       key={movimento.id}
@@ -987,6 +998,15 @@ export function CarteiraClienteWorkspace({
                           {dataHora(movimento.created_at)}
                           {movimento.descricao ? ` · ${movimento.descricao}` : ""}
                         </p>
+                        {recebimentoVinculado ? (
+                          <button
+                            type="button"
+                            className="mt-1 text-xs font-semibold text-zinc-700 underline"
+                            onClick={() => setReciboImprimir(recebimentoVinculado)}
+                          >
+                            Imprimir
+                          </button>
+                        ) : null}
                       </div>
                       <p
                         className={`text-sm font-semibold ${
@@ -1135,6 +1155,7 @@ export function CarteiraClienteWorkspace({
             }
             estornosPorRecebimento={estornosPorRecebimento}
             alocacoesPorRecebimento={alocacoesPorRecebimento}
+            onImprimir={setReciboImprimir}
             onCancelar={(recebimento) => {
               const titulo = titulosPreparados.find(
                 (item) => item.id === recebimentosTituloId
@@ -1151,6 +1172,23 @@ export function CarteiraClienteWorkspace({
           />
         </Modal>
       )}
+
+      <ModalReciboRecebimento
+        open={Boolean(reciboImprimir)}
+        clienteId={cliente.id}
+        clienteNome={cliente.nome_fantasia || cliente.nome}
+        recebimento={
+          reciboImprimir
+            ? {
+                id: reciboImprimir.id,
+                valor: reciboImprimir.valor,
+                formaPagamento: reciboImprimir.forma_pagamento_nome,
+                dataIso: reciboImprimir.processado_at ?? reciboImprimir.created_at,
+              }
+            : null
+        }
+        onClose={() => setReciboImprimir(null)}
+      />
 
       {estorno && (
         <Modal
@@ -1436,12 +1474,14 @@ function ListaVendas({
 function HistoricoRecebimentos({
   recebimentos,
   estornosPorRecebimento,
+  onImprimir,
   onCancelar,
   podeCancelar,
 }: {
   recebimentos: Recebimento[];
   estornosPorRecebimento: Map<string, Estorno[]>;
   alocacoesPorRecebimento?: Map<string, Alocacao[]>;
+  onImprimir: (recebimento: Recebimento) => void;
   onCancelar: (recebimento: Recebimento) => void;
   podeCancelar: (recebimento: Recebimento) => boolean;
 }) {
@@ -1467,15 +1507,24 @@ function HistoricoRecebimentos({
                   {recebimento.forma_pagamento_nome ?? "—"}
                 </p>
               </div>
-              {podeCancelar(recebimento) && (
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700"
-                  onClick={() => onCancelar(recebimento)}
+                  className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700"
+                  onClick={() => onImprimir(recebimento)}
                 >
-                  Cancelar recebimento
+                  Imprimir
                 </button>
-              )}
+                {podeCancelar(recebimento) && (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700"
+                    onClick={() => onCancelar(recebimento)}
+                  >
+                    Cancelar recebimento
+                  </button>
+                )}
+              </div>
             </div>
             {listaEstornos.map((item) => (
               <div

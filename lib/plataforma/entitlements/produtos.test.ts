@@ -245,6 +245,13 @@ test("CASO 8: criar/editar/excluir direto exige plano + permissão antes da escr
   assert.match(excluir, /exigirProduto\([\s\S]*"excluir"/);
   assert.ok(excluir.indexOf("exigirProduto") < excluir.indexOf('.from("produtos")'));
 
+  const inativar = trecho(
+    "export async function inativarProduto",
+    "CADASTRO RÁPIDO"
+  );
+  assert.match(inativar, /exigirProduto\([\s\S]*"excluir"/);
+  assert.ok(inativar.indexOf("exigirProduto") < inativar.indexOf('.from("produtos")'));
+
   const acesso = fonte("lib/produtos/acesso-operacao.ts");
   assert.match(acesso, /recurso: "produtos"/);
   assert.match(acesso, /modulo: "produtos"/);

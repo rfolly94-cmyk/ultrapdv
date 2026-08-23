@@ -289,6 +289,7 @@ function lerDadosComerciaisProduto(
     precoCustoInformado: precoCusto,
     precoVendaInformado: precoVenda,
     estoqueInicialInformado: estoqueInicial,
+    ativo: formData.get("ativo") === "1",
   };
 }
 
@@ -475,7 +476,7 @@ function payloadComercialProduto(
     tipo_item: "00",
     preco_custo: dados.precoCusto,
     preco_venda: dados.precoVenda,
-    ativo: true,
+    ativo: dados.ativo,
   };
 }
 
@@ -788,6 +789,18 @@ export async function cadastrarProduto(
     if (!fiscal.ok) {
       voltarErro(`${MENSAGEM_FISCAL_NAO_GRAVADO} ${fiscal.erro}`);
     }
+
+    if (!dados.ativo) {
+      const { error: erroInativo } = await supabase
+        .from("produtos")
+        .update({ ativo: false })
+        .eq("empresa_id", empresaId)
+        .eq("id", produtoId);
+
+      if (erroInativo) {
+        voltarErro(erroInativo.message);
+      }
+    }
   }
 
   revalidatePath("/produtos");
@@ -917,6 +930,7 @@ export async function editarProduto(
       unidade_medida: dados.unidade,
       preco_custo: dados.precoCusto,
       preco_venda: dados.precoVenda,
+      ativo: dados.ativo,
       ...(catalogo ? payloadCatalogoProduto(catalogo, imagemPath) : {}),
     })
     .eq("empresa_id", empresaId)
@@ -1206,6 +1220,73 @@ export async function reativarProduto(
   return {
     ok: true,
     mensagem: "Produto reativado com sucesso.",
+  };
+}
+
+export async function inativarProduto(
+  produtoId: string
+): Promise<ResultadoProduto> {
+  const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "excluir", "inativarProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
+
+  const id = String(produtoId ?? "").trim();
+  if (!id) {
+    return { ok: false, erro: "Produto inválido." };
+  }
+
+  const { data: produto, error: erroProduto } = await supabase
+    .from("produtos")
+    .select("id")
+    .eq("empresa_id", empresaId)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (erroProduto || !produto) {
+    return {
+      ok: false,
+      erro: "Produto não encontrado nesta empresa.",
+    };
+  }
+
+  const { data: estoque } = await supabase
+    .from("estoque_atual")
+    .select("quantidade")
+    .eq("empresa_id", empresaId)
+    .eq("produto_id", id)
+    .maybeSingle();
+
+  const quantidade = Number(estoque?.quantidade ?? 0);
+
+  const { error } = await supabase
+    .from("produtos")
+    .update({ ativo: false })
+    .eq("empresa_id", empresaId)
+    .eq("id", id);
+
+  if (error) {
+    return { ok: false, erro: error.message };
+  }
+
+  revalidatePath("/produtos");
+  revalidatePath("/estoque");
+  revalidatePath("/pdv");
+
+  const quantidadeTexto = quantidade.toLocaleString("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
+
+  return {
+    ok: true,
+    mensagem:
+      quantidade > 0
+        ? `Produto inativado. Ele permanece no histórico com ${quantidadeTexto} em estoque e saiu do PDV e do catálogo.`
+        : "Produto inativado com sucesso.",
   };
 }
 

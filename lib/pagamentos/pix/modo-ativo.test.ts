@@ -94,12 +94,16 @@ test("3. modo local não busca secrets Geranet", () => {
     "exigirPixGeranetAtivo",
     "carregarApiKeyGeranet"
   );
-  const testar = fonte("app/api/pagamentos/pix/geranet/testar/route.ts");
+  const testar = fonte("lib/pagamentos/pix/geranet.ts");
   apareceAntes(
-    testar.slice(testar.indexOf("export async function POST")),
+    testar.slice(testar.indexOf("export async function testarConexaoPixGeranet")),
     "exigirPixGeranetAtivo",
     "carregarApiKeyGeranet"
   );
+  const rotaTestar = fonte("app/api/pagamentos/pix/geranet/testar/route.ts");
+  assert.match(rotaTestar, /exigirPixGeranetAtivo/);
+  assert.match(rotaTestar, /testarConexaoPixGeranet/);
+  assert.equal(rotaTestar.includes("/api/v1/user"), false);
 });
 
 test("4. modo local não chama API Geranet", () => {

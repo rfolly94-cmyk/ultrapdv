@@ -186,11 +186,21 @@ test("CASO 7: acesso direto à carteira valida plano e permissão", () => {
     pathname: `/api/impressao/carteira-abertos/${clienteId}`,
     permissoes: presetDoPerfil("vendedor"),
   });
+  const recibo = decidirAcessoRota({
+    pathname: `/api/impressao/carteira-recebimento/${clienteId}`,
+    permissoes: presetDoPerfil("caixa"),
+  });
+  const reciboVendedor = decidirAcessoRota({
+    pathname: `/api/impressao/carteira-recebimento/${clienteId}`,
+    permissoes: presetDoPerfil("vendedor"),
+  });
   assert.equal(caixa.ok, true);
   assert.equal(vendedor.ok, false);
   assert.equal(imprimir.ok, true);
   assert.equal(pdf.ok, true);
   assert.equal(pdfVendedor.ok, false);
+  assert.equal(recibo.ok, true);
+  assert.equal(reciboVendedor.ok, false);
 
   const pagina = fonte("app/clientes/[id]/carteira/page.tsx");
   const corpo = pagina.slice(pagina.indexOf("export default async function"));
@@ -309,6 +319,18 @@ test("CASO 9: estorno/cancelamento direto exige plano + permissão antes da RPC"
   assert.ok(
     corpoPdf.indexOf("exigirOperacaoCarteira") <
       corpoPdf.indexOf("carregarItensAbertosCarteiraDaEmpresaAtiva")
+  );
+
+  const reciboPdf = fonte(
+    "app/api/impressao/carteira-recebimento/[id]/route.ts"
+  );
+  const corpoRecibo = reciboPdf.slice(
+    reciboPdf.indexOf("export async function GET")
+  );
+  assert.match(corpoRecibo, /acao: "acessar_carteira"/);
+  assert.ok(
+    corpoRecibo.indexOf("exigirOperacaoCarteira") <
+      corpoRecibo.indexOf("carregarReciboRecebimentoCarteiraDaEmpresaAtiva")
   );
 });
 

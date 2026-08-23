@@ -87,6 +87,7 @@ export async function carregarRelatorioCarteira(
 
   const pagina = paginarSemAlterarTotais(linhas, filtros.pagina, filtros.porPagina);
   const recebimentos = await carregarRecebimentos(ctx, filtros);
+  const creditoDisponivel = linhas.reduce((total, item) => total + item.disponivel, 0);
 
   return {
     titulo: "Carteira / Fiado",
@@ -95,6 +96,8 @@ export async function carregarRelatorioCarteira(
       { label: "Total em aberto", valor: formatarMoeda(totalAberto) },
       { label: "Total vencido", valor: formatarMoeda(vencido) },
       { label: "A vencer", valor: formatarMoeda(Math.max(0, totalAberto - vencido)) },
+      { label: "Recebido no período", valor: formatarMoeda(recebimentos.total) },
+      { label: "Crédito disponível", valor: formatarMoeda(creditoDisponivel) },
       { label: "Clientes com saldo", valor: String(linhas.length) },
     ],
     colunas: ["Cliente", "Limite", "Saldo devedor", "Crédito disponível", "Vencimento", "Situação"],
@@ -114,7 +117,7 @@ export async function carregarRelatorioCarteira(
     extra: {
       titulo: "Recebimentos",
       colunas: ["Data", "Cliente", "Valor", "Tipo/Origem"],
-      linhas: recebimentos,
+      linhas: recebimentos.linhas,
     },
     opcoes: {},
   };
@@ -156,14 +159,17 @@ async function carregarRecebimentos(
     }
   }
 
-  return recebidos.map((item) => ({
-    id: item.id,
-    href: `/clientes/${item.cliente_id}/carteira`,
-    celulas: [
-      formatarDataHora(item.created_at),
-      nomes.get(item.cliente_id) || "Cliente",
-      formatarMoeda(item.valor),
-      `${item.modo} · ${item.forma_pagamento_nome || "Recebimento"}`,
-    ],
-  }));
+  return {
+    total: recebidos.reduce((soma, item) => soma + numeroSeguro(item.valor), 0),
+    linhas: recebidos.map((item) => ({
+      id: item.id,
+      href: `/clientes/${item.cliente_id}/carteira`,
+      celulas: [
+        formatarDataHora(item.created_at),
+        nomes.get(item.cliente_id) || "Cliente",
+        formatarMoeda(item.valor),
+        `${item.modo} · ${item.forma_pagamento_nome || "Recebimento"}`,
+      ],
+    })),
+  };
 }

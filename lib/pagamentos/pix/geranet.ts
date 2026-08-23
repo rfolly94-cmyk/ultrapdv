@@ -15,8 +15,14 @@ import { statusMonotonicoConsultaPix } from "./geranet-regras";
 import { exigirPixGeranetAtivo } from "./modo-ativo-servidor";
 import { montarPayloadCobrancaPix } from "./montar-payload";
 import { normalizarRespostaPix } from "./normalizar-resposta";
+import { obterProvedorPixGeranet } from "./provedores-geranet";
 import { payloadSemCredenciais, sanitizarRespostaPix } from "./sanitizar";
 import { podeCancelarLocalmente, statusAposRespostaHttp } from "./status";
+import {
+  classificarRespostaTestePix,
+  METODO_TESTE_PIX_GERANET,
+  TXID_TESTE_CONEXAO_PIX,
+} from "./testar-conexao";
 import type {
   AmbientePixGeranet,
   CobrancaPixPublica,
@@ -592,5 +598,104 @@ export async function cancelarCobrancaPix({
     cobranca: linhaPublica((atualizada ?? cobranca) as Record<string, unknown>),
     respostaSanitizada: sanitizarRespostaPix(resultado.dados),
     txid,
+  };
+}
+
+export async function testarConexaoPixGeranet(empresaId: string) {
+  await exigirPixGeranetAtivo(empresaId);
+  const integracao = await carregarIntegracaoPix(empresaId);
+
+  if (!integracao || !integracao.ativo) {
+    throw new ErroPixGeranet(
+      "Configure a integração PIX Geranet antes de testar a conexão."
+    );
+  }
+
+  if (!integracao.provedor) {
+    throw new ErroPixGeranet("Selecione um provedor PIX da Geranet.");
+  }
+
+  const meta = obterProvedorPixGeranet(integracao.provedor);
+  if (!meta?.configuracaoDisponivel) {
+    throw new ErroPixGeranet(
+      "Configuração deste provedor ainda não foi mapeada no UltraPDV."
+    );
+  }
+
+  if (!integracao.recebedor_nome || !integracao.recebedor_cidade) {
+    throw new ErroPixGeranet("Preencha os dados do recebedor PIX.");
+  }
+
+  const [apiKey, cnpj, credenciais] = await Promise.all([
+    carregarApiKeyGeranet(empresaId),
+    carregarCnpjEmpresa(empresaId),
+    montarCredenciaisGeranetPix({
+      empresaId,
+      provedor: integracao.provedor,
+      ambiente: integracao.ambiente as AmbientePixGeranet,
+      chavePixPublica: integracao.chave_pix,
+    }),
+  ]);
+
+  const payload = montarPayloadCobrancaPix({
+    ambiente: integracao.ambiente as AmbientePixGeranet,
+    provedor: integracao.provedor,
+    cnpj,
+    credenciais,
+    recebedor: {
+      nome: integracao.recebedor_nome,
+      cep: integracao.recebedor_cep ?? "",
+      cidade: integracao.recebedor_cidade,
+      uf: integracao.recebedor_uf ?? "",
+    },
+    txid: TXID_TESTE_CONEXAO_PIX,
+  });
+
+  const resultado = await chamarGeranetBanking({
+    apiKey,
+    endpoint: "/api/v1/pix/consultar",
+    payload,
+  });
+
+  const dadosInternos =
+    resultado.dados.dados && typeof resultado.dados.dados === "object"
+      ? resultado.dados.dados
+      : {};
+  const dadosStatus = Number(
+    (dadosInternos as { status?: unknown }).status ?? ""
+  );
+  const classificacao = classificarRespostaTestePix({
+    httpStatus: resultado.httpStatus,
+    situacao: String(resultado.dados.situacao ?? ""),
+    mensagem: String(resultado.dados.mensagem ?? ""),
+    dadosStatus: Number.isFinite(dadosStatus) ? dadosStatus : null,
+    provedor: integracao.provedor,
+  });
+
+  await registrarLog({
+    empresaId,
+    endpoint: "/api/v1/pix/consultar",
+    provedor: integracao.provedor,
+    httpStatus: resultado.httpStatus,
+    situacao: String(resultado.dados.situacao ?? "") || null,
+    mensagem: `teste_conexao;${classificacao.resultado};${classificacao.mensagem}`,
+  });
+
+  return {
+    ok: classificacao.ok,
+    resultado: classificacao.resultado,
+    httpStatus: resultado.httpStatus,
+    provedor: integracao.provedor,
+    ambiente: integracao.ambiente,
+    credenciaisConfiguradas: true,
+    cobrancaEmitida: false,
+    metodoTeste: METODO_TESTE_PIX_GERANET,
+    mensagem: classificacao.mensagem,
+    limitacao: classificacao.limitacao,
+    provedorAutenticado: classificacao.provedorAutenticado,
+    respostaSanitizada: sanitizarRespostaPix(resultado.dados),
+    payloadEnviado: payloadSemCredenciais(
+      payload as unknown as Record<string, unknown>
+    ),
   };
 }

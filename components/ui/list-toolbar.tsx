@@ -9,6 +9,7 @@ export function ListToolbar({
   onSearchChange,
   filters,
   actions,
+  searchExtras,
 }: {
   searchPlaceholder: string;
   searchAction?: string;
@@ -17,6 +18,7 @@ export function ListToolbar({
   onSearchChange?: (valor: string) => void;
   filters?: ReactNode;
   actions?: ReactNode;
+  searchExtras?: ReactNode;
 }) {
   const campo = (
     <div className="relative min-w-0 flex-1">
@@ -42,6 +44,7 @@ export function ListToolbar({
         campo
       ) : (
         <form action={searchAction} method="get" className="min-w-0 flex-1">
+          {searchExtras}
           {campo}
         </form>
       )}

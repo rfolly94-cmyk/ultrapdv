@@ -186,8 +186,15 @@ export async function montarCredenciaisGeranetPix({
     );
   }
 
-  const [existentes, legado] = await Promise.all([
+  const [existentes, aliasGerencianet, legado] = await Promise.all([
     carregarSegredosProvedor({ empresaId, provedor, ambiente }),
+    provedor === "efibank"
+      ? carregarSegredosProvedor({
+          empresaId,
+          provedor: "gerencianet",
+          ambiente,
+        })
+      : Promise.resolve({}),
     provedor === "efibank" || provedor === "gerencianet"
       ? carregarSegredosLegado(empresaId)
       : Promise.resolve({}),
@@ -197,7 +204,7 @@ export async function montarCredenciaisGeranetPix({
     provedor,
     ambiente,
     novos: {},
-    existentes,
+    existentes: { ...aliasGerencianet, ...existentes },
     legado,
   });
 
