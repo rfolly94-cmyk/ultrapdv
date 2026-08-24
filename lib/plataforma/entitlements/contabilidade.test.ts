@@ -31,7 +31,7 @@ function plano(empresaId: string, contabilidade: boolean | "ausente") {
 test("rollout inclui somente os dezesseis recursos ativos", () => {
   assert.deepEqual(
     [...RECURSOS_COM_ENFORCEMENT],
-    ["importador", "impressao_automatica", "relatorios", "contabilidade", "pix_integrado", "carteira", "produtos", "clientes", "estoque", "nfce", "nfe", "cce", "inutilizacao_fiscal", "vendas", "pdv", "catalogo"]
+    ["importador", "impressao_automatica", "relatorios", "contabilidade", "pix_integrado", "carteira", "produtos", "clientes", "estoque", "nfce", "nfe", "cce", "inutilizacao_fiscal", "vendas", "pdv", "catalogo", "caixa"]
   );
   assert.equal(modoEntitlementDoRecurso("contabilidade"), "enforce");
   assert.equal(modoEntitlementDoRecurso("pix_integrado"), "enforce");

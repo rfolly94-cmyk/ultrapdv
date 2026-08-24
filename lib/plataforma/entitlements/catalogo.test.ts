@@ -45,11 +45,12 @@ const ROLL_OUT = [
   "vendas",
   "pdv",
   "catalogo",
+  "caixa",
 ];
 
-test("rollout inclui catalogo como 16º recurso e nenhum outro novo", () => {
+test("rollout inclui catalogo e caixa", () => {
   assert.deepEqual([...RECURSOS_COM_ENFORCEMENT], ROLL_OUT);
-  assert.equal(RECURSOS_COM_ENFORCEMENT.size, 16);
+  assert.equal(RECURSOS_COM_ENFORCEMENT.size, 17);
   assert.equal(modoEntitlementDoRecurso("catalogo"), "enforce");
   assert.equal(modoEntitlementDoRecurso("pdv"), "enforce");
   assert.equal(modoEntitlementDoRecurso("vendas"), "enforce");

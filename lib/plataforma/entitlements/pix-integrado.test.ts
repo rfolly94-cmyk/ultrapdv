@@ -48,6 +48,7 @@ test("rollout inclui somente os dezesseis recursos ativos", () => {
       "vendas",
       "pdv",
       "catalogo",
+      "caixa",
     ]
   );
   assert.equal(modoEntitlementDoRecurso("pix_integrado"), "enforce");

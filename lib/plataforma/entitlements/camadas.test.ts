@@ -30,6 +30,7 @@ test("modo de entitlement permanece desligado no padrão e o PDV não chama aval
   assert.equal(modoEntitlementDoRecurso("vendas"), "enforce");
   assert.equal(modoEntitlementDoRecurso("pdv"), "enforce");
   assert.equal(modoEntitlementDoRecurso("catalogo"), "enforce");
+  assert.equal(modoEntitlementDoRecurso("caixa"), "enforce");
   assert.doesNotMatch(fonte("app/pdv/actions.ts"), /avaliarCamadasAcesso/);
   assert.doesNotMatch(fonte("app/pdv/editar-actions.ts"), /avaliarCamadasAcesso/);
   assert.doesNotMatch(

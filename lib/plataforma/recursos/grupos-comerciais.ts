@@ -14,7 +14,7 @@ export const GRUPOS_COMERCIAIS_PLANO: readonly GrupoComercialPlano[] = [
   {
     id: "operacao_comercial",
     rotulo: "Operação comercial",
-    chaves: ["pdv", "vendas", "produtos", "clientes"],
+    chaves: ["pdv", "caixa", "vendas", "produtos", "clientes"],
   },
   {
     id: "catalogo_online",

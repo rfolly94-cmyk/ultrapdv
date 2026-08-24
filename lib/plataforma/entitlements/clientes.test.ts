@@ -45,6 +45,7 @@ const ROLL_OUT = [
   "vendas",
   "pdv",
   "catalogo",
+  "caixa",
 ];
 
 const clienteId = "11111111-1111-4111-8111-111111111111";

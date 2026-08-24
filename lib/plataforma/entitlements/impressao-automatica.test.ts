@@ -53,7 +53,7 @@ const configAuto = completarConfiguracoesImpressao([
 test("rollout inclui importador, impressao_automatica, relatorios e contabilidade", () => {
   assert.deepEqual(
     [...RECURSOS_COM_ENFORCEMENT],
-    ["importador", "impressao_automatica", "relatorios", "contabilidade", "pix_integrado", "carteira", "produtos", "clientes", "estoque", "nfce", "nfe", "cce", "inutilizacao_fiscal", "vendas", "pdv", "catalogo"]
+    ["importador", "impressao_automatica", "relatorios", "contabilidade", "pix_integrado", "carteira", "produtos", "clientes", "estoque", "nfce", "nfe", "cce", "inutilizacao_fiscal", "vendas", "pdv", "catalogo", "caixa"]
   );
   assert.equal(modoEntitlementDoRecurso("impressao_automatica"), "enforce");
   assert.equal(modoEntitlementDoRecurso("relatorios"), "enforce");

@@ -47,6 +47,9 @@ const cores: Record<string, string> = {
   aguardando_cliente: "bg-sky-50 text-sky-800",
   encerrada: "bg-zinc-100 text-zinc-600",
   aberta: "bg-emerald-50 text-emerald-700",
+  aberto: "bg-emerald-50 text-emerald-700",
+  fechado: "bg-zinc-100 text-zinc-600",
+  cancelado: "bg-rose-50 text-rose-800",
 };
 
 function rotulo(valor: string) {

@@ -35,7 +35,7 @@ function plano(empresaId: string, importador: boolean | "ausente") {
 test("rollout liga importador, impressao_automatica, relatorios e contabilidade", () => {
   assert.deepEqual(
     [...RECURSOS_COM_ENFORCEMENT],
-    ["importador", "impressao_automatica", "relatorios", "contabilidade", "pix_integrado", "carteira", "produtos", "clientes", "estoque", "nfce", "nfe", "cce", "inutilizacao_fiscal", "vendas", "pdv", "catalogo"]
+    ["importador", "impressao_automatica", "relatorios", "contabilidade", "pix_integrado", "carteira", "produtos", "clientes", "estoque", "nfce", "nfe", "cce", "inutilizacao_fiscal", "vendas", "pdv", "catalogo", "caixa"]
   );
   assert.equal(modoEntitlementDoRecurso("importador"), "enforce");
   assert.equal(modoEntitlementDoRecurso("nfe"), "enforce");

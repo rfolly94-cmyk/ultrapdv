@@ -105,6 +105,10 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "pdv", acao: "acessar" };
   }
 
+  if (pathname.startsWith("/caixa")) {
+    return { tipo: "permissao", modulo: "caixa", acao: "acessar" };
+  }
+
   if (
     pathname.startsWith("/clientes/") &&
     pathname.includes("/carteira")
@@ -307,6 +311,7 @@ export function primeiraRotaPermitida(permissoes: PermissoesEfetivas) {
   const ordem: Array<{ href: string; modulo: keyof PermissoesEfetivas }> = [
     { href: "/painel", modulo: "inicio" },
     { href: "/pdv", modulo: "pdv" },
+    { href: "/caixa", modulo: "caixa" },
     { href: "/vendas", modulo: "vendas" },
     { href: "/contabilidade", modulo: "contabilidade" },
     { href: "/clientes", modulo: "clientes" },

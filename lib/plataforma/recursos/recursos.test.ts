@@ -16,6 +16,8 @@ const MIGRATION =
   "supabase/migrations/20260821160000_planos_saas_recursos_limites.sql";
 const MIGRATION_CATALOGO =
   "supabase/migrations/20260821220000_recurso_catalogo.sql";
+const MIGRATION_CAIXA =
+  "supabase/migrations/20260824100000_caixa_modulo.sql";
 
 function recursosTodos(habilitado: boolean) {
   return CATALOGO_RECURSOS.map((item) => ({
@@ -28,7 +30,7 @@ function recursosTodos(habilitado: boolean) {
 test("catálogo de recursos não duplica chaves e migration casa com o código", () => {
   const chaves = CATALOGO_RECURSOS.map((item) => item.chave);
   assert.equal(new Set(chaves).size, chaves.length);
-  const sql = fonte(MIGRATION) + fonte(MIGRATION_CATALOGO);
+  const sql = fonte(MIGRATION) + fonte(MIGRATION_CATALOGO) + fonte(MIGRATION_CAIXA);
   for (const chave of chaves) {
     assert.match(sql, new RegExp(`'${chave}'`));
   }

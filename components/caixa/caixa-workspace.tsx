@@ -1,0 +1,284 @@
+"use client";
+
+import { useState } from "react";
+
+import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
+import { DetailDrawer } from "@/components/ui/detail-drawer";
+import { PageAlert } from "@/components/ui/page-alert";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { CaixaMovimentosTabela } from "@/components/caixa/caixa-movimentos-tabela";
+import {
+  ModalAbrirCaixa,
+  ModalFecharCaixa,
+  ModalMovimentoCaixa,
+} from "@/components/caixa/caixa-modais";
+import { CaixaResumoValores } from "@/components/caixa/caixa-resumo-valores";
+import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
+import type { AbaCaixa, CaixaResumoAnterior, PainelCaixa } from "@/lib/caixa/tipos";
+import {
+  formatarData,
+  formatarDataHora,
+  formatarMoeda,
+} from "@/lib/relatorios/formatacao";
+
+const STATUS_LABEL: Record<string, string> = {
+  aberto: "Aberto",
+  fechado: "Fechado",
+  cancelado: "Cancelado",
+};
+
+export function CaixaWorkspace({
+  aba,
+  painel,
+}: {
+  aba: AbaCaixa;
+  painel: PainelCaixa;
+}) {
+  const podeAbrir = useTemPermissao("caixa", "abrir");
+  const podeMovimentar = useTemPermissao("caixa", "movimentar");
+  const podeFechar = useTemPermissao("caixa", "fechar");
+  const [modal, setModal] = useState<
+    "abrir" | "suprimento" | "sangria" | "fechar" | "resumo" | null
+  >(null);
+  const [anterior, setAnterior] = useState<CaixaResumoAnterior | null>(null);
+  const atual = painel.atual;
+
+  return (
+    <div className="space-y-4 px-4 py-4">
+      {aba === "atual" ? (
+        atual ? (
+          <section className="space-y-4 rounded-md border border-zinc-200 bg-white p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[16px] font-semibold text-zinc-950">
+                    Caixa #{atual.numero}
+                  </h2>
+                  <StatusBadge status="aberto">Aberto</StatusBadge>
+                </div>
+                <p className="mt-1 text-[13px] text-zinc-500">
+                  Aberto em {formatarDataHora(atual.aberto_em)} · Operador{" "}
+                  {atual.usuario_abertura_nome || "—"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {podeMovimentar ? (
+                  <>
+                    <button
+                      type="button"
+                      className="updv-btn updv-btn-ghost"
+                      onClick={() => setModal("suprimento")}
+                    >
+                      Suprimento
+                    </button>
+                    <button
+                      type="button"
+                      className="updv-btn updv-btn-ghost"
+                      onClick={() => setModal("sangria")}
+                    >
+                      Sangria
+                    </button>
+                  </>
+                ) : null}
+                {podeFechar ? (
+                  <button
+                    type="button"
+                    className="updv-btn updv-btn-primary"
+                    onClick={() => setModal("fechar")}
+                  >
+                    Fechar Caixa
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="updv-btn updv-btn-ghost"
+                  onClick={() => setModal("resumo")}
+                >
+                  Ver Resumo
+                </button>
+              </div>
+            </div>
+
+            <CaixaResumoValores
+              saldoInicial={atual.saldoInicial}
+              suprimentos={atual.suprimentos}
+              sangrias={atual.sangrias}
+              saldoAtual={atual.saldoAtual}
+              rotuloSaldoAtual="Saldo atual em dinheiro"
+            />
+          </section>
+        ) : (
+          <section className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-10 text-center">
+            <StatusBadge status="fechado">Fechado</StatusBadge>
+            <h2 className="mt-3 text-[16px] font-semibold text-zinc-950">
+              Caixa fechado
+            </h2>
+            <p className="mt-1 text-[13px] text-zinc-500">
+              Abra uma sessão para registrar suprimentos e sangrias.
+            </p>
+            {podeAbrir ? (
+              <button
+                type="button"
+                className="updv-btn updv-btn-primary mt-4"
+                onClick={() => setModal("abrir")}
+              >
+                Abrir Caixa
+              </button>
+            ) : (
+              <p className="mt-4 text-[13px] text-zinc-500">
+                Você não tem permissão para abrir o caixa.
+              </p>
+            )}
+          </section>
+        )
+      ) : (
+        <DataTable minWidth={980}>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Abertura</th>
+              <th>Fechamento</th>
+              <th>Operador</th>
+              <th className="num">Saldo inicial</th>
+              <th className="num">Entradas</th>
+              <th className="num">Saídas</th>
+              <th className="num">Saldo final</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {painel.anteriores.length === 0 ? (
+              <DataTableEmpty colSpan={9}>
+                Nenhum caixa anterior nesta empresa.
+              </DataTableEmpty>
+            ) : (
+              painel.anteriores.map((caixa) => (
+                <tr
+                  key={caixa.id}
+                  className="cursor-pointer"
+                  onClick={() => setAnterior(caixa)}
+                >
+                  <td>{formatarData(caixa.aberto_em)}</td>
+                  <td>{formatarDataHora(caixa.aberto_em)}</td>
+                  <td>{formatarDataHora(caixa.fechado_em)}</td>
+                  <td>{caixa.usuario_abertura_nome || "—"}</td>
+                  <td className="num">{formatarMoeda(caixa.saldoInicial)}</td>
+                  <td className="num">{formatarMoeda(caixa.entradas)}</td>
+                  <td className="num">{formatarMoeda(caixa.saidas)}</td>
+                  <td className="num">{formatarMoeda(caixa.saldoAtual)}</td>
+                  <td>
+                    <StatusBadge status={caixa.status}>
+                      {STATUS_LABEL[caixa.status] ?? caixa.status}
+                    </StatusBadge>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      )}
+
+      <ModalAbrirCaixa
+        open={modal === "abrir"}
+        onClose={() => setModal(null)}
+      />
+      {atual ? (
+        <>
+          <ModalMovimentoCaixa
+            open={modal === "suprimento"}
+            tipo="suprimento"
+            caixaId={atual.id}
+            saldoAtual={atual.saldoAtual}
+            onClose={() => setModal(null)}
+          />
+          <ModalMovimentoCaixa
+            open={modal === "sangria"}
+            tipo="sangria"
+            caixaId={atual.id}
+            saldoAtual={atual.saldoAtual}
+            onClose={() => setModal(null)}
+          />
+          <ModalFecharCaixa
+            open={modal === "fechar"}
+            caixaId={atual.id}
+            saldoInicial={atual.saldoInicial}
+            suprimentos={atual.suprimentos}
+            sangrias={atual.sangrias}
+            saldoEsperado={atual.saldoAtual}
+            onClose={() => setModal(null)}
+          />
+          <AppResumoAtual
+            open={modal === "resumo"}
+            onClose={() => setModal(null)}
+            caixa={atual}
+          />
+        </>
+      ) : null}
+
+      <DetailDrawer
+        title={anterior ? `Caixa #${anterior.numero}` : "Caixa anterior"}
+        open={Boolean(anterior)}
+        onClose={() => setAnterior(null)}
+        size="md"
+      >
+        {anterior ? (
+          <div className="space-y-4">
+            <PageAlert type="aviso" className="mx-0 mt-0">
+              Caixa fechado em somente leitura nesta fase.
+            </PageAlert>
+            <p className="text-[13px] text-zinc-500">
+              Aberto em {formatarDataHora(anterior.aberto_em)} por{" "}
+              {anterior.usuario_abertura_nome || "—"}
+              {anterior.fechado_em
+                ? ` · Fechado em ${formatarDataHora(anterior.fechado_em)}`
+                : ""}
+            </p>
+            <CaixaResumoValores
+              saldoInicial={anterior.saldoInicial}
+              suprimentos={anterior.suprimentos}
+              sangrias={anterior.sangrias}
+              saldoAtual={anterior.saldoAtual}
+              rotuloSaldoAtual="Saldo final em dinheiro"
+              dinheiroContado={anterior.dinheiro_contado}
+              diferenca={anterior.diferenca}
+            />
+            {anterior.observacao_fechamento ? (
+              <p className="text-[13px] text-zinc-500">
+                {anterior.observacao_fechamento}
+              </p>
+            ) : null}
+            <CaixaMovimentosTabela movimentos={anterior.movimentos} />
+          </div>
+        ) : null}
+      </DetailDrawer>
+    </div>
+  );
+}
+
+function AppResumoAtual({
+  open,
+  onClose,
+  caixa,
+}: {
+  open: boolean;
+  onClose: () => void;
+  caixa: NonNullable<PainelCaixa["atual"]>;
+}) {
+  return (
+    <DetailDrawer title={`Resumo · Caixa #${caixa.numero}`} open={open} onClose={onClose} size="md">
+      <div className="space-y-4">
+        <CaixaResumoValores
+          saldoInicial={caixa.saldoInicial}
+          suprimentos={caixa.suprimentos}
+          sangrias={caixa.sangrias}
+          saldoAtual={caixa.saldoAtual}
+          rotuloSaldoAtual="Saldo atual em dinheiro"
+        />
+        {caixa.observacao_abertura ? (
+          <p className="text-[13px] text-zinc-500">{caixa.observacao_abertura}</p>
+        ) : null}
+        <CaixaMovimentosTabela movimentos={caixa.movimentos} />
+      </div>
+    </DetailDrawer>
+  );
+}

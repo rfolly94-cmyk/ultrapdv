@@ -26,7 +26,7 @@ export type { ModoEntitlement } from "./rollout";
 /**
  * Padrão global permanece off. O rollout seletivo em
  * RECURSOS_COM_ENFORCEMENT liga enforce por recurso
- * (hoje: importador, impressao_automatica, relatorios, contabilidade, pix_integrado, carteira, produtos, clientes, estoque, nfce, nfe, cce, inutilizacao_fiscal, vendas, pdv, catalogo).
+ * (hoje: importador, impressao_automatica, relatorios, contabilidade, pix_integrado, carteira, produtos, clientes, estoque, nfce, nfe, cce, inutilizacao_fiscal, vendas, pdv, catalogo, caixa).
  * Não usar este módulo em helpers Geranet nem nas RPCs internas.
  */
 export const MODO_ENTITLEMENT = "off" as const;
@@ -72,6 +72,7 @@ export const RECURSO_PARA_MODULO = {
   pix_integrado: "financeiro",
   impressao_automatica: "configuracoes",
   catalogo: "catalogo",
+  caixa: "caixa",
   suporte_prioritario: null,
 } as const satisfies Record<string, ModuloPermissao | null>;
 

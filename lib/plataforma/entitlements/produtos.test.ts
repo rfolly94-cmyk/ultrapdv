@@ -45,6 +45,7 @@ const ROLL_OUT = [
   "vendas",
   "pdv",
   "catalogo",
+  "caixa",
 ];
 
 test("rollout inclui somente os dezesseis recursos ativos", () => {

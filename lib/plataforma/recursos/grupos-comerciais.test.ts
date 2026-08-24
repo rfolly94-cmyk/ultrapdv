@@ -57,13 +57,14 @@ test("grupos comerciais cobrem o catálogo sem criar chave nova", () => {
   assert.equal(GRUPOS_COMERCIAIS_PLANO[0].rotulo, "Operação comercial");
   assert.deepEqual([...GRUPOS_COMERCIAIS_PLANO[0].chaves], [
     "pdv",
+    "caixa",
     "vendas",
     "produtos",
     "clientes",
   ]);
   assert.equal(GRUPOS_COMERCIAIS_PLANO[1].rotulo, "Catálogo online");
   assert.deepEqual([...GRUPOS_COMERCIAIS_PLANO[1].chaves], ["catalogo"]);
-  assert.equal(RECURSOS_COM_ENFORCEMENT.size, 16);
+  assert.equal(RECURSOS_COM_ENFORCEMENT.size, 17);
   assert.equal(modoEntitlementDoRecurso("suporte_prioritario"), "off");
   assert.equal(modoEntitlementDoRecurso("pdv"), "enforce");
   assert.equal(modoEntitlementDoRecurso("catalogo"), "enforce");

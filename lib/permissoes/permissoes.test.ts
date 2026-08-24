@@ -44,11 +44,12 @@ test("vendedor não acessa Configurações por padrão", () => {
   assert.equal(temPermissao(vendedor, "produtos", "editar"), false);
 });
 
-test("caixa acessa PDV", () => {
+test("caixa acessa PDV e o módulo Caixa", () => {
   const caixa = presetDoPerfil("caixa");
   assert.equal(temPermissao(caixa, "pdv", "acessar"), true);
   assert.equal(temPermissao(caixa, "pdv", "finalizar_venda"), true);
   assert.equal(temPermissao(caixa, "clientes", "receber_carteira"), true);
+  assert.equal(temPermissao(caixa, "caixa", "abrir"), true);
   assert.equal(temAcessoModulo(caixa, "configuracoes"), false);
   assert.equal(temAcessoModulo(caixa, "relatorios"), false);
 });
@@ -136,6 +137,7 @@ test("sidebar esconde módulo sem acesso", () => {
 
   const caixa = hrefsMenuPermitidos(presetDoPerfil("caixa"));
   assert.equal(caixa.includes("/relatorios"), false);
+  assert.ok(caixa.includes("/caixa"));
 
   const sidebar = fonte("components/layout/app-sidebar.tsx");
   assert.match(sidebar, /hrefsMenuPermitidos|permissoes/);

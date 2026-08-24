@@ -26,6 +26,7 @@ import {
   Warehouse,
   BarChart3,
   CreditCard,
+  Wallet,
 } from "lucide-react";
 
 type MenuItem = {
@@ -47,6 +48,11 @@ const menu: MenuItem[] = [
     href: "/vendas",
     icon: ShoppingCart,
     match: (p) => p.startsWith("/vendas") || p.startsWith("/pdv"),
+  },
+  {
+    label: "Caixa",
+    href: "/caixa",
+    icon: Wallet,
   },
   {
     label: "Clientes",
@@ -137,6 +143,7 @@ export function AppSidebar({
   const estoqueNoPlano = useRecursoLiberado("estoque");
   const vendasNoPlano = useRecursoLiberado("vendas");
   const pdvNoPlano = useRecursoLiberado("pdv");
+  const caixaNoPlano = useRecursoLiberado("caixa");
   const permitidos = new Set(hrefsMenuPermitidos(permissoes));
   const itens = menu.filter((item) => {
     if (!permitidos.has(item.href)) {
@@ -164,6 +171,9 @@ export function AppSidebar({
       return Boolean(
         pdvNoPlano && permissoes && temAcessoModulo(permissoes, "pdv")
       );
+    }
+    if (item.href === "/caixa") {
+      return caixaNoPlano;
     }
     return true;
   });

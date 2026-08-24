@@ -40,6 +40,13 @@ export const CATALOGO_RECURSOS: RecursoCatalogo[] = [
     ordem: 10,
   },
   {
+    chave: "caixa",
+    nome: "Caixa",
+    descricao: "Abertura, suprimento, sangria e fechamento de caixa.",
+    categoria: "comercial",
+    ordem: 15,
+  },
+  {
     chave: "vendas",
     nome: "Vendas",
     descricao: "Histórico e gestão de vendas.",

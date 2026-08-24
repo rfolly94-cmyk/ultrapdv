@@ -15,6 +15,7 @@ export const ITENS_MENU_PERMISSAO: ItemMenuPermissao[] = [
   { href: "/clientes", visivel: (p) => temAcessoModulo(p, "clientes") },
   { href: "/produtos", visivel: (p) => temAcessoModulo(p, "produtos") },
   { href: "/estoque", visivel: (p) => temAcessoModulo(p, "estoque") },
+  { href: "/caixa", visivel: (p) => temAcessoModulo(p, "caixa") },
   { href: "/relatorios", visivel: (p) => temAcessoModulo(p, "relatorios") },
   { href: "/assinatura", visivel: () => true },
   { href: "/contabilidade", visivel: (p) => temAcessoModulo(p, "contabilidade") },

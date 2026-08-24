@@ -15,6 +15,7 @@ export const RECURSOS_COM_ENFORCEMENT = new Set<string>([
   "vendas",
   "pdv",
   "catalogo",
+  "caixa",
 ]);
 
 export type ModoEntitlement = "off" | "observe" | "enforce";
