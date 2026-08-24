@@ -57,6 +57,39 @@ export function tituloPassaNaAba(
   return true;
 }
 
+export function montarTitulosAbaCarteira<
+  T extends {
+    id: string;
+    status: string;
+    valor_aberto?: number | string | null;
+    created_at: string;
+    quitado_em?: string | null;
+  },
+  I extends { titulo_id: string }
+>(titulos: T[], itens: I[], aba: AbaVendasCarteira) {
+  const itensPorTitulo = new Map<string, I[]>();
+  for (const item of itens) {
+    const lista = itensPorTitulo.get(String(item.titulo_id)) ?? [];
+    lista.push(item);
+    itensPorTitulo.set(String(item.titulo_id), lista);
+  }
+
+  return ordenarTitulosCarteira(
+    titulos
+      .filter((titulo) =>
+        tituloPassaNaAba(
+          titulo.status,
+          aba,
+          Number(titulo.valor_aberto ?? 0)
+        )
+      )
+      .map((titulo) => ({
+        ...titulo,
+        itens: itensPorTitulo.get(String(titulo.id)) ?? [],
+      }))
+  );
+}
+
 function instante(valor: string | null | undefined) {
   const tempo = Date.parse(String(valor ?? ""));
   return Number.isFinite(tempo) ? tempo : 0;

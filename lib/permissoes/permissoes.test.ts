@@ -186,6 +186,19 @@ test("digitar rota diretamente sem permissão é bloqueado", () => {
   assert.deepEqual(resolverExigenciaRota("/api/pdv/finalizar", "POST"), {
     tipo: "autenticado",
   });
+
+  assert.deepEqual(
+    resolverExigenciaRota(
+      "/api/impressao/recibo/11111111-1111-4111-8111-111111111111"
+    ),
+    { tipo: "autenticado" }
+  );
+
+  const reciboCaixa = decidirAcessoRota({
+    pathname: "/api/impressao/recibo/11111111-1111-4111-8111-111111111111",
+    permissoes: presetDoPerfil("caixa"),
+  });
+  assert.equal(reciboCaixa.ok, true);
 });
 
 test("Server Action sem permissão é bloqueada", () => {

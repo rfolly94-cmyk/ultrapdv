@@ -93,6 +93,10 @@ export function resolverExigenciaRota(
     return { tipo: "autenticado" };
   }
 
+  if (pathname.startsWith("/api/impressao/recibo")) {
+    return { tipo: "autenticado" };
+  }
+
   if (pathname.startsWith("/api/produtos")) {
     return { tipo: "autenticado" };
   }

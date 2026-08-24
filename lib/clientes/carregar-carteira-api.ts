@@ -1,4 +1,7 @@
-import { dataQuitacaoTitulo, tituloPassaNaAba } from "@/lib/carteira/titulos";
+import {
+  dataQuitacaoTitulo,
+  montarTitulosAbaCarteira,
+} from "@/lib/carteira/titulos";
 import { carregarResumoCarteiraListagem } from "@/lib/clientes/carregar-resumo-carteira";
 import { createClient } from "@/lib/supabase/server";
 
@@ -215,6 +218,26 @@ export async function carregarCarteiraApi(input: {
       disponivelFiado,
     },
     itens: resumo.itens,
+    abertos: montarTitulosAbaCarteira(
+      titulosResult.data ?? [],
+      itensResult.data ?? [],
+      "EM_ABERTO"
+    ).map((titulo) => ({
+      id: String(titulo.id),
+      vendaId: titulo.venda_id ? String(titulo.venda_id) : null,
+      numeroVenda: titulo.numero_venda ?? null,
+      data: titulo.created_at ? String(titulo.created_at) : null,
+      status: String(titulo.status ?? ""),
+      valorOriginal: Number(titulo.valor_original ?? 0),
+      valorAberto: Number(titulo.valor_aberto ?? 0),
+      itens: titulo.itens.map((item) => ({
+        id: String(item.id),
+        produtoNome: String(item.produto_nome ?? "Item"),
+        valorOriginal: Number(item.valor_original ?? 0),
+        valorAberto: Number(item.valor_aberto ?? 0),
+        status: String(item.status ?? ""),
+      })),
+    })),
     creditos: resumo.creditos,
     formas: resumo.formas,
     recebimentos: recebimentos.map((recebimento) => {
@@ -253,31 +276,28 @@ export async function carregarCarteiraApi(input: {
           !recebimentosEstornados.has(String(recebimento.id)),
       };
     }),
-    quitadas: (titulosResult.data ?? [])
-      .filter((titulo) => tituloPassaNaAba(titulo.status, "QUITADAS"))
-      .map((titulo) => {
-        const itens = (itensResult.data ?? []).filter(
-          (item) => item.titulo_id === titulo.id
-        );
-        return {
-          id: String(titulo.id),
-          vendaId: titulo.venda_id ? String(titulo.venda_id) : null,
-          numeroVenda: titulo.numero_venda ?? null,
-          data: titulo.created_at ? String(titulo.created_at) : null,
-          quitadoEm: dataQuitacaoTitulo({
-            status: titulo.status,
-            updated_at: titulo.updated_at,
-            recebimentosProcessadosEm:
-              datasRecebimentoPorTitulo.get(String(titulo.id)) ?? [],
-          }),
-          valorOriginal: Number(titulo.valor_original ?? 0),
-          itens: itens.map((item) => ({
-            id: String(item.id),
-            produtoNome: String(item.produto_nome ?? "Item"),
-            valorOriginal: Number(item.valor_original ?? 0),
-          })),
-        };
+    quitadas: montarTitulosAbaCarteira(
+      titulosResult.data ?? [],
+      itensResult.data ?? [],
+      "QUITADAS"
+    ).map((titulo) => ({
+      id: String(titulo.id),
+      vendaId: titulo.venda_id ? String(titulo.venda_id) : null,
+      numeroVenda: titulo.numero_venda ?? null,
+      data: titulo.created_at ? String(titulo.created_at) : null,
+      quitadoEm: dataQuitacaoTitulo({
+        status: titulo.status,
+        updated_at: titulo.updated_at,
+        recebimentosProcessadosEm:
+          datasRecebimentoPorTitulo.get(String(titulo.id)) ?? [],
       }),
+      valorOriginal: Number(titulo.valor_original ?? 0),
+      itens: titulo.itens.map((item) => ({
+        id: String(item.id),
+        produtoNome: String(item.produto_nome ?? "Item"),
+        valorOriginal: Number(item.valor_original ?? 0),
+      })),
+    })),
     movimentos: (movimentosResult.data ?? []).map((movimento) => ({
       id: String(movimento.id),
       tipo: String(movimento.tipo ?? ""),

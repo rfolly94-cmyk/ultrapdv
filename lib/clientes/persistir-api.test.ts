@@ -45,9 +45,11 @@ test("APIs de cliente e carteira exigem Bearer e resolvem empresa no servidor", 
 
   const carteiraLoader = fonte("lib/clientes/carregar-carteira-api.ts");
   assert.match(carteiraLoader, /quitadas:/);
+  assert.match(carteiraLoader, /abertos:/);
+  assert.match(carteiraLoader, /montarTitulosAbaCarteira/);
   assert.match(carteiraLoader, /movimentos:/);
   assert.match(carteiraLoader, /compras:/);
   assert.match(carteiraLoader, /carteira_cliente_movimentacoes/);
-  assert.match(carteiraLoader, /tituloPassaNaAba/);
+  assert.match(fonte("lib/carteira/titulos.ts"), /tituloPassaNaAba/);
   assert.match(carteiraLoader, /dataQuitacaoTitulo/);
 });
