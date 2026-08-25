@@ -57,7 +57,12 @@ export async function NfeEmissaoPagina({
           { label: titulo },
         ]}
       />
-      <NfeEmissaoForm {...formulario} />
+      <NfeEmissaoForm
+        {...formulario}
+        caixaAberto={formulario.caixaAberto === true}
+        caixaReabertoAviso={formulario.caixaReabertoAviso ?? null}
+        podeAbrirCaixa={formulario.podeAbrirCaixa === true}
+      />
     </div>
   );
 }

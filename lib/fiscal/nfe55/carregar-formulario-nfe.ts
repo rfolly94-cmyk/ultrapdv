@@ -528,7 +528,7 @@ export async function carregarFormularioNfeEmissao({
       codigo: String(tipo.codigo),
       rotulo: String(tipo.rotulo ?? tipo.codigo),
       movimentaEstoque: Boolean(tipo.movimenta_estoque),
-      vinculaVenda: Boolean(tipo.vincula_venda),
+      vinculaVenda: tipo.vincula_venda === true,
     })),
     itens: (itens ?? []).map((item) => {
       const produto = produtoPorId.get(String(item.produto_id));
@@ -662,6 +662,7 @@ export async function carregarFormularioNfeEmissao({
     formasPagamento: filtrarFormasPagamentoCheckoutPdv(formasPagamento ?? []),
     pixConfig: pixConfigPublicoPdv(classificarIntegracaoPix(integracaoPix)),
     caixaAberto: caixaAbertoRegistro !== null,
+    caixaReabertoAviso: caixaAbertoRegistro?.aviso ?? null,
     podeAbrirCaixa: temPermissao(
       sessaoPermissoes?.permissoes,
       "caixa",

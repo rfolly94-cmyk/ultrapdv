@@ -17,6 +17,9 @@ import { ModalFecharCaixa } from "@/components/caixa/caixa-fechamento-modal";
 import { CaixaResumoSessao } from "@/components/caixa/caixa-resumo-sessao";
 import { CaixaResumoValores } from "@/components/caixa/caixa-resumo-valores";
 import { definirFechamentoCaixaCego, iniciarFechamentoCaixa } from "@/app/caixa/actions";
+import { CaixaHistoricoCiclos } from "@/components/caixa/caixa-historico-ciclos";
+import { CaixaRelatorioAcoes } from "@/components/caixa/caixa-relatorio-acoes";
+import { ModalReabrirCaixa } from "@/components/caixa/caixa-reabrir-modal";
 import { conferenciaRevelaEsperado } from "@/lib/caixa/conferencia";
 import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
 import type {
@@ -47,6 +50,7 @@ export function CaixaWorkspace({
   const podeAbrir = useTemPermissao("caixa", "abrir");
   const podeMovimentar = useTemPermissao("caixa", "movimentar");
   const podeFechar = useTemPermissao("caixa", "fechar");
+  const podeReabrir = useTemPermissao("caixa", "reabrir");
   const podeConfigurar = useTemPermissao("configuracoes", "editar_empresa");
   const router = useRouter();
   const [pendingCego, startCego] = useTransition();
@@ -56,10 +60,17 @@ export function CaixaWorkspace({
   const [conferenciaInicial, setConferenciaInicial] =
     useState<ConferenciaCaixa | null>(null);
   const [modal, setModal] = useState<
-    "abrir" | "suprimento" | "sangria" | "fechar" | "resumo" | null
+    "abrir" | "suprimento" | "sangria" | "fechar" | "resumo" | "reabrir" | null
   >(null);
   const [anterior, setAnterior] = useState<CaixaResumoAnterior | null>(null);
   const atual = painel.atual;
+  const caixaReabrir =
+    anterior && anterior.id === painel.caixaReabrirElegivelId
+      ? anterior
+      : !atual
+        ? painel.anteriores.find((caixa) => caixa.id === painel.caixaReabrirElegivelId) ??
+          null
+        : null;
 
   function abrirFechamento() {
     if (!atual) {
@@ -131,6 +142,9 @@ export function CaixaWorkspace({
                     Caixa #{atual.numero}
                   </h2>
                   <StatusBadge status="aberto">Aberto</StatusBadge>
+                  {atual.reaberto ? (
+                    <StatusBadge status="reaberto">REABERTO</StatusBadge>
+                  ) : null}
                 </div>
                 <p className="mt-1 text-[13px] text-zinc-500">
                   Aberto em {formatarDataHora(atual.aberto_em)} · Operador{" "}
@@ -173,8 +187,32 @@ export function CaixaWorkspace({
                 >
                   Ver Resumo
                 </button>
+                <CaixaRelatorioAcoes
+                  caixaId={atual.id}
+                  numero={atual.numero}
+                  abertoEm={atual.aberto_em}
+                />
               </div>
             </div>
+
+            {atual.reaberto ? (
+              <div
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-950"
+                data-caixa-bloco-reaberto="true"
+              >
+                <p>
+                  Reaberto em{" "}
+                  {formatarDataHora(atual.reaberturas.at(-1)?.reaberto_em)}
+                </p>
+                <p>
+                  Reaberto por {atual.reaberturas.at(-1)?.reaberto_por_nome || "—"}
+                </p>
+                <p>Motivo: {atual.reaberturas.at(-1)?.motivo || "—"}</p>
+                {atual.reaberturas.length > 1 ? (
+                  <p>{atual.reaberturas.length} reaberturas nesta sessão.</p>
+                ) : null}
+              </div>
+            ) : null}
 
             <CaixaResumoSessao totais={atual} />
 
@@ -184,6 +222,10 @@ export function CaixaWorkspace({
               </h3>
               <CaixaMovimentosTabela movimentos={atual.movimentos} />
             </div>
+            <CaixaHistoricoCiclos
+              ciclos={atual.ciclos_fechamento}
+              reaberturas={atual.reaberturas}
+            />
           </section>
         ) : (
           <section className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-10 text-center">
@@ -207,6 +249,24 @@ export function CaixaWorkspace({
                 Você não tem permissão para abrir o caixa.
               </p>
             )}
+            {podeReabrir && caixaReabrir ? (
+              <button
+                type="button"
+                className="updv-btn updv-btn-ghost mt-2"
+                onClick={() => setModal("reabrir")}
+              >
+                Reabrir Caixa
+              </button>
+            ) : null}
+            {caixaReabrir ? (
+              <div className="mt-4 flex justify-center">
+                <CaixaRelatorioAcoes
+                  caixaId={caixaReabrir.id}
+                  numero={caixaReabrir.numero}
+                  abertoEm={caixaReabrir.aberto_em}
+                />
+              </div>
+            ) : null}
           </section>
         )
       ) : (
@@ -245,9 +305,14 @@ export function CaixaWorkspace({
                   <td className="num">{formatarMoeda(caixa.saidas)}</td>
                   <td className="num">{formatarMoeda(caixa.saldoAtual)}</td>
                   <td>
-                    <StatusBadge status={caixa.status}>
-                      {STATUS_LABEL[caixa.status] ?? caixa.status}
-                    </StatusBadge>
+                    <div className="flex flex-wrap gap-1">
+                      <StatusBadge status={caixa.status}>
+                        {STATUS_LABEL[caixa.status] ?? caixa.status}
+                      </StatusBadge>
+                      {caixa.reaberto ? (
+                        <StatusBadge status="reaberto">REABERTO</StatusBadge>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -300,10 +365,46 @@ export function CaixaWorkspace({
       >
         {anterior ? (
           <div className="space-y-4">
-            <PageAlert type="aviso" className="mx-0 mt-0">
-              Caixa fechado em somente leitura. Reabertura não está disponível
-              nesta fase.
-            </PageAlert>
+            <div className="flex flex-wrap items-center gap-2">
+              {anterior.reaberto ? (
+                <StatusBadge status="reaberto">REABERTO</StatusBadge>
+              ) : null}
+              <CaixaRelatorioAcoes
+                caixaId={anterior.id}
+                numero={anterior.numero}
+                abertoEm={anterior.aberto_em}
+              />
+              {podeReabrir && anterior.id === painel.caixaReabrirElegivelId ? (
+                <button
+                  type="button"
+                  className="updv-btn updv-btn-primary"
+                  onClick={() => setModal("reabrir")}
+                >
+                  Reabrir Caixa
+                </button>
+              ) : null}
+            </div>
+            {podeReabrir && anterior.id !== painel.caixaReabrirElegivelId ? (
+              <PageAlert type="aviso" className="mx-0 mt-0">
+                Só é possível reabrir o último caixa fechado desta empresa.
+              </PageAlert>
+            ) : null}
+            {anterior.reaberto && anterior.reaberturas.length > 0 ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-950">
+                <p>
+                  Reaberto em{" "}
+                  {formatarDataHora(anterior.reaberturas.at(-1)?.reaberto_em)}
+                </p>
+                <p>
+                  Reaberto por{" "}
+                  {anterior.reaberturas.at(-1)?.reaberto_por_nome || "—"}
+                </p>
+                <p>Motivo: {anterior.reaberturas.at(-1)?.motivo || "—"}</p>
+                {anterior.reaberturas.length > 1 ? (
+                  <p>{anterior.reaberturas.length} reaberturas nesta sessão.</p>
+                ) : null}
+              </div>
+            ) : null}
             <p className="text-[13px] text-zinc-500">
               Aberto em {formatarDataHora(anterior.aberto_em)} por{" "}
               {anterior.usuario_abertura_nome || "—"}
@@ -340,9 +441,23 @@ export function CaixaWorkspace({
               </p>
             ) : null}
             <CaixaMovimentosTabela movimentos={anterior.movimentos} />
+            <CaixaHistoricoCiclos
+              ciclos={anterior.ciclos_fechamento}
+              reaberturas={anterior.reaberturas}
+            />
           </div>
         ) : null}
       </DetailDrawer>
+      <ModalReabrirCaixa
+        open={modal === "reabrir"}
+        onClose={() => setModal(null)}
+        caixaId={caixaReabrir?.id ?? anterior?.id ?? ""}
+        numero={caixaReabrir?.numero ?? anterior?.numero ?? 0}
+        ciclo={
+          (caixaReabrir ?? anterior)?.ciclos_fechamento.at(-1) ?? null
+        }
+        ocultarEsperado={painel.fechamentoCego && !podeConfigurar}
+      />
     </div>
   );
 }

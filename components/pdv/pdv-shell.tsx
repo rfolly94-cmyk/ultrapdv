@@ -26,6 +26,8 @@ import {
 import { finalizarVendaPdv } from "../../app/pdv/actions";
 import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
 import { PdvConsumidorNota } from "@/components/pdv/pdv-consumidor-nota";
+import { CaixaAvisoReabertoFaixa } from "@/components/caixa/caixa-aviso-reaberto";
+import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
 import {
   buscarConfiguracoesImpressaoAction,
 } from "@/app/configuracoes/impressao/actions";
@@ -207,6 +209,7 @@ type Props = {
   ambienteFiscal?: 1 | 2;
   caixaAberto: boolean;
   podeAbrirCaixa: boolean;
+  caixaReabertoAviso?: CaixaAvisoReaberto | null;
 };
 
 type FiscalUltimaVenda = {
@@ -400,6 +403,7 @@ export function PdvShell({
   ambienteFiscal = 2,
   caixaAberto,
   podeAbrirCaixa,
+  caixaReabertoAviso = null,
 }: Props) {
   const router = useRouter();
   const podeDesconto = useTemPermissao("pdv", "aplicar_desconto");
@@ -1953,6 +1957,9 @@ export function PdvShell({
           podeAbrir={podeAbrirCaixa}
           onSair={fecharPdv}
         />
+      ) : null}
+      {caixaAberto && caixaReabertoAviso ? (
+        <CaixaAvisoReabertoFaixa aviso={caixaReabertoAviso} />
       ) : null}
       {ultimaVenda && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">

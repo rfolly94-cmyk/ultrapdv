@@ -305,6 +305,7 @@ export default async function PdvPage({
         "caixa",
         "abrir"
       )}
+      caixaReabertoAviso={caixaAbertoRegistro?.aviso ?? null}
     />
   );
 }

@@ -15,6 +15,7 @@ import { PageAlert } from "@/components/ui/page-alert";
 export function PdvCaixaFechado({
   podeAbrir,
   onSair,
+  onAberto,
   variante = "overlay",
   rotuloContexto = "PDV bloqueado",
   mensagem = MENSAGEM_CAIXA_FECHADO_PDV,
@@ -22,6 +23,7 @@ export function PdvCaixaFechado({
 }: {
   podeAbrir: boolean;
   onSair: () => void;
+  onAberto?: () => void;
   variante?: "overlay" | "painel";
   rotuloContexto?: string;
   mensagem?: string;
@@ -54,6 +56,7 @@ export function PdvCaixaFechado({
         setErro(resultado.erro);
         return;
       }
+      onAberto?.();
       router.refresh();
     });
   }
@@ -171,6 +174,7 @@ export function PdvCaixaFechado({
       aria-modal="true"
       aria-labelledby="pdv-caixa-fechado-titulo"
       data-pdv-caixa-fechado="true"
+      data-nfe-caixa-fechado={rotuloContexto === "Venda bloqueada" ? "true" : undefined}
     >
       {corpo}
     </div>

@@ -354,12 +354,11 @@ test("17. snapshot do fechamento permanece após renomear forma", () => {
   );
 });
 
-test("18. caixa fechado rejeita novos movimentos e não reabre", () => {
+test("18. caixa fechado rejeita novos movimentos (reabertura é a Fase 4)", () => {
   const sql = fonte(FASE3);
   assert.match(sql, /Este caixa já está fechado/);
   assert.match(fonte(FASE1), /Só é possível movimentar um caixa aberto/);
   assert.doesNotMatch(sql, /rpc_reabrir_caixa|reabrir/);
-  assert.match(fonte("components/caixa/caixa-workspace.tsx"), /somente leitura/);
 });
 
 test("19. dupla tentativa de fechamento", () => {
@@ -413,7 +412,7 @@ test("23. histórico continua correto e somente leitura", () => {
   const carregar = fonte("lib/caixa/carregar.ts");
   assert.match(workspace, /Conferência por meio/);
   assert.match(workspace, /CaixaResumoSessao/);
-  assert.match(carregar, /conferencia: conferencias\.get/);
+  assert.match(carregar, /conferencia: historico\.conferencias\.get/);
   assert.match(fonte("components/caixa/caixa-resumo-sessao.tsx"), /Dinheiro físico esperado/);
 });
 

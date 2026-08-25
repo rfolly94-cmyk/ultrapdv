@@ -156,6 +156,8 @@ Arquitetura futura recomendada (já é esta): preset do perfil + override por v�
 | `POST /api/pdv/finalizar` | mesmas permissões do PDV; **não** exige caixa aberto nesta fase (Caixa mobile futuro) |
 | `abrirCaixa` | `caixa.abrir` + plano `caixa` |
 | `iniciarFechamentoCaixa` / `confirmarFechamentoCaixa` | `caixa.fechar` + plano `caixa` |
+| `reabrirCaixa` | `caixa.reabrir` + plano `caixa` (preset: administrador/gerente; não entra no perfil caixa/operador) |
+| `GET /api/impressao/caixa/[id]` | `caixa.acessar` + plano `caixa` |
 | `definirFechamentoCaixaCego` | `caixa.acessar` + `configuracoes.editar_empresa` |
 | ver esperado no caixa aberto com fechamento cego | `configuracoes.editar_empresa` (sem permissão nova; operador com só `caixa.fechar` não vê) |
 | `editarVendaPdv` | `vendas.editar` |

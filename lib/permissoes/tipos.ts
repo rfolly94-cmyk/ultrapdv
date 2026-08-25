@@ -61,7 +61,7 @@ export const ACOES_POR_MODULO = {
   catalogo: ["acessar", "configurar", "pedidos"],
   importacao_dados: ["acessar", "importar_produtos", "importar_clientes"],
   relatorios: ["acessar", "exportar"],
-  caixa: ["acessar", "abrir", "movimentar", "fechar"],
+  caixa: ["acessar", "abrir", "movimentar", "fechar", "reabrir"],
 } as const;
 
 export type AcaoDoModulo<M extends ModuloPermissao> =
@@ -140,6 +140,7 @@ export const ACAO_LABEL: Record<string, string> = {
   exportar: "Exportar",
   abrir: "Abrir caixa",
   fechar: "Fechar caixa",
+  reabrir: "Reabrir caixa",
 };
 
 export function ehModuloPermissao(valor: string): valor is ModuloPermissao {

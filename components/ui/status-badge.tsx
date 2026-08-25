@@ -48,6 +48,7 @@ const cores: Record<string, string> = {
   encerrada: "bg-zinc-100 text-zinc-600",
   aberta: "bg-emerald-50 text-emerald-700",
   aberto: "bg-emerald-50 text-emerald-700",
+  reaberto: "bg-amber-100 text-amber-900",
   fechado: "bg-zinc-100 text-zinc-600",
   cancelado: "bg-rose-50 text-rose-800",
 };

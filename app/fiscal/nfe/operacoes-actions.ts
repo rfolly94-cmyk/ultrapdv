@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 
 import { executarFinalizacaoVendaPdv } from "@/app/pdv/actions";
 import { MENSAGEM_CAIXA_FECHADO_FINALIZAR, MENSAGEM_CAIXA_FECHADO_NFE_VENDA } from "@/lib/caixa/mensagens";
-import { nfeVendaNovaExigeCaixa } from "@/lib/caixa/nfe-venda";
+import { nfeVendaNovaExigeCaixa, vendaIdNfeMaterializada } from "@/lib/caixa/nfe-venda";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import {
   MENSAGEM_NATUREZA_BONIFICACAO_INVALIDA,
@@ -2236,7 +2236,9 @@ export async function prepararVendaParaEmissaoNfe(input: {
       return { ok: false, erro: "Selecione o destinatário da venda." };
     }
 
-    let vendaId = operacao.venda_id ? String(operacao.venda_id) : null;
+    let vendaId = vendaIdNfeMaterializada(operacao.venda_id)
+      ? String(operacao.venda_id)
+      : null;
 
     if (!vendaId) {
       if (operacao.status !== "pronta_para_emissao") {
@@ -2279,10 +2281,21 @@ export async function prepararVendaParaEmissaoNfe(input: {
         return { ok: false, erro: pixModo.erro };
       }
 
+      const { data: tipoCatalogo } = await supabase
+        .from("fiscal_tipos_operacao")
+        .select("codigo, vincula_venda")
+        .eq("codigo", operacao.tipo_operacao_interno)
+        .maybeSingle();
+      const exigeCaixa = nfeVendaNovaExigeCaixa({
+        tipoOperacaoInterno: operacao.tipo_operacao_interno,
+        vinculaVenda: tipoCatalogo?.vincula_venda === true,
+        vendaId: null,
+      });
+
       // Motor comercial da NF-e de venda nova: mesmo RPC atômico do PDV web
-      // (venda + pagamentos + estoque + livro do Caixa). Emissão fiscal
-      // posterior não relança Caixa. Sem venda_id = venda nova; com venda_id
-      // este bloco não corre.
+      // (venda + pagamentos + estoque + livro do Caixa). Vale para Nova NF-e
+      // e para Editar rascunho sem venda_id. Emissão fiscal posterior não
+      // relança Caixa.
       const finalizada = await executarFinalizacaoVendaPdv(
         {
           idempotencyKey: String(operacao.id),
@@ -2295,10 +2308,7 @@ export async function prepararVendaParaEmissaoNfe(input: {
           pagamentos,
         },
         {
-          exigirCaixaAberto: nfeVendaNovaExigeCaixa({
-            tipoOperacaoInterno: operacao.tipo_operacao_interno,
-            vendaId: null,
-          }),
+          exigirCaixaAberto: exigeCaixa,
         }
       );
       if (!finalizada.ok) {

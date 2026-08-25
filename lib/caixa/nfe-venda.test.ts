@@ -10,7 +10,7 @@ import {
   MENSAGEM_CAIXA_FECHADO_NFE_VENDA,
   MENSAGEM_CAIXA_FECHADO_SEM_PERMISSAO,
 } from "@/lib/caixa/mensagens";
-import { nfeVendaNovaExigeCaixa } from "@/lib/caixa/nfe-venda";
+import { nfeVendaNovaExigeCaixa, vendaIdNfeMaterializada } from "@/lib/caixa/nfe-venda";
 import { totaisDoLivro } from "@/lib/caixa/saldo";
 import { fonte } from "@/lib/multiempresa/fonte";
 import { presetDoPerfil } from "@/lib/permissoes/presets";
@@ -69,7 +69,7 @@ test("natureza real: só venda comercial nova com recebimento exige Caixa", () =
       tipoOperacaoInterno: "venda",
       vinculaVenda: false,
     }),
-    false
+    true
   );
   assert.equal(
     nfeVendaNovaExigeCaixa({
@@ -107,6 +107,12 @@ test("natureza real: só venda comercial nova com recebimento exige Caixa", () =
   assert.equal(
     nfeVendaNovaExigeCaixa({
       tipoOperacaoInterno: "Venda",
+    }),
+    true
+  );
+  assert.equal(
+    nfeVendaNovaExigeCaixa({
+      tipoOperacaoInterno: "Venda de Mercadoria",
     }),
     false
   );
@@ -319,12 +325,13 @@ test("14-17. caixa fechado bloqueia Nova NF-e Venda; abrir usa rpc_abrir_caixa",
   assert.doesNotMatch(carregar, /rpc_abrir_caixa/);
 
   assert.match(form, /PdvCaixaFechado/);
-  assert.match(form, /variante="painel"/);
+  assert.match(form, /variante="overlay"/);
   assert.match(form, /MENSAGEM_CAIXA_FECHADO_NFE_VENDA/);
   assert.match(form, /Caixa aberto/);
   assert.match(form, /data-nfe-caixa-aberto/);
   assert.match(form, /nfeVendaNovaExigeCaixa/);
-  assert.match(form, /exigeCaixaVendaNova && !caixaAberto/);
+  assert.match(form, /vendaNovaSemCaixa/);
+  assert.match(form, /data-nfe-caixa-bloqueado/);
   assert.doesNotMatch(form, /rpc_abrir_caixa/);
 
   assert.match(bloqueio, /Caixa fechado/);
@@ -431,5 +438,81 @@ test("24-26. PDV web, Carteira e Fases 2A/2B/3 do Caixa permanecem no wrapper of
   assert.doesNotMatch(
     fonte("app/fiscal/nfe/operacoes-actions.ts"),
     /rpc_finalizar_venda_com_caixa/
+  );
+});
+
+test("rascunho Editar NF-e: guard não depende da URL Nova NF-e", () => {
+  const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
+  const carregar = fonte("lib/fiscal/nfe55/carregar-formulario-nfe.ts");
+  const pagina = fonte("app/fiscal/nfe/nfe-emissao-pagina.tsx");
+  const nova = fonte("app/fiscal/nfe/nova/page.tsx");
+  const editar = fonte("app/fiscal/nfe/[id]/editar/page.tsx");
+  const preparar = fonte("app/fiscal/nfe/operacoes-actions.ts");
+  const verificar = preparar.slice(
+    preparar.indexOf("export async function verificarOperacaoFiscalAction"),
+    preparar.indexOf("export async function confirmarSaidaOperacaoFiscal") !== -1
+      ? preparar.indexOf("export async function confirmarSaidaOperacaoFiscal")
+      : preparar.indexOf("export async function prepararVendaParaEmissaoNfe")
+  );
+
+  assert.match(nova, /NfeEmissaoPagina/);
+  assert.match(editar, /NfeEmissaoPagina operacaoId=\{id\}/);
+  assert.match(pagina, /carregarFormularioNfeEmissao/);
+  assert.match(pagina, /caixaAberto=\{formulario\.caixaAberto === true\}/);
+  assert.doesNotMatch(pagina, /Nova NF-e.*caixaAberto|operacaoId \? null/);
+  assert.match(carregar, /buscarCaixaAbertoEmpresa/);
+  assert.match(carregar, /vendaId: operacao\?\.venda_id/);
+  assert.match(carregar, /vinculaVenda: tipo\.vincula_venda === true/);
+  assert.doesNotMatch(carregar, /Boolean\(tipo\.vincula_venda\)/);
+
+  assert.equal(
+    nfeVendaNovaExigeCaixa({ tipoOperacaoInterno: "" }),
+    false
+  );
+  assert.equal(
+    nfeVendaNovaExigeCaixa({
+      tipoOperacaoInterno: "venda",
+      vendaId: null,
+    }),
+    true
+  );
+  assert.equal(vendaIdNfeMaterializada(null), false);
+  assert.equal(vendaIdNfeMaterializada("  "), false);
+
+  assert.match(form, /vendaNovaSemCaixa/);
+  assert.match(form, /operacao\.vendaId/);
+  assert.match(form, /operacao\.tipo/);
+  assert.match(form, /data-nfe-caixa-bloqueado=\{vendaNovaSemCaixa/);
+  assert.match(form, /disabled=\{pending \|\| !podeEmitir \|\| vendaNovaSemCaixa\}/);
+  assert.match(form, /if \(vendaNovaSemCaixa\)/);
+  assert.match(form, /setCaixaLiberadoLocal\(true\)/);
+  assert.match(form, /onAberto=/);
+  assert.match(fonte("components/pdv/pdv-caixa-fechado.tsx"), /onAberto\?\.\(\)/);
+
+  assert.match(form, /tipoAtual === "transferencia"|destTipo === "estabelecimento"/);
+  assert.equal(
+    nfeVendaNovaExigeCaixa({ tipoOperacaoInterno: "transferencia" }),
+    false
+  );
+  assert.equal(
+    nfeVendaNovaExigeCaixa({ tipoOperacaoInterno: "bonificacao" }),
+    false
+  );
+
+  const blocoPreparar = preparar.slice(
+    preparar.indexOf("export async function prepararVendaParaEmissaoNfe")
+  );
+  assert.match(blocoPreparar, /fiscal_tipos_operacao/);
+  assert.match(blocoPreparar, /exigirCaixaAberto: exigeCaixa/);
+  assert.match(blocoPreparar, /MENSAGEM_CAIXA_FECHADO_NFE_VENDA/);
+  assert.match(blocoPreparar, /vendaIdNfeMaterializada/);
+  assert.match(blocoPreparar, /if \(!vendaId\)/);
+
+  assert.doesNotMatch(verificar, /executarFinalizacaoVendaPdv/);
+  assert.doesNotMatch(verificar, /rpc_finalizar_venda/);
+  const persistir = form.slice(form.indexOf("async function persistirRascunho"));
+  assert.doesNotMatch(
+    persistir.slice(0, persistir.indexOf("function acionarValidar")),
+    /prepararVendaParaEmissaoNfe/
   );
 });

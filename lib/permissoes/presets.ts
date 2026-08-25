@@ -69,7 +69,7 @@ export const PRESETS_PERFIL: Record<PerfilUsuario, PermissoesEfetivas> = {
     ["vendas", ["acessar"]],
     ["pdv", ["acessar", "finalizar_venda"]],
     ["clientes", ["acessar", "acessar_carteira", "receber_carteira"]],
-    ["caixa", "todas"],
+    ["caixa", ["acessar", "abrir", "movimentar", "fechar"]],
   ]),
 
   operador: montar([
@@ -81,7 +81,7 @@ export const PRESETS_PERFIL: Record<PerfilUsuario, PermissoesEfetivas> = {
     ["estoque", ["acessar", "movimentar"]],
     ["catalogo", ["acessar", "pedidos"]],
     ["relatorios", ["acessar"]],
-    ["caixa", "todas"],
+    ["caixa", ["acessar", "abrir", "movimentar", "fechar"]],
   ]),
 
   contador: montar([

@@ -413,7 +413,7 @@ Transmitir contingência já gerada (`/api/fiscal/contingencia/[id]/transmitir`)
 - **Auto-print:** PDV (`tentarImpressaoPosVenda`) e NF-e (`EmitirNfeVendaButton`) — só o envio ao agente; venda/fiscal já concluídos permanecem
 - **Actions:** `salvarConfiguracaoImpressaoAction` e `gerarPdfTesteImpressaoAction` exigem o recurso; `autorizarUsoConectorImpressaoAction` é o SERVER_GUARD chamado **antes** de `enviarImpressaoAgente`
 - **Leitura de config:** `buscarConfiguracoesImpressaoAction` **não** exige o recurso (preserva dados; devolve `conectorLiberado`)
-- **APIs PDF:** `/api/impressao/recibo`, `danfe`, `carta-correcao`, `carteira-abertos` **não** consultam o plano de impressão; `/api/impressao/relatorio` é o PDF **gerencial** e pertence a `relatorios`, não ao Conector
+- **APIs PDF:** `/api/impressao/recibo`, `danfe`, `carta-correcao`, `carteira-abertos` **não** consultam o plano de impressão; `/api/impressao/relatorio` é o PDF **gerencial** e pertence a `relatorios`, não ao Conector; `/api/impressao/caixa/[id]` é o relatório de Caixa (`caixa.acessar` + plano `caixa`) e a impressão no Conector reutiliza a impressora selecionada (`danfe_nfe`/A4)
 - **print-agent:** não alterado
 - **Compatibilidade:** chave ausente libera; só `impressao_automatica = false` explícito nega
 - Configuração persistida **não é apagada** se o Master desligar o recurso

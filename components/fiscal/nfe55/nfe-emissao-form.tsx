@@ -54,6 +54,8 @@ import {
 } from "@/components/vendas/transporte-venda-form";
 import { hrefEdicaoOperacaoFiscal, resolverAcoesEmissaoFiscal } from "@/lib/fiscal/acoes-emissao";
 import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
+import { CaixaAvisoReabertoFaixa } from "@/components/caixa/caixa-aviso-reaberto";
+import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
 import {
   MENSAGEM_CAIXA_FECHADO_NFE_VENDA,
 } from "@/lib/caixa/mensagens";
@@ -303,6 +305,7 @@ export function NfeEmissaoForm({
   seriePrevistaNfce: _seriePrevistaNfce = "",
   numeroPrevistoNfce: _numeroPrevistoNfce = "",
   caixaAberto = false,
+  caixaReabertoAviso = null,
   podeAbrirCaixa = false,
 }: {
   operacao: {
@@ -389,6 +392,7 @@ export function NfeEmissaoForm({
   seriePrevistaNfce?: string;
   numeroPrevistoNfce?: string;
   caixaAberto?: boolean;
+  caixaReabertoAviso?: CaixaAvisoReaberto | null;
   podeAbrirCaixa?: boolean;
 }) {
   const router = useRouter();
@@ -526,6 +530,7 @@ export function NfeEmissaoForm({
   const [validadaLocalmente, setValidadaLocalmente] = useState(
     operacaoPodeEmitir(operacao.status)
   );
+  const [caixaLiberadoLocal, setCaixaLiberadoLocal] = useState(false);
   const emitindo = useRef(false);
   const saindo = useRef(false);
   const recebendo = useRef(false);
@@ -537,12 +542,17 @@ export function NfeEmissaoForm({
 
   const natureza = naturezas.find((item) => item.id === naturezaId) ?? null;
   const tipoAtual = natureza?.tipoOperacaoInterno || operacao.tipo;
-  const tipoCatalogo = tiposOperacao.find((item) => item.codigo === tipoAtual) ?? null;
+  const tipoCatalogo =
+    tiposOperacao.find((item) => item.codigo === tipoAtual) ??
+    tiposOperacao.find((item) => item.codigo === operacao.tipo) ??
+    null;
   const exigeCaixaVendaNova = nfeVendaNovaExigeCaixa({
-    tipoOperacaoInterno: tipoAtual,
-    vinculaVenda: tipoCatalogo?.vinculaVenda,
+    tipoOperacaoInterno: tipoAtual || operacao.tipo,
+    vinculaVenda: tipoCatalogo?.vinculaVenda === true,
     vendaId: operacao.vendaId,
   });
+  const caixaAbertoEfetivo = caixaAberto || caixaLiberadoLocal;
+  const vendaNovaSemCaixa = exigeCaixaVendaNova && !caixaAbertoEfetivo;
   const emitivel = tipoOperacaoEmitivelNestaTela(tipoAtual);
   const destTipo = destinatarioTipoPeloTipoOperacao(tipoAtual);
   const nfeAutorizada = emissao?.status === "autorizada";
@@ -591,7 +601,7 @@ export function NfeEmissaoForm({
     emitivel &&
     !bloqueiaRetransmissao &&
     !cabecalhoSujo &&
-    (!exigeCaixaVendaNova || caixaAberto) &&
+    !vendaNovaSemCaixa &&
     (acoesFiscais?.podeRetransmitir === true ||
       (validadaLocalmente && operacaoPodeEmitir(operacao.status)));
   const destinatario = useMemo(() => {
@@ -910,9 +920,13 @@ export function NfeEmissaoForm({
       );
       return;
     }
+    if (vendaNovaSemCaixa) {
+      setErro(MENSAGEM_CAIXA_FECHADO_NFE_VENDA);
+      return;
+    }
     if (!podeEmitir) {
       setErro(
-        exigeCaixaVendaNova && !caixaAberto
+        exigeCaixaVendaNova && !caixaAbertoEfetivo
           ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA
           : "Valide a NF-e antes de emitir. A validação não transmite o documento."
       );
@@ -1175,7 +1189,11 @@ export function NfeEmissaoForm({
   });
 
   return (
-    <div className="nfe-form">
+    <div
+      className="nfe-form"
+      data-nfe-exige-caixa={exigeCaixaVendaNova ? "true" : "false"}
+      data-nfe-caixa-bloqueado={vendaNovaSemCaixa ? "true" : "false"}
+    >
       {erro ? (
         <div className="nfe-alerta">
           {erro}
@@ -1195,19 +1213,24 @@ export function NfeEmissaoForm({
         </div>
       ) : null}
 
-      {exigeCaixaVendaNova && !caixaAberto ? (
+      {vendaNovaSemCaixa ? (
         <PdvCaixaFechado
-          variante="painel"
+          variante="overlay"
           podeAbrir={podeAbrirCaixa}
           rotuloContexto="Venda bloqueada"
           mensagem={MENSAGEM_CAIXA_FECHADO_NFE_VENDA}
           rotuloSair="Voltar"
           onSair={() => router.push("/fiscal")}
+          onAberto={() => setCaixaLiberadoLocal(true)}
         />
       ) : null}
 
+      {caixaAbertoEfetivo && caixaReabertoAviso ? (
+        <CaixaAvisoReabertoFaixa aviso={caixaReabertoAviso} />
+      ) : null}
+
       <div className="sticky top-[var(--header)] z-[15] -mx-4 mb-2 flex flex-wrap justify-end gap-2 border-b border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur-sm lg:top-0">
-        {exigeCaixaVendaNova && caixaAberto ? (
+        {exigeCaixaVendaNova && caixaAbertoEfetivo ? (
           <span
             className="mr-auto self-center text-xs font-medium text-emerald-700"
             data-nfe-caixa-aberto="true"
@@ -1238,8 +1261,13 @@ export function NfeEmissaoForm({
         </button>
         <button
           type="button"
-          className="updv-btn updv-btn-primary"
-          disabled={pending || !podeEmitir}
+          className={
+            vendaNovaSemCaixa || !podeEmitir
+              ? "updv-btn updv-btn-primary opacity-50 cursor-not-allowed"
+              : "updv-btn updv-btn-primary"
+          }
+          disabled={pending || !podeEmitir || vendaNovaSemCaixa}
+          title={vendaNovaSemCaixa ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA : undefined}
           onClick={emitir}
         >
           Emitir NF-e

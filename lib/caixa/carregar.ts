@@ -7,9 +7,15 @@ import {
   deveOcultarEsperadoCaixaAberto,
   sanitizarSessaoCaixaAbertoCego,
 } from "./conferencia";
+import {
+  idCaixaReabrirElegivel,
+  sanitizarCiclosFechamentoCego,
+} from "./reabertura";
 import type {
+  CaixaCicloFechamento,
   CaixaFechamentoMeio,
   CaixaMovimento,
+  CaixaReabertura,
   CaixaResumoAnterior,
   CaixaSessao,
   PainelCaixa,
@@ -66,7 +72,11 @@ type LinhaCaixa = {
   status: string;
   observacao_abertura: string | null;
   observacao_fechamento: string | null;
+  reaberto?: boolean | null;
 };
+
+const COLUNAS_CAIXA =
+  "id, empresa_id, filial_id, numero, usuario_abertura_id, usuario_fechamento_id, saldo_inicial, dinheiro_contado, diferenca, aberto_em, fechado_em, status, observacao_abertura, observacao_fechamento, reaberto";
 
 const COLUNAS_MOVIMENTO =
   "id, caixa_id, tipo, origem_tipo, origem_id, forma_pagamento_id, forma_tipo, forma_codigo, forma_nome, permite_troco_snapshot, afeta_caixa_fisico_snapshot, venda_id, venda_numero, cliente_nome, entrada, saida, valor_liquido, descricao, usuario_id, estorno_de_id, created_at";
@@ -97,7 +107,9 @@ type LinhaMovimento = {
 
 function mapearSessao(
   linha: LinhaCaixa,
-  nomes: Map<string, string>
+  nomes: Map<string, string>,
+  ciclos: CaixaCicloFechamento[],
+  reaberturas: CaixaReabertura[]
 ): CaixaSessao {
   return {
     id: String(linha.id),
@@ -126,6 +138,9 @@ function mapearSessao(
     status: statusCaixa(linha.status),
     observacao_abertura: texto(linha.observacao_abertura),
     observacao_fechamento: texto(linha.observacao_fechamento),
+    reaberto: linha.reaberto === true,
+    reaberturas,
+    ciclos_fechamento: ciclos,
   };
 }
 
@@ -219,37 +234,128 @@ function mapearFechamentoMeio(linha: {
   };
 }
 
-async function carregarConferencias(
+async function carregarHistoricoFechamentos(
   supabase: Awaited<ReturnType<typeof createClient>>,
   empresaId: string,
   idsCaixa: string[]
 ) {
-  const porCaixa = new Map<string, CaixaFechamentoMeio[]>();
+  const ciclosPorCaixa = new Map<string, CaixaCicloFechamento[]>();
+  const reaberturasPorCaixa = new Map<string, CaixaReabertura[]>();
+  const conferencias = new Map<string, CaixaFechamentoMeio[]>();
   if (idsCaixa.length === 0) {
-    return porCaixa;
+    return { ciclosPorCaixa, reaberturasPorCaixa, conferencias };
   }
 
-  const { data } = await supabase
-    .from("caixa_fechamentos_meios")
-    .select(
-      "caixa_id, chave, forma_pagamento_id, forma_nome_snapshot, forma_tipo_snapshot, forma_codigo_snapshot, afeta_caixa_fisico_snapshot, valor_esperado, valor_informado, diferenca"
-    )
-    .eq("empresa_id", empresaId)
-    .in("caixa_id", idsCaixa)
-    .order("created_at", { ascending: true });
-
   const permitidos = new Set(idsCaixa);
-  for (const bruto of data ?? []) {
+  const [
+    { data: ciclosBrutos },
+    { data: meiosBrutos },
+    { data: reaberturasBrutas },
+  ] = await Promise.all([
+    supabase
+      .from("caixa_fechamentos")
+      .select(
+        "id, caixa_id, versao, fechado_em, fechado_por, dinheiro_contado, dinheiro_fisico_esperado, diferenca, observacao, fechamento_cego"
+      )
+      .eq("empresa_id", empresaId)
+      .in("caixa_id", idsCaixa)
+      .order("versao", { ascending: true }),
+    supabase
+      .from("caixa_fechamentos_meios")
+      .select(
+        "caixa_id, caixa_fechamento_id, chave, forma_pagamento_id, forma_nome_snapshot, forma_tipo_snapshot, forma_codigo_snapshot, afeta_caixa_fisico_snapshot, valor_esperado, valor_informado, diferenca"
+      )
+      .eq("empresa_id", empresaId)
+      .in("caixa_id", idsCaixa)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("caixa_reaberturas")
+      .select(
+        "id, caixa_id, fechamento_id, reaberto_em, reaberto_por, motivo"
+      )
+      .eq("empresa_id", empresaId)
+      .in("caixa_id", idsCaixa)
+      .order("reaberto_em", { ascending: true }),
+  ]);
+
+  const idsUsuarios = [
+    ...((ciclosBrutos ?? []) as Array<{ fechado_por?: unknown }>).map((item) =>
+      String(item.fechado_por ?? "")
+    ),
+    ...((reaberturasBrutas ?? []) as Array<{ reaberto_por?: unknown }>).map(
+      (item) => String(item.reaberto_por ?? "")
+    ),
+  ];
+  const nomes = await nomesUsuarios(supabase, idsUsuarios);
+
+  const meiosPorCiclo = new Map<string, CaixaFechamentoMeio[]>();
+  for (const bruto of meiosBrutos ?? []) {
+    const caixaId = String((bruto as { caixa_id?: unknown }).caixa_id ?? "");
+    const cicloId = String(
+      (bruto as { caixa_fechamento_id?: unknown }).caixa_fechamento_id ?? ""
+    );
+    if (!permitidos.has(caixaId) || !cicloId) {
+      continue;
+    }
+    const lista = meiosPorCiclo.get(cicloId) ?? [];
+    lista.push(
+      mapearFechamentoMeio(bruto as Parameters<typeof mapearFechamentoMeio>[0])
+    );
+    meiosPorCiclo.set(cicloId, lista);
+  }
+
+  for (const bruto of ciclosBrutos ?? []) {
+    const caixaId = String((bruto as { caixa_id?: unknown }).caixa_id ?? "");
+    const cicloId = String((bruto as { id?: unknown }).id ?? "");
+    if (!permitidos.has(caixaId) || !cicloId) {
+      continue;
+    }
+    const fechadoPor = String((bruto as { fechado_por?: unknown }).fechado_por ?? "");
+    const ciclo: CaixaCicloFechamento = {
+      id: cicloId,
+      versao: Number((bruto as { versao?: unknown }).versao ?? 0) || 0,
+      fechado_em: String((bruto as { fechado_em?: unknown }).fechado_em ?? ""),
+      fechado_por_id: fechadoPor,
+      fechado_por_nome: nomes.get(fechadoPor) ?? null,
+      dinheiro_contado: numero((bruto as { dinheiro_contado?: unknown }).dinheiro_contado),
+      dinheiro_fisico_esperado: numero(
+        (bruto as { dinheiro_fisico_esperado?: unknown }).dinheiro_fisico_esperado
+      ),
+      diferenca: numero((bruto as { diferenca?: unknown }).diferenca),
+      observacao: texto((bruto as { observacao?: unknown }).observacao),
+      fechamento_cego:
+        (bruto as { fechamento_cego?: unknown }).fechamento_cego === true,
+      meios: meiosPorCiclo.get(cicloId) ?? [],
+    };
+    const lista = ciclosPorCaixa.get(caixaId) ?? [];
+    lista.push(ciclo);
+    ciclosPorCaixa.set(caixaId, lista);
+  }
+
+  for (const [caixaId, ciclos] of ciclosPorCaixa) {
+    const ultimo = ciclos[ciclos.length - 1];
+    conferencias.set(caixaId, ultimo?.meios ?? []);
+  }
+
+  for (const bruto of reaberturasBrutas ?? []) {
     const caixaId = String((bruto as { caixa_id?: unknown }).caixa_id ?? "");
     if (!permitidos.has(caixaId)) {
       continue;
     }
-    const lista = porCaixa.get(caixaId) ?? [];
-    lista.push(mapearFechamentoMeio(bruto as Parameters<typeof mapearFechamentoMeio>[0]));
-    porCaixa.set(caixaId, lista);
+    const porId = String((bruto as { reaberto_por?: unknown }).reaberto_por ?? "");
+    const lista = reaberturasPorCaixa.get(caixaId) ?? [];
+    lista.push({
+      id: String((bruto as { id?: unknown }).id ?? ""),
+      fechamento_id: String((bruto as { fechamento_id?: unknown }).fechamento_id ?? ""),
+      reaberto_em: String((bruto as { reaberto_em?: unknown }).reaberto_em ?? ""),
+      reaberto_por_id: porId,
+      reaberto_por_nome: nomes.get(porId) ?? null,
+      motivo: texto((bruto as { motivo?: unknown }).motivo) || "",
+    });
+    reaberturasPorCaixa.set(caixaId, lista);
   }
 
-  return porCaixa;
+  return { ciclosPorCaixa, reaberturasPorCaixa, conferencias };
 }
 
 export async function carregarFechamentoCego(
@@ -290,9 +396,7 @@ export async function carregarPainelCaixa(
 
   const { data: caixasBrutas } = await supabase
     .from("caixas")
-    .select(
-      "id, empresa_id, filial_id, numero, usuario_abertura_id, usuario_fechamento_id, saldo_inicial, dinheiro_contado, diferenca, aberto_em, fechado_em, status, observacao_abertura, observacao_fechamento"
-    )
+    .select(COLUNAS_CAIXA)
     .eq("empresa_id", id)
     .order("aberto_em", { ascending: false })
     .limit(120);
@@ -322,7 +426,7 @@ export async function carregarPainelCaixa(
     ...caixas.map((caixa) => caixa.usuario_fechamento_id ?? ""),
     ...movimentos.map((movimento) => movimento.usuario_id),
   ]);
-  const conferencias = await carregarConferencias(supabase, id, idsCaixa);
+  const historico = await carregarHistoricoFechamentos(supabase, id, idsCaixa);
   const fechamentoCego = await carregarFechamentoCego(supabase, id);
 
   const porCaixa = new Map<string, CaixaMovimento[]>();
@@ -337,7 +441,12 @@ export async function carregarPainelCaixa(
   const totaisAtual = totaisDoLivro(atuaisMovimentos);
   const atualBruto = aberto
     ? {
-        ...mapearSessao(aberto, nomes),
+        ...mapearSessao(
+          aberto,
+          nomes,
+          historico.ciclosPorCaixa.get(aberto.id) ?? [],
+          historico.reaberturasPorCaixa.get(aberto.id) ?? []
+        ),
         ...totaisAtual,
         movimentos: atuaisMovimentos,
       }
@@ -351,23 +460,44 @@ export async function carregarPainelCaixa(
   const anteriores: CaixaResumoAnterior[] = caixas
     .filter((caixa) => caixa.status !== "aberto")
     .map((linha) => {
-      const sessao = mapearSessao(linha, nomes);
+      const sessao = mapearSessao(
+        linha,
+        nomes,
+        historico.ciclosPorCaixa.get(linha.id) ?? [],
+        historico.reaberturasPorCaixa.get(linha.id) ?? []
+      );
       const movimentosCaixa = porCaixa.get(sessao.id) ?? [];
       return {
         ...sessao,
         ...totaisDoLivro(movimentosCaixa),
         movimentos: movimentosCaixa,
-        conferencia: conferencias.get(sessao.id) ?? [],
+        conferencia: historico.conferencias.get(sessao.id) ?? [],
       };
     });
 
+  const atualSanitizado =
+    atualBruto && ocultarAberto
+      ? {
+          ...sanitizarSessaoCaixaAbertoCego(atualBruto),
+          ciclos_fechamento: sanitizarCiclosFechamentoCego(
+            atualBruto.ciclos_fechamento
+          ),
+        }
+      : atualBruto;
+
   return {
-    atual:
-      atualBruto && ocultarAberto
-        ? sanitizarSessaoCaixaAbertoCego(atualBruto)
-        : atualBruto,
+    atual: atualSanitizado,
     anteriores,
     fechamentoCego,
+    caixaReabrirElegivelId: idCaixaReabrirElegivel(
+      caixas.map((caixa) => ({
+        id: caixa.id,
+        status: statusCaixa(caixa.status),
+        aberto_em: String(caixa.aberto_em),
+        numero: Number(caixa.numero) || 0,
+        filial_id: caixa.filial_id ? String(caixa.filial_id) : null,
+      }))
+    ),
   };
 }
 
@@ -382,9 +512,7 @@ export async function carregarDetalheCaixa(input: {
 
   const { data: linha, error } = await supabase
     .from("caixas")
-    .select(
-      "id, empresa_id, filial_id, numero, usuario_abertura_id, usuario_fechamento_id, saldo_inicial, dinheiro_contado, diferenca, aberto_em, fechado_em, status, observacao_abertura, observacao_fechamento"
-    )
+    .select(COLUNAS_CAIXA)
     .eq("empresa_id", empresaId)
     .eq("id", caixaId)
     .maybeSingle();
@@ -408,13 +536,22 @@ export async function carregarDetalheCaixa(input: {
     (linha as LinhaCaixa).usuario_fechamento_id ?? "",
     ...linhas.map((item) => item.usuario_id),
   ]);
-  const conferencias = await carregarConferencias(supabase, empresaId, [caixaId]);
+  const conferencias = await carregarHistoricoFechamentos(
+    supabase,
+    empresaId,
+    [caixaId]
+  );
   const fechamentoCego = await carregarFechamentoCego(supabase, empresaId);
   const detalhe = {
-    ...mapearSessao(linha as LinhaCaixa, nomes),
+    ...mapearSessao(
+      linha as LinhaCaixa,
+      nomes,
+      conferencias.ciclosPorCaixa.get(caixaId) ?? [],
+      conferencias.reaberturasPorCaixa.get(caixaId) ?? []
+    ),
     ...totaisDoLivro(livro),
     movimentos: livro,
-    conferencia: conferencias.get(caixaId) ?? [],
+    conferencia: conferencias.conferencias.get(caixaId) ?? [],
   };
   const ocultar = deveOcultarEsperadoCaixaAberto({
     fechamentoCego,
@@ -422,5 +559,12 @@ export async function carregarDetalheCaixa(input: {
     podeRevelarEsperado: input.podeRevelarEsperadoCego === true,
   });
 
-  return ocultar ? sanitizarSessaoCaixaAbertoCego(detalhe) : detalhe;
+  if (!ocultar) {
+    return detalhe;
+  }
+
+  return {
+    ...sanitizarSessaoCaixaAbertoCego(detalhe),
+    ciclos_fechamento: sanitizarCiclosFechamentoCego(detalhe.ciclos_fechamento),
+  };
 }

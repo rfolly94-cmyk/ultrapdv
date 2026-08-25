@@ -41,6 +41,35 @@ export type CaixaMovimento = {
   valores_ocultos?: boolean;
 };
 
+export type CaixaReabertura = {
+  id: string;
+  fechamento_id: string;
+  reaberto_em: string;
+  reaberto_por_id: string;
+  reaberto_por_nome: string | null;
+  motivo: string;
+};
+
+export type CaixaCicloFechamento = {
+  id: string;
+  versao: number;
+  fechado_em: string;
+  fechado_por_id: string;
+  fechado_por_nome: string | null;
+  dinheiro_contado: number;
+  dinheiro_fisico_esperado: number;
+  diferenca: number;
+  observacao: string | null;
+  fechamento_cego: boolean;
+  meios: CaixaFechamentoMeio[];
+};
+
+export type CaixaAvisoReaberto = {
+  reaberto_em: string;
+  reaberto_por_nome: string | null;
+  motivo: string;
+};
+
 export type CaixaSessao = {
   id: string;
   empresa_id: string;
@@ -58,6 +87,9 @@ export type CaixaSessao = {
   status: StatusCaixa;
   observacao_abertura: string | null;
   observacao_fechamento: string | null;
+  reaberto: boolean;
+  reaberturas: CaixaReabertura[];
+  ciclos_fechamento: CaixaCicloFechamento[];
 };
 
 export type CaixaTotais = {
@@ -138,4 +170,5 @@ export type PainelCaixa = {
   atual: (CaixaSessao & CaixaTotais & { movimentos: CaixaMovimento[] }) | null;
   anteriores: CaixaResumoAnterior[];
   fechamentoCego: boolean;
+  caixaReabrirElegivelId: string | null;
 };

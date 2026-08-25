@@ -13,6 +13,7 @@ import {
   podeRevelarEsperadoCaixaCego,
 } from "@/lib/caixa/conferencia";
 import { carregarDetalheCaixa, carregarFechamentoCego } from "@/lib/caixa/carregar";
+import { validarMotivoReabertura } from "@/lib/caixa/reabertura";
 import type { ConferenciaCaixa, MeioConferenciaCaixa } from "@/lib/caixa/tipos";
 import { mensagemErroCaixa, parseValorCaixa, uuidCaixaValido } from "@/lib/caixa/valor";
 import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
@@ -429,6 +430,58 @@ export async function carregarResumoCaixa(caixaId: string) {
     return {
       ok: false as const,
       erro: mensagemErroCaixa(error, "Não foi possível carregar o resumo."),
+    };
+  }
+}
+
+export async function reabrirCaixa(input: {
+  caixaId: string;
+  motivo: string;
+}): Promise<Resultado> {
+  try {
+    const { supabase, empresaId } = await getContexto();
+
+    try {
+      await exigirOperacaoCaixa({
+        empresaId,
+        acao: "reabrir",
+        origem: "reabrirCaixa",
+      });
+    } catch (error) {
+      return resultadoNegacao(error);
+    }
+
+    if (!uuidCaixaValido(input.caixaId)) {
+      return { ok: false, erro: "Caixa inválido." };
+    }
+
+    const motivo = validarMotivoReabertura(input.motivo);
+    if (!motivo.ok) {
+      return { ok: false, erro: motivo.erro };
+    }
+
+    const { error } = await supabase.rpc("rpc_reabrir_caixa", {
+      p_caixa_id: input.caixaId,
+      p_motivo: motivo.motivo,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        erro: mensagemErroCaixa(error, "Não foi possível reabrir o caixa."),
+      };
+    }
+
+    revalidatePath("/caixa");
+    revalidatePath("/pdv");
+    revalidatePath("/fiscal");
+    revalidatePath("/fiscal/nfe/nova");
+    revalidatePath("/fiscal/nfe", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      erro: mensagemErroCaixa(error, "Não foi possível reabrir o caixa."),
     };
   }
 }

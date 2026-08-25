@@ -16,6 +16,18 @@ export const MENSAGEM_CONFERENCIA_DESATUALIZADA =
 export const MENSAGEM_FECHAMENTO_EXIGE_CONFERENCIA =
   "O fechamento exige conferência por meio de pagamento.";
 
+export const MENSAGEM_MOTIVO_REABERTURA =
+  "Informe o motivo da reabertura com pelo menos 8 caracteres.";
+
+export const MENSAGEM_REABRIR_ULTIMO_FECHADO =
+  "Só é possível reabrir o último caixa fechado desta empresa.";
+
+export const MENSAGEM_REABRIR_COM_ABERTO =
+  "Já existe um caixa aberto para esta empresa.";
+
+export const MENSAGEM_REABRIR_NAO_FECHADO =
+  "Só é possível reabrir um caixa fechado.";
+
 export function mensagemErroCaixaOperacao(erro: unknown) {
   const texto =
     erro instanceof Error
