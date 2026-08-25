@@ -61,9 +61,9 @@ export function AppShell({
   const conteudo = semChrome ? (
     <>{children}</>
   ) : (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[var(--background)]">
       <aside
-        className={`fixed inset-y-0 left-0 z-30 hidden border-r border-zinc-200 print:hidden lg:block ${largura}`}
+        className={`fixed inset-y-0 left-0 z-30 hidden border-r border-zinc-200/80 print:hidden lg:block ${largura}`}
       >
         <AppSidebar
           recolhida={recolhida}
@@ -83,7 +83,7 @@ export function AppShell({
             className="absolute inset-0 bg-black/30"
             onClick={() => setMobileAberto(false)}
           />
-          <aside className="relative h-full w-[var(--sidebar-expanded)] border-r border-zinc-200 bg-[#f7f7f8]">
+          <aside className="relative h-full w-[var(--sidebar-expanded)] border-r border-zinc-200/80 bg-[var(--sidebar-bg)]">
             <AppSidebar
               recolhida={false}
               onToggle={() => setMobileAberto(false)}
@@ -98,7 +98,7 @@ export function AppShell({
       )}
 
       <div className={`${padding} print:pl-0`}>
-        <header className="sticky top-0 z-20 flex h-12 items-center border-b border-zinc-200 bg-white px-3 print:hidden lg:hidden">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-zinc-200/80 bg-[var(--sidebar-bg)] px-3 print:hidden lg:hidden">
           <button
             type="button"
             onClick={() => setMobileAberto(true)}
@@ -106,7 +106,7 @@ export function AppShell({
           >
             Menu
           </button>
-          <span className="ml-3">
+          <span className="ml-1 min-w-0">
             <LogoEmpresa
               src={identidade?.logoUrl}
               nome={identidade?.nome}

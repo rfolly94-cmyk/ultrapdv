@@ -23,7 +23,7 @@ export function RelatoriosAbas() {
   return (
     <nav
       aria-label="Relatórios"
-      className="print-hide flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-200 bg-white px-3"
+      className="print-hide flex h-10 shrink-0 items-center gap-1 overflow-x-auto px-[var(--page-pad)]"
     >
       {ABAS_RELATORIO.map((aba) => {
         const href = `/relatorios?aba=${aba}&periodo=${periodo}`;
@@ -35,12 +35,12 @@ export function RelatoriosAbas() {
             href={href}
             className={[
               "relative shrink-0 px-2.5 py-1.5 text-[13px] font-medium",
-              ativa ? "text-zinc-950" : "text-zinc-500 hover:text-zinc-800",
+              ativa ? "text-[var(--primary)]" : "text-zinc-500 hover:text-zinc-800",
             ].join(" ")}
           >
             {ROTULOS[aba]}
             {ativa && (
-              <span className="absolute inset-x-2 bottom-0 h-0.5 bg-zinc-950" />
+              <span className="absolute inset-x-2 bottom-0 h-0.5 bg-[var(--primary)]" />
             )}
           </Link>
         );

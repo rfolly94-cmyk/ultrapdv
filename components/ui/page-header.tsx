@@ -19,28 +19,24 @@ export function PageHeader({
   breadcrumb?: BreadcrumbItem[];
 }) {
   const trilha = breadcrumb && breadcrumb.length >= 2;
-  const compacto = !description && !trilha;
 
   return (
-    <header className="shrink-0 border-b border-zinc-200 bg-white">
+    <header className="shrink-0">
       {trilha ? <AppBreadcrumb items={breadcrumb} /> : null}
-      <div
-        className={[
-          "flex justify-between gap-3 px-4",
-          compacto ? "h-12 items-center" : "items-start py-2.5",
-        ].join(" ")}
-      >
+      <div className="flex flex-wrap items-start justify-between gap-3 px-[var(--page-pad)] py-5">
         <div className="min-w-0">
-          <h1 className="text-[17px] font-semibold tracking-tight text-zinc-950">
+          <h1 className="text-[22px] font-semibold tracking-tight text-zinc-950">
             {title}
             {count !== undefined && (
-              <span className="ml-1.5 font-medium text-zinc-400">({count})</span>
+              <span className="ml-1.5 text-[16px] font-medium text-zinc-400">
+                ({count})
+              </span>
             )}
           </h1>
           {description ? <p className="updv-page-desc">{description}</p> : null}
         </div>
         {actions ? (
-          <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
         ) : null}
       </div>
     </header>

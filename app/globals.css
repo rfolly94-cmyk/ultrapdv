@@ -1,20 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #f8fafc;
   --foreground: #18181b;
   --surface: #ffffff;
   --muted: #71717a;
-  --line: #e4e4e7;
+  --line: #e4e7ec;
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
+  --primary-soft: #eff6ff;
+  --sidebar-bg: #fcfcfd;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: 0 8px 24px rgba(15, 23, 42, 0.04);
   --row: 40px;
   --header-row: 38px;
   --control: 36px;
   --header: 48px;
-  --page-pad: 16px;
-  --sidebar-expanded: 176px;
-  --sidebar-collapsed: 56px;
+  --page-pad: 20px;
+  --sidebar-expanded: 220px;
+  --sidebar-collapsed: 72px;
   --drawer-sm: 440px;
   --drawer-md: 560px;
 }
@@ -42,7 +48,7 @@ body {
   display: flex;
   min-height: 100vh;
   flex-direction: column;
-  background: #fff;
+  background: transparent;
 }
 
 .updv-breadcrumb {
@@ -50,22 +56,22 @@ body {
   min-height: 28px;
   align-items: center;
   gap: 6px;
-  padding: 6px 16px 0;
+  padding: 8px var(--page-pad) 0;
   font-size: 12px;
   color: #71717a;
 }
 
 .updv-page-desc {
-  margin-top: 2px;
-  font-size: 12.5px;
-  line-height: 1.35;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
   color: #71717a;
 }
 
 .updv-config {
   width: 100%;
   max-width: 64rem;
-  padding: 16px;
+  padding: var(--page-pad);
 }
 
 .updv-table-shell {
@@ -73,8 +79,12 @@ body {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  border-top: 1px solid #e4e4e7;
-  background: #fff;
+  margin: 0 var(--page-pad) var(--page-pad);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .updv-table-scroll {
@@ -97,8 +107,8 @@ body {
   font-size: 12px;
   font-weight: 500;
   color: #71717a;
-  background: #f4f4f5;
-  border-bottom: 1px solid #e4e4e7;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 
@@ -112,7 +122,7 @@ body {
 }
 
 .updv-table tbody tr:hover {
-  background: #f8fafc;
+  background: #f1f5f9;
 }
 
 .updv-table tbody tr[data-selected="true"] {
@@ -139,7 +149,7 @@ body {
 .updv-select {
   height: var(--control);
   border: 1px solid #d4d4d8;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: #fff;
   padding: 0 10px;
   font-size: 13px;
@@ -161,7 +171,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 12px;
   font-size: 13px;
   font-weight: 500;
@@ -212,39 +222,60 @@ body {
 .updv-nav-item {
   position: relative;
   display: flex;
-  height: 36px;
+  height: 40px;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin: 2px 10px;
   padding: 0 12px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
   font-weight: 500;
   color: #52525b;
 }
 
+.updv-nav-item svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
+}
+
 .updv-nav-item:hover {
-  background: #ececee;
+  background: #f4f4f5;
   color: #18181b;
 }
 
 .updv-nav-item[data-active="true"] {
-  background: #e8e8ea;
-  color: #18181b;
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
-.updv-nav-item[data-active="true"]::before {
-  content: "";
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 0;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: #2563eb;
+.updv-nav-item[data-active="true"]:hover {
+  background: #dbeafe;
+  color: var(--primary);
 }
 
 .updv-nav-item[data-collapsed="true"] {
   justify-content: center;
+  margin: 2px 8px;
   padding: 0;
+}
+
+.updv-sidebar-account {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 8px 10px 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.updv-sidebar-account[data-collapsed="true"] {
+  align-items: center;
+  margin: 8px;
+  padding: 8px 4px;
 }
 
 .nfe-form {

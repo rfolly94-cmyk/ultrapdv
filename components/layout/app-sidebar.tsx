@@ -117,6 +117,20 @@ function rotuloPerfil(perfil?: string | null) {
   );
 }
 
+function iniciais(nome?: string | null) {
+  const partes = String(nome ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (partes.length === 0) {
+    return "U";
+  }
+  if (partes.length === 1) {
+    return partes[0].slice(0, 2).toUpperCase();
+  }
+  return `${partes[0][0]}${partes[partes.length - 1][0]}`.toUpperCase();
+}
+
 export function AppSidebar({
   recolhida,
   onToggle,
@@ -180,6 +194,9 @@ export function AppSidebar({
   const itensRodape = menuRodape.filter((item) => permitidos.has(item.href));
   const home = permissoes ? primeiraRotaPermitida(permissoes) : "/painel";
   const logoUrl = logoUrlUtilizavel(identidade?.logoUrl);
+  const perfilRotulo = rotuloPerfil(perfil);
+  const temConta = Boolean(identidade?.nome || usuario || perfil);
+  const marcaIniciais = iniciais(identidade?.nome || usuario);
 
   function linkMenu(item: MenuItem) {
     const Icon = item.icon;
@@ -197,79 +214,119 @@ export function AppSidebar({
         data-collapsed={recolhida}
         className="updv-nav-item"
       >
-        <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
         {!recolhida && <span className="truncate">{item.label}</span>}
       </Link>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#f7f7f8]">
-      <div className="flex h-12 shrink-0 items-center px-2">
+    <div className="flex h-full flex-col bg-[var(--sidebar-bg)]">
+      <div
+        className={
+          recolhida
+            ? "flex shrink-0 flex-col items-center gap-2 border-b border-zinc-100 px-2 py-3"
+            : "flex h-16 shrink-0 items-center gap-1 border-b border-zinc-100 px-3"
+        }
+      >
         <button
           type="button"
           onClick={onToggle}
-          className="flex h-8 w-8 items-center justify-center text-zinc-500 hover:text-zinc-900"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
           aria-label={recolhida ? "Expandir menu" : "Recolher menu"}
         >
-          <Menu className="h-4 w-4" />
+          <Menu className="h-[18px] w-[18px]" strokeWidth={1.75} />
         </button>
         {!recolhida && (
           <Link
             href={home}
             onClick={onNavigate}
-            className={
-              logoUrl
-                ? "flex min-w-0 flex-1 items-center justify-center px-1"
-                : "min-w-0 flex-1 overflow-hidden"
-            }
+            className="flex min-w-0 flex-1 items-center px-1"
           >
             <LogoEmpresa src={logoUrl} nome={identidade?.nome} />
           </Link>
         )}
-        {recolhida && logoUrl && (
+        {recolhida && logoUrl ? (
           <LogoEmpresa src={logoUrl} nome={identidade?.nome} compacto />
-        )}
+        ) : null}
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-1">
+      <nav className="flex-1 overflow-y-auto py-3">
         {itens.map((item) => linkMenu(item))}
       </nav>
 
-      <div className="mt-auto border-t border-zinc-200 py-1">
+      <div className="mt-auto border-t border-zinc-100 pt-2">
         {itensRodape.map((item) => linkMenu(item))}
-        {!recolhida && (identidade?.nome || usuario || perfil) && (
-          <div className="px-3 py-2">
-            {identidade?.nome ? (
-              <p className="truncate text-[12px] font-medium text-zinc-900">
-                {identidade.nome}
-              </p>
-            ) : null}
-            {assinaturaSuspensa ? (
-              <p className="mt-1 text-[11px] font-medium text-amber-700">
-                Assinatura suspensa
-              </p>
-            ) : null}
-            {(usuario || rotuloPerfil(perfil)) && (
-              <p className="truncate text-[11px] text-zinc-500">
-                {[usuario, rotuloPerfil(perfil)].filter(Boolean).join(" · ")}
-              </p>
-            )}
+        {temConta ? (
+          <div
+            className="updv-sidebar-account"
+            data-collapsed={recolhida}
+            title={
+              recolhida
+                ? [identidade?.nome, usuario, perfilRotulo]
+                    .filter(Boolean)
+                    .join(" · ")
+                : undefined
+            }
+          >
+            <div
+              className={
+                recolhida
+                  ? "flex flex-col items-center gap-2"
+                  : "flex min-w-0 items-center gap-2.5"
+              }
+            >
+              <span
+                aria-hidden
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--primary-soft)] text-[11px] font-semibold text-[var(--primary)]"
+              >
+                {marcaIniciais}
+              </span>
+              {!recolhida ? (
+                <div className="min-w-0 flex-1">
+                  {identidade?.nome ? (
+                    <p className="truncate text-[13px] font-semibold text-zinc-900">
+                      {identidade.nome}
+                    </p>
+                  ) : null}
+                  {assinaturaSuspensa ? (
+                    <p className="mt-0.5 text-[11px] font-medium text-amber-700">
+                      Assinatura suspensa
+                    </p>
+                  ) : null}
+                  {usuario || perfilRotulo ? (
+                    <p className="truncate text-[11px] text-zinc-500">
+                      {[usuario, perfilRotulo].filter(Boolean).join(" · ")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <a
+              href="/logout"
+              title="Sair"
+              onClick={onNavigate}
+              className={
+                recolhida
+                  ? "flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+                  : "mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+              }
+            >
+              <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+              {!recolhida ? <span>Sair</span> : null}
+            </a>
           </div>
+        ) : (
+          <a
+            href="/logout"
+            title="Sair"
+            data-collapsed={recolhida}
+            className="updv-nav-item"
+          >
+            <LogOut className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+            {!recolhida && <span>Sair</span>}
+          </a>
         )}
-        <a
-          href="/logout"
-          title={
-            recolhida
-              ? ["Sair", identidade?.nome, usuario].filter(Boolean).join(" · ")
-              : "Sair"
-          }
-          data-collapsed={recolhida}
-          className="updv-nav-item"
-        >
-          <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-          {!recolhida && <span>Sair</span>}
-        </a>
       </div>
     </div>
   );

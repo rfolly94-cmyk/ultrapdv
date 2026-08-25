@@ -62,7 +62,7 @@ export default async function PainelPage({ searchParams }: PageProps) {
   return (
     <PageShell
       title="Início"
-      description={`${dados.empresaNome} · ${dados.periodoRotulo}`}
+      description={`Visão geral da ${dados.empresaNome}`}
       actions={
         <Suspense>
           <DashboardPeriodoFiltro />

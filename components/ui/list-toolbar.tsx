@@ -39,7 +39,7 @@ export function ListToolbar({
   );
 
   return (
-    <div className="flex shrink-0 items-center gap-2 px-4 py-2.5">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 px-[var(--page-pad)] pb-3 pt-1">
       {onSearchChange ? (
         campo
       ) : (
