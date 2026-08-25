@@ -11,6 +11,7 @@ import {
   idCaixaReabrirElegivel,
   sanitizarCiclosFechamentoCego,
 } from "./reabertura";
+import { controleCaixaAtivoDoRegistro } from "./controle";
 import type {
   CaixaCicloFechamento,
   CaixaFechamentoMeio,
@@ -358,21 +359,38 @@ async function carregarHistoricoFechamentos(
   return { ciclosPorCaixa, reaberturasPorCaixa, conferencias };
 }
 
-export async function carregarFechamentoCego(
+export async function carregarConfiguracaoCaixaEmpresa(
   supabase: Awaited<ReturnType<typeof createClient>>,
   empresaId: string
 ) {
   const { data } = await supabase
     .from("caixa_configuracoes")
-    .select("empresa_id, fechamento_caixa_cego")
+    .select("empresa_id, fechamento_caixa_cego, controle_caixa_ativo")
     .eq("empresa_id", empresaId)
     .maybeSingle();
 
   if (!data || String((data as { empresa_id?: unknown }).empresa_id) !== empresaId) {
-    return false;
+    return {
+      fechamentoCego: false,
+      controleAtivo: controleCaixaAtivoDoRegistro(undefined),
+    };
   }
 
-  return (data as { fechamento_caixa_cego?: unknown }).fechamento_caixa_cego === true;
+  return {
+    fechamentoCego:
+      (data as { fechamento_caixa_cego?: unknown }).fechamento_caixa_cego === true,
+    controleAtivo: controleCaixaAtivoDoRegistro(
+      (data as { controle_caixa_ativo?: unknown }).controle_caixa_ativo
+    ),
+  };
+}
+
+export async function carregarFechamentoCego(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  empresaId: string
+) {
+  const cfg = await carregarConfiguracaoCaixaEmpresa(supabase, empresaId);
+  return cfg.fechamentoCego;
 }
 
 async function mapearLivro(
@@ -427,7 +445,8 @@ export async function carregarPainelCaixa(
     ...movimentos.map((movimento) => movimento.usuario_id),
   ]);
   const historico = await carregarHistoricoFechamentos(supabase, id, idsCaixa);
-  const fechamentoCego = await carregarFechamentoCego(supabase, id);
+  const configuracao = await carregarConfiguracaoCaixaEmpresa(supabase, id);
+  const fechamentoCego = configuracao.fechamentoCego;
 
   const porCaixa = new Map<string, CaixaMovimento[]>();
   for (const mapeado of livro) {
@@ -489,6 +508,7 @@ export async function carregarPainelCaixa(
     atual: atualSanitizado,
     anteriores,
     fechamentoCego,
+    controleAtivo: configuracao.controleAtivo,
     caixaReabrirElegivelId: idCaixaReabrirElegivel(
       caixas.map((caixa) => ({
         id: caixa.id,

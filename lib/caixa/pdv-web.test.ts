@@ -37,10 +37,10 @@ test("PDV web e Nova NF-e Venda exigem caixa aberto; mobile não nesta fase", ()
   assert.match(actions, /buscarCaixaAbertoEmpresa/);
   assert.match(actions, /MENSAGEM_CAIXA_FECHADO_FINALIZAR/);
   assert.match(actions, /rpc_finalizar_venda_com_caixa/);
-  assert.ok(
-    actions.indexOf("if (opcoes?.exigirCaixaAberto)") <
-      actions.indexOf("rpc_finalizar_venda_com_caixa")
-  );
+  assert.match(actions, /fluxoExigeCaixa = opcoes\?\.exigirCaixaAberto === true/);
+  assert.match(actions, /deveUsarLivroCaixa/);
+  assert.match(actions, /controleCaixaAtivo/);
+  assert.ok(actions.indexOf("usarLivroCaixa") < actions.indexOf("rpc_finalizar_venda_com_caixa"));
   assert.doesNotMatch(actions, /rpc_abrir_caixa|rpc_movimentar_caixa|rpc_fechar_caixa/);
 
   assert.match(api, /executarFinalizacaoVendaPdv\(corpo\)/);

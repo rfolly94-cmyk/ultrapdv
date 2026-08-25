@@ -370,7 +370,7 @@ test("listagem consulta carteira no servidor e não esconde linha só no client"
   assert.match(modal, /resolverModoRecebimentoListagem/);
   assert.match(modal, /estadoBotoesBaixaModal/);
   assert.match(modal, /bg-red-50/);
-  assert.match(receber, /rpc_receber_carteira_com_caixa/);
+  assert.match(receber, /rpcReceberCarteiraPorControle/);
   assert.match(resumo, /\.eq\(\s*"empresa_id"/);
   assert.match(action, /carregarResumoCarteiraCliente/);
   assert.match(action, /exigirOperacaoCarteira/);

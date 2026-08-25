@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { PdvShell } from "@/components/pdv/pdv-shell";
 import { carregarPedidoParaPdv } from "@/lib/catalogo/carregar-pedido-pdv";
 import { buscarCaixaAbertoEmpresa } from "@/lib/caixa/sessao-aberta";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
+import { sessaoCaixaLiberadaParaOperar } from "@/lib/caixa/controle";
 import { pathLogoDaEmpresa, urlPublicaLogoEmpresa } from "@/lib/empresa/logo";
 import { carregarPreferenciasPdvSessao } from "@/lib/pdv/preferencias-servidor";
 import { obterRotuloUsuarioSessao } from "@/lib/usuarios/perfil-sessao";
@@ -118,6 +120,7 @@ export default async function PdvPage({
     preferencias,
     caixaAbertoRegistro,
     sessaoPermissoes,
+    controleAtivo,
   ] = await Promise.all([
     supabase
       .from("produtos")
@@ -200,6 +203,7 @@ export default async function PdvPage({
     carregarPreferenciasPdvSessao(),
     buscarCaixaAbertoEmpresa(supabase, String(vinculo.empresa_id)),
     obterPermissoesSessao(),
+    controleCaixaAtivo(supabase, String(vinculo.empresa_id)),
   ]);
 
   if (
@@ -299,13 +303,21 @@ export default async function PdvPage({
         emitirNfceAutomaticoPdv && planoNfce.permitido
       }
       ambienteFiscal={ambienteFiscal}
-      caixaAberto={caixaAbertoRegistro !== null}
-      podeAbrirCaixa={temPermissao(
-        sessaoPermissoes?.permissoes,
-        "caixa",
-        "abrir"
-      )}
-      caixaReabertoAviso={caixaAbertoRegistro?.aviso ?? null}
+      caixaAberto={sessaoCaixaLiberadaParaOperar({
+        controleAtivo,
+        caixaAberto: caixaAbertoRegistro !== null,
+      })}
+      podeAbrirCaixa={
+        controleAtivo &&
+        temPermissao(
+          sessaoPermissoes?.permissoes,
+          "caixa",
+          "abrir"
+        )
+      }
+      caixaReabertoAviso={
+        controleAtivo ? caixaAbertoRegistro?.aviso ?? null : null
+      }
     />
   );
 }

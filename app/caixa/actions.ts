@@ -13,6 +13,7 @@ import {
   podeRevelarEsperadoCaixaCego,
 } from "@/lib/caixa/conferencia";
 import { carregarDetalheCaixa, carregarFechamentoCego } from "@/lib/caixa/carregar";
+import { recusarSessaoCaixaSeControleDesativado } from "@/lib/caixa/controle-servidor";
 import { validarMotivoReabertura } from "@/lib/caixa/reabertura";
 import type { ConferenciaCaixa, MeioConferenciaCaixa } from "@/lib/caixa/tipos";
 import { mensagemErroCaixa, parseValorCaixa, uuidCaixaValido } from "@/lib/caixa/valor";
@@ -80,6 +81,14 @@ export async function abrirCaixa(input: {
       return resultadoNegacao(error);
     }
 
+    const recusaControle = await recusarSessaoCaixaSeControleDesativado(
+      supabase,
+      empresaId
+    );
+    if (recusaControle) {
+      return recusaControle;
+    }
+
     const saldo = parseValorCaixa(input.saldoInicial);
     if (saldo === null) {
       return { ok: false, erro: "Informe o saldo inicial em dinheiro." };
@@ -132,6 +141,14 @@ export async function movimentarCaixa(input: {
       });
     } catch (error) {
       return resultadoNegacao(error);
+    }
+
+    const recusaControle = await recusarSessaoCaixaSeControleDesativado(
+      supabase,
+      empresaId
+    );
+    if (recusaControle) {
+      return recusaControle;
     }
 
     if (!uuidCaixaValido(input.caixaId)) {
@@ -193,7 +210,7 @@ export async function iniciarFechamentoCaixa(input: {
     let podeRevelarEsperadoCego = false;
 
     try {
-      const sessao = await exigirOperacaoCaixa({
+      const sessao =       await exigirOperacaoCaixa({
         empresaId,
         acao: "fechar",
         origem: "iniciarFechamentoCaixa",
@@ -449,6 +466,14 @@ export async function reabrirCaixa(input: {
       });
     } catch (error) {
       return resultadoNegacao(error);
+    }
+
+    const recusaControle = await recusarSessaoCaixaSeControleDesativado(
+      supabase,
+      empresaId
+    );
+    if (recusaControle) {
+      return recusaControle;
     }
 
     if (!uuidCaixaValido(input.caixaId)) {

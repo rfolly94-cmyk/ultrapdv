@@ -40,6 +40,12 @@ export const ABAS_CONFIGURACOES_PERMISSAO = [
     acao: "configurar_fiscal" as const,
   },
   {
+    label: "Caixa",
+    href: "/configuracoes/caixa",
+    modulo: "configuracoes" as const,
+    acao: "acessar" as const,
+  },
+  {
     label: "Usuários",
     href: "/configuracoes/usuarios",
     modulo: "usuarios" as const,

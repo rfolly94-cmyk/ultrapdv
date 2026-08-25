@@ -356,10 +356,8 @@ test("14-17. caixa fechado bloqueia Nova NF-e Venda; abrir usa rpc_abrir_caixa",
   assert.match(preparar, /exigirCaixaAberto:/);
   assert.match(preparar, /MENSAGEM_CAIXA_FECHADO_NFE_VENDA/);
   assert.match(preparar, /codigo === "CAIXA_FECHADO"/);
-  assert.ok(
-    pdv.indexOf("if (opcoes?.exigirCaixaAberto)") <
-      pdv.indexOf("rpc_finalizar_venda_com_caixa")
-  );
+  assert.match(pdv, /fluxoExigeCaixa = opcoes\?\.exigirCaixaAberto === true/);
+  assert.ok(pdv.indexOf("usarLivroCaixa") < pdv.indexOf("rpc_finalizar_venda_com_caixa"));
   assert.equal(
     MENSAGEM_CAIXA_FECHADO_FINALIZAR,
     "O caixa foi fechado. Abra um caixa para continuar."
@@ -428,8 +426,8 @@ test("24-26. PDV web, Carteira e Fases 2A/2B/3 do Caixa permanecem no wrapper of
   const estornar = fonte(
     "app/api/clientes/[id]/carteira/estornar-recebimento/route.ts"
   );
-  assert.match(receber, /rpc_receber_carteira_com_caixa/);
-  assert.match(estornar, /rpc_estornar_recebimento_carteira_com_caixa/);
+  assert.match(receber, /rpcReceberCarteiraPorControle/);
+  assert.match(estornar, /rpcEstornarCarteiraPorControle/);
 
   assert.match(fonte(FISICO), /afeta_caixa_fisico_snapshot/);
   assert.match(fonte(FASE2B), /recebimento_carteira/);
@@ -503,7 +501,9 @@ test("rascunho Editar NF-e: guard não depende da URL Nova NF-e", () => {
     preparar.indexOf("export async function prepararVendaParaEmissaoNfe")
   );
   assert.match(blocoPreparar, /fiscal_tipos_operacao/);
-  assert.match(blocoPreparar, /exigirCaixaAberto: exigeCaixa/);
+  assert.match(blocoPreparar, /exigirCaixaAberto: exigirCaixaAberto/);
+  assert.match(blocoPreparar, /deveUsarLivroCaixa/);
+  assert.match(blocoPreparar, /controleCaixaAtivo/);
   assert.match(blocoPreparar, /MENSAGEM_CAIXA_FECHADO_NFE_VENDA/);
   assert.match(blocoPreparar, /vendaIdNfeMaterializada/);
   assert.match(blocoPreparar, /if \(!vendaId\)/);

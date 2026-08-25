@@ -170,5 +170,6 @@ export type PainelCaixa = {
   atual: (CaixaSessao & CaixaTotais & { movimentos: CaixaMovimento[] }) | null;
   anteriores: CaixaResumoAnterior[];
   fechamentoCego: boolean;
+  controleAtivo: boolean;
   caixaReabrirElegivelId: string | null;
 };

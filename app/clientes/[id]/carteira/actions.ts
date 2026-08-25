@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import {
+  rpcEstornarCarteiraPorControle,
+  rpcReceberCarteiraPorControle,
+} from "@/lib/caixa/controle";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
 import { mensagemErroCaixaOperacao } from "@/lib/caixa/mensagens";
 import {
   exigirOperacaoCarteira,
@@ -263,11 +268,14 @@ export async function receberCarteira(
       };
     }
 
+    const controleAtivo = await controleCaixaAtivo(supabase, empresaId);
+    const rpcReceber = rpcReceberCarteiraPorControle(controleAtivo);
+
     const {
       data,
       error,
     } = await supabase.rpc(
-      "rpc_receber_carteira_com_caixa",
+      rpcReceber,
       {
         p_empresa_id:
           empresaId,
@@ -445,8 +453,11 @@ export async function estornarRecebimentoCarteira(
       return { ok: false, erro: "Cliente não encontrado." };
     }
 
+    const controleAtivo = await controleCaixaAtivo(supabase, empresaId);
+    const rpcEstornar = rpcEstornarCarteiraPorControle(controleAtivo);
+
     const { data, error } = await supabase.rpc(
-      "rpc_estornar_recebimento_carteira_com_caixa",
+      rpcEstornar,
       {
         p_empresa_id: empresaId,
         p_cliente_id: input.clienteId,

@@ -252,6 +252,10 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "configuracoes", acao: "editar_empresa" };
   }
 
+  if (pathname.startsWith("/configuracoes/caixa")) {
+    return { tipo: "permissao", modulo: "configuracoes", acao: "acessar" };
+  }
+
   if (pathname.startsWith("/configuracoes/fiscal")) {
     return { tipo: "permissao", modulo: "fiscal", acao: "configurar_fiscal" };
   }

@@ -28,6 +28,21 @@ export const MENSAGEM_REABRIR_COM_ABERTO =
 export const MENSAGEM_REABRIR_NAO_FECHADO =
   "Só é possível reabrir um caixa fechado.";
 
+export const MENSAGEM_CONTROLE_CAIXA_DESATIVADO =
+  "Controle de Caixa desativado";
+
+export const MENSAGEM_CONTROLE_CAIXA_DESATIVADO_DETALHE =
+  "As vendas e recebimentos atuais não estão sendo vinculados a uma sessão de Caixa.";
+
+export const MENSAGEM_CONTROLE_CAIXA_DESATIVADO_OPERACAO =
+  "O controle de Caixa está desativado. Não é possível abrir ou movimentar uma sessão.";
+
+export const MENSAGEM_CONTROLE_CAIXA_ATIVADO =
+  "Controle de Caixa ativado. Abra um Caixa antes de realizar novas vendas.";
+
+export const MENSAGEM_CONTROLE_CAIXA_BLOQUEIA_DESATIVAR =
+  "Não é possível desativar o controle de Caixa enquanto houver um Caixa aberto. Feche a sessão atual primeiro.";
+
 export function mensagemErroCaixaOperacao(erro: unknown) {
   const texto =
     erro instanceof Error

@@ -4,6 +4,8 @@ import {
 } from "next/server";
 
 import { aplicarCors, respostaOptions } from "@/lib/api/cors-mobile";
+import { rpcReceberCarteiraPorControle } from "@/lib/caixa/controle";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
 import { mensagemErroCaixaOperacao } from "@/lib/caixa/mensagens";
 import {
   exigirOperacaoCarteira,
@@ -309,12 +311,18 @@ export async function POST(
     );
   }
 
+  const controleAtivo = await controleCaixaAtivo(
+    supabase,
+    String(vinculo.empresa_id)
+  );
+  const rpcReceber = rpcReceberCarteiraPorControle(controleAtivo);
+
   const {
     data,
     error,
   } =
     await supabase.rpc(
-      "rpc_receber_carteira_com_caixa",
+      rpcReceber,
       {
         p_empresa_id:
           vinculo.empresa_id,

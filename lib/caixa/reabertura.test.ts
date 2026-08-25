@@ -251,7 +251,8 @@ test("18. tentar reabrir Caixa histórico incompatível recusa", () => {
 test("19-20. PDV sem aviso no caixa normal e com aviso no reaberto", () => {
   const page = fonte("app/pdv/page.tsx");
   const shell = fonte("components/pdv/pdv-shell.tsx");
-  assert.match(page, /caixaReabertoAviso=\{caixaAbertoRegistro\?\.aviso \?\? null\}/);
+  assert.match(page, /caixaReabertoAviso=\{/);
+  assert.match(page, /controleAtivo \? caixaAbertoRegistro\?\.aviso/);
   assert.match(shell, /CaixaAvisoReabertoFaixa/);
   assert.match(shell, /caixaAberto && caixaReabertoAviso/);
   assert.match(fonte("components/caixa/caixa-aviso-reaberto.tsx"), /data-caixa-aviso-reaberto/);

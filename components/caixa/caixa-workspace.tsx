@@ -33,6 +33,10 @@ import {
   formatarDataHora,
   formatarMoeda,
 } from "@/lib/relatorios/formatacao";
+import {
+  MENSAGEM_CONTROLE_CAIXA_DESATIVADO,
+  MENSAGEM_CONTROLE_CAIXA_DESATIVADO_DETALHE,
+} from "@/lib/caixa/mensagens";
 
 const STATUS_LABEL: Record<string, string> = {
   aberto: "Aberto",
@@ -47,10 +51,13 @@ export function CaixaWorkspace({
   aba: AbaCaixa;
   painel: PainelCaixa;
 }) {
-  const podeAbrir = useTemPermissao("caixa", "abrir");
-  const podeMovimentar = useTemPermissao("caixa", "movimentar");
+  const atual = painel.atual;
+  const podeAbrir = useTemPermissao("caixa", "abrir") && painel.controleAtivo;
+  const podeMovimentar =
+    useTemPermissao("caixa", "movimentar") && painel.controleAtivo;
   const podeFechar = useTemPermissao("caixa", "fechar");
-  const podeReabrir = useTemPermissao("caixa", "reabrir");
+  const podeReabrir =
+    useTemPermissao("caixa", "reabrir") && painel.controleAtivo;
   const podeConfigurar = useTemPermissao("configuracoes", "editar_empresa");
   const router = useRouter();
   const [pendingCego, startCego] = useTransition();
@@ -63,7 +70,6 @@ export function CaixaWorkspace({
     "abrir" | "suprimento" | "sangria" | "fechar" | "resumo" | "reabrir" | null
   >(null);
   const [anterior, setAnterior] = useState<CaixaResumoAnterior | null>(null);
-  const atual = painel.atual;
   const caixaReabrir =
     anterior && anterior.id === painel.caixaReabrirElegivelId
       ? anterior
@@ -118,6 +124,15 @@ export function CaixaWorkspace({
         <PageAlert type="erro" className="mx-0 mt-0">
           {erroCego || erroFechar}
         </PageAlert>
+      ) : null}
+
+      {!painel.controleAtivo ? (
+        <div data-caixa-controle-desativado="true">
+          <PageAlert type="aviso" className="mx-0 mt-0">
+            <p className="font-semibold">{MENSAGEM_CONTROLE_CAIXA_DESATIVADO}</p>
+            <p>{MENSAGEM_CONTROLE_CAIXA_DESATIVADO_DETALHE}</p>
+          </PageAlert>
+        </div>
       ) : null}
 
       {podeConfigurar ? (
@@ -231,12 +246,14 @@ export function CaixaWorkspace({
           <section className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-10 text-center">
             <StatusBadge status="fechado">Fechado</StatusBadge>
             <h2 className="mt-3 text-[16px] font-semibold text-zinc-950">
-              Caixa fechado
+              {painel.controleAtivo ? "Caixa fechado" : MENSAGEM_CONTROLE_CAIXA_DESATIVADO}
             </h2>
             <p className="mt-1 text-[13px] text-zinc-500">
-              Abra uma sessão para registrar suprimentos e sangrias.
+              {painel.controleAtivo
+                ? "Abra uma sessão para registrar suprimentos e sangrias."
+                : MENSAGEM_CONTROLE_CAIXA_DESATIVADO_DETALHE}
             </p>
-            {podeAbrir ? (
+            {painel.controleAtivo && podeAbrir ? (
               <button
                 type="button"
                 className="updv-btn updv-btn-primary mt-4"
@@ -244,11 +261,12 @@ export function CaixaWorkspace({
               >
                 Abrir Caixa
               </button>
-            ) : (
+            ) : null}
+            {painel.controleAtivo && !podeAbrir ? (
               <p className="mt-4 text-[13px] text-zinc-500">
                 Você não tem permissão para abrir o caixa.
               </p>
-            )}
+            ) : null}
             {podeReabrir && caixaReabrir ? (
               <button
                 type="button"

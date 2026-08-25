@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { executarFinalizacaoVendaPdv } from "@/app/pdv/actions";
 import { MENSAGEM_CAIXA_FECHADO_FINALIZAR, MENSAGEM_CAIXA_FECHADO_NFE_VENDA } from "@/lib/caixa/mensagens";
 import { nfeVendaNovaExigeCaixa, vendaIdNfeMaterializada } from "@/lib/caixa/nfe-venda";
+import { deveUsarLivroCaixa } from "@/lib/caixa/controle";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import {
   MENSAGEM_NATUREZA_BONIFICACAO_INVALIDA,
@@ -2291,11 +2293,15 @@ export async function prepararVendaParaEmissaoNfe(input: {
         vinculaVenda: tipoCatalogo?.vincula_venda === true,
         vendaId: null,
       });
+      const controleAtivo = await controleCaixaAtivo(supabase, empresaId);
+      const exigirCaixaAberto = deveUsarLivroCaixa({
+        controleAtivo,
+        fluxoExigeCaixa: exigeCaixa,
+      });
 
       // Motor comercial da NF-e de venda nova: mesmo RPC atômico do PDV web
-      // (venda + pagamentos + estoque + livro do Caixa). Vale para Nova NF-e
-      // e para Editar rascunho sem venda_id. Emissão fiscal posterior não
-      // relança Caixa.
+      // quando o controle de Caixa está ativo. Sem controle, materializa
+      // pela RPC comercial sem livro. Emissão fiscal posterior não relança Caixa.
       const finalizada = await executarFinalizacaoVendaPdv(
         {
           idempotencyKey: String(operacao.id),
@@ -2308,7 +2314,7 @@ export async function prepararVendaParaEmissaoNfe(input: {
           pagamentos,
         },
         {
-          exigirCaixaAberto: exigeCaixa,
+          exigirCaixaAberto: exigirCaixaAberto,
         }
       );
       if (!finalizada.ok) {

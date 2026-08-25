@@ -305,6 +305,7 @@ export function NfeEmissaoForm({
   seriePrevistaNfce: _seriePrevistaNfce = "",
   numeroPrevistoNfce: _numeroPrevistoNfce = "",
   caixaAberto = false,
+  controleCaixaAtivo = true,
   caixaReabertoAviso = null,
   podeAbrirCaixa = false,
 }: {
@@ -392,6 +393,7 @@ export function NfeEmissaoForm({
   seriePrevistaNfce?: string;
   numeroPrevistoNfce?: string;
   caixaAberto?: boolean;
+  controleCaixaAtivo?: boolean;
   caixaReabertoAviso?: CaixaAvisoReaberto | null;
   podeAbrirCaixa?: boolean;
 }) {
@@ -546,11 +548,13 @@ export function NfeEmissaoForm({
     tiposOperacao.find((item) => item.codigo === tipoAtual) ??
     tiposOperacao.find((item) => item.codigo === operacao.tipo) ??
     null;
-  const exigeCaixaVendaNova = nfeVendaNovaExigeCaixa({
-    tipoOperacaoInterno: tipoAtual || operacao.tipo,
-    vinculaVenda: tipoCatalogo?.vinculaVenda === true,
-    vendaId: operacao.vendaId,
-  });
+  const exigeCaixaVendaNova =
+    controleCaixaAtivo !== false &&
+    nfeVendaNovaExigeCaixa({
+      tipoOperacaoInterno: tipoAtual || operacao.tipo,
+      vinculaVenda: tipoCatalogo?.vinculaVenda === true,
+      vendaId: operacao.vendaId,
+    });
   const caixaAbertoEfetivo = caixaAberto || caixaLiberadoLocal;
   const vendaNovaSemCaixa = exigeCaixaVendaNova && !caixaAbertoEfetivo;
   const emitivel = tipoOperacaoEmitivelNestaTela(tipoAtual);

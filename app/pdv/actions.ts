@@ -19,6 +19,8 @@ import { mensagemErroFinalizacaoPublica } from "@/lib/pdv/mensagem-erro-publica"
 import {
   buscarCaixaAbertoEmpresa,
 } from "@/lib/caixa/sessao-aberta";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
+import { deveUsarLivroCaixa } from "@/lib/caixa/controle";
 import { MENSAGEM_CAIXA_FECHADO_FINALIZAR } from "@/lib/caixa/mensagens";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import {
@@ -436,7 +438,16 @@ export async function executarFinalizacaoVendaPdv(
       };
     }
 
-    if (opcoes?.exigirCaixaAberto) {
+    const fluxoExigeCaixa = opcoes?.exigirCaixaAberto === true;
+    const controleAtivo = fluxoExigeCaixa
+      ? await controleCaixaAtivo(supabase, String(vinculo.empresa_id))
+      : false;
+    const usarLivroCaixa = deveUsarLivroCaixa({
+      controleAtivo,
+      fluxoExigeCaixa,
+    });
+
+    if (usarLivroCaixa) {
       const caixaAberto = await buscarCaixaAbertoEmpresa(
         supabase,
         String(vinculo.empresa_id)
@@ -489,9 +500,10 @@ export async function executarFinalizacaoVendaPdv(
       return { ok: false, erro: documentoFiscal.erro };
     }
 
-    // PDV web e Nova NF-e → Venda (venda comercial nova): wrapper atômico.
-    // Mobile: rpc_finalizar_venda sem exigir caixa nesta fase.
-    const rpcFinalizacao = opcoes?.exigirCaixaAberto
+    // PDV web e Nova NF-e → Venda nova: exigirCaixaAberto true.
+    // Só usa o livro se o controle da empresa estiver ativo.
+    // Mobile omite a flag e permanece em rpc_finalizar_venda.
+    const rpcFinalizacao = usarLivroCaixa
       ? "rpc_finalizar_venda_com_caixa"
       : "rpc_finalizar_venda";
 

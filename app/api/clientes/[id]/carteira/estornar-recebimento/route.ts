@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { aplicarCors, respostaOptions } from "@/lib/api/cors-mobile";
+import { rpcEstornarCarteiraPorControle } from "@/lib/caixa/controle";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
 import { mensagemErroCaixaOperacao } from "@/lib/caixa/mensagens";
 import {
   exigirOperacaoCarteira,
@@ -112,8 +114,14 @@ export async function POST(request: NextRequest, context: Context) {
     return resposta({ ok: false, erro: "Recebimento não encontrado." }, 404);
   }
 
+  const controleAtivo = await controleCaixaAtivo(
+    supabase,
+    String(vinculo.empresa_id)
+  );
+  const rpcEstornar = rpcEstornarCarteiraPorControle(controleAtivo);
+
   const { data, error } = await supabase.rpc(
-    "rpc_estornar_recebimento_carteira_com_caixa",
+    rpcEstornar,
     {
       p_empresa_id: vinculo.empresa_id,
       p_cliente_id: clienteId,

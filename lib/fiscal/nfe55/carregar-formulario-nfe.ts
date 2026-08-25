@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 
 import type { DadosTransporteVenda } from "@/components/vendas/transporte-venda-form";
 import { buscarCaixaAbertoEmpresa } from "@/lib/caixa/sessao-aberta";
+import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
+import { sessaoCaixaLiberadaParaOperar } from "@/lib/caixa/controle";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
@@ -430,6 +432,7 @@ export async function carregarFormularioNfeEmissao({
     { data: integracaoPix },
     caixaAbertoRegistro,
     sessaoPermissoes,
+    controleAtivo,
   ] = await Promise.all([
     supabase
       .from("formas_pagamento")
@@ -446,6 +449,7 @@ export async function carregarFormularioNfeEmissao({
       .maybeSingle(),
     buscarCaixaAbertoEmpresa(supabase, empresaId),
     obterPermissoesSessao(),
+    controleCaixaAtivo(supabase, empresaId),
   ]);
 
   const snapDestinatario = lerSnapshotDestinatarioFiscal(operacao?.snapshot_fiscal);
@@ -661,12 +665,20 @@ export async function carregarFormularioNfeEmissao({
     ambienteFiscal: Number(fiscalEmpresa?.ambiente) === 1 ? ("1" as const) : ("2" as const),
     formasPagamento: filtrarFormasPagamentoCheckoutPdv(formasPagamento ?? []),
     pixConfig: pixConfigPublicoPdv(classificarIntegracaoPix(integracaoPix)),
-    caixaAberto: caixaAbertoRegistro !== null,
-    caixaReabertoAviso: caixaAbertoRegistro?.aviso ?? null,
-    podeAbrirCaixa: temPermissao(
-      sessaoPermissoes?.permissoes,
-      "caixa",
-      "abrir"
-    ),
+    caixaAberto: sessaoCaixaLiberadaParaOperar({
+      controleAtivo,
+      caixaAberto: caixaAbertoRegistro !== null,
+    }),
+    controleCaixaAtivo: controleAtivo,
+    caixaReabertoAviso: controleAtivo
+      ? caixaAbertoRegistro?.aviso ?? null
+      : null,
+    podeAbrirCaixa:
+      controleAtivo &&
+      temPermissao(
+        sessaoPermissoes?.permissoes,
+        "caixa",
+        "abrir"
+      ),
   };
 }

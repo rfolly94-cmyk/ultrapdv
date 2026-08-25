@@ -159,6 +159,7 @@ Arquitetura futura recomendada (já é esta): preset do perfil + override por v�
 | `reabrirCaixa` | `caixa.reabrir` + plano `caixa` (preset: administrador/gerente; não entra no perfil caixa/operador) |
 | `GET /api/impressao/caixa/[id]` | `caixa.acessar` + plano `caixa` |
 | `definirFechamentoCaixaCego` | `caixa.acessar` + `configuracoes.editar_empresa` |
+| `definirControleCaixa` (Configurações → Caixa) | `configuracoes.editar_empresa` (visualizar: `configuracoes.acessar`) |
 | ver esperado no caixa aberto com fechamento cego | `configuracoes.editar_empresa` (sem permissão nova; operador com só `caixa.fechar` não vê) |
 | `editarVendaPdv` | `vendas.editar` |
 | `POST /api/vendas/[id]/cancelar` | `vendas.cancelar` |

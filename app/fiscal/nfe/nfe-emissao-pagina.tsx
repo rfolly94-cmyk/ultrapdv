@@ -60,6 +60,7 @@ export async function NfeEmissaoPagina({
       <NfeEmissaoForm
         {...formulario}
         caixaAberto={formulario.caixaAberto === true}
+        controleCaixaAtivo={formulario.controleCaixaAtivo !== false}
         caixaReabertoAviso={formulario.caixaReabertoAviso ?? null}
         podeAbrirCaixa={formulario.podeAbrirCaixa === true}
       />
