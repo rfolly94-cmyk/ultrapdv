@@ -246,7 +246,7 @@ test("CASO 8: recebimento direto exige plano + permissão antes da RPC", () => {
   assert.match(corpo, /exigirOperacaoCarteira/);
   assert.ok(
     corpo.indexOf("exigirOperacaoCarteira") <
-      corpo.indexOf("rpc_receber_carteira_cliente")
+      corpo.indexOf("rpc_receber_carteira_com_caixa")
   );
 
   const actions = fonte("app/clientes/[id]/carteira/actions.ts");
@@ -254,7 +254,7 @@ test("CASO 8: recebimento direto exige plano + permissão antes da RPC", () => {
   assert.match(receber, /exigirOperacaoCarteira/);
   assert.ok(
     receber.indexOf("exigirOperacaoCarteira") <
-      receber.indexOf("rpc_receber_carteira_cliente")
+      receber.indexOf("rpc_receber_carteira_com_caixa")
   );
 });
 
@@ -279,7 +279,7 @@ test("CASO 9: estorno/cancelamento direto exige plano + permissão antes da RPC"
   assert.match(corpoEstorno, /exigirOperacaoCarteira/);
   assert.ok(
     corpoEstorno.indexOf("exigirOperacaoCarteira") <
-      corpoEstorno.indexOf("rpc_estornar_recebimento_carteira")
+      corpoEstorno.indexOf("rpc_estornar_recebimento_carteira_com_caixa")
   );
 
   const actions = fonte("app/clientes/[id]/carteira/actions.ts");
@@ -289,7 +289,7 @@ test("CASO 9: estorno/cancelamento direto exige plano + permissão antes da RPC"
   assert.match(estornar, /exigirOperacaoCarteira/);
   assert.ok(
     estornar.indexOf("exigirOperacaoCarteira") <
-      estornar.indexOf("rpc_estornar_recebimento_carteira")
+      estornar.indexOf("rpc_estornar_recebimento_carteira_com_caixa")
   );
 
   const caixaCancelar = decidirAcessoRota({

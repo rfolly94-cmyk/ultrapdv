@@ -44,4 +44,21 @@ test("erros internos da RPC não vazam para o cliente", () => {
     mensagemErroFinalizacaoPublica("Pagamento fiado exige cliente."),
     "Pagamento fiado exige cliente."
   );
+  assert.equal(
+    mensagemErroFinalizacaoPublica(
+      "function public.rpc_finalizar_venda_com_caixa() O caixa foi fechado. Abra um caixa para continuar."
+    ),
+    "O caixa foi fechado. Abra um caixa para continuar."
+  );
+});
+
+test("API mobile não exige caixa aberto nesta fase; PDV web exige", () => {
+  const rota = fonte("app/api/pdv/finalizar/route.ts");
+  const action = fonte("app/pdv/actions.ts");
+
+  assert.match(rota, /executarFinalizacaoVendaPdv\(corpo\)/);
+  assert.doesNotMatch(rota, /executarFinalizacaoVendaPdv\(corpo,/);
+  assert.match(rota, /Futura integração Caixa mobile/);
+  assert.match(action, /exigirCaixaAberto:\s*true/);
+  assert.match(action, /buscarCaixaAbertoEmpresa/);
 });

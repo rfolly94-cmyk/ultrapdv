@@ -5,6 +5,7 @@ import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contra
 import { createClient } from "@/lib/supabase/server";
 import { PdvShell } from "@/components/pdv/pdv-shell";
 import { carregarPedidoParaPdv } from "@/lib/catalogo/carregar-pedido-pdv";
+import { buscarCaixaAbertoEmpresa } from "@/lib/caixa/sessao-aberta";
 import { pathLogoDaEmpresa, urlPublicaLogoEmpresa } from "@/lib/empresa/logo";
 import { carregarPreferenciasPdvSessao } from "@/lib/pdv/preferencias-servidor";
 import { obterRotuloUsuarioSessao } from "@/lib/usuarios/perfil-sessao";
@@ -17,6 +18,8 @@ import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar"
 import { filtrarFormasPagamentoCheckoutPdv } from "@/lib/pdv/formas-pagamento-checkout";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import { resolverAssinaturaEmpresa } from "@/lib/assinatura/resolver-assinatura-empresa";
+import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
+import { temPermissao } from "@/lib/permissoes/tem-permissao";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +116,8 @@ export default async function PdvPage({
     nfceConfigResult,
     usuarioResult,
     preferencias,
+    caixaAbertoRegistro,
+    sessaoPermissoes,
   ] = await Promise.all([
     supabase
       .from("produtos")
@@ -193,6 +198,8 @@ export default async function PdvPage({
       .eq("id", String(usuarioId))
       .maybeSingle(),
     carregarPreferenciasPdvSessao(),
+    buscarCaixaAbertoEmpresa(supabase, String(vinculo.empresa_id)),
+    obterPermissoesSessao(),
   ]);
 
   if (
@@ -292,6 +299,12 @@ export default async function PdvPage({
         emitirNfceAutomaticoPdv && planoNfce.permitido
       }
       ambienteFiscal={ambienteFiscal}
+      caixaAberto={caixaAbertoRegistro !== null}
+      podeAbrirCaixa={temPermissao(
+        sessaoPermissoes?.permissoes,
+        "caixa",
+        "abrir"
+      )}
     />
   );
 }

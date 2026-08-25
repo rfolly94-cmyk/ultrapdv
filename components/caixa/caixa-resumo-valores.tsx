@@ -12,7 +12,7 @@ export function CaixaResumoValores({
   saldoInicial: number;
   suprimentos: number;
   sangrias: number;
-  saldoAtual: number;
+  saldoAtual: number | null;
   rotuloSaldoAtual?: string;
   dinheiroContado?: number | null;
   diferenca?: number | null;
@@ -43,14 +43,16 @@ export function CaixaResumoValores({
           {formatarMoeda(sangrias)}
         </dd>
       </div>
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-        <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-          {rotuloSaldoAtual}
-        </dt>
-        <dd className="mt-1 text-[15px] font-semibold text-zinc-950">
-          {formatarMoeda(saldoAtual)}
-        </dd>
-      </div>
+      {saldoAtual != null ? (
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+          <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+            {rotuloSaldoAtual}
+          </dt>
+          <dd className="mt-1 text-[15px] font-semibold text-zinc-950">
+            {formatarMoeda(saldoAtual)}
+          </dd>
+        </div>
+      ) : null}
       {dinheiroContado != null ? (
         <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
           <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">

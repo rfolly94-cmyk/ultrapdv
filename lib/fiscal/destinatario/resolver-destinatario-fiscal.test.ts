@@ -290,7 +290,7 @@ test("rotas de teste/homologação passam pelo resolver central", () => {
   assert.match(nfeAvulso, /resolverDestinatarioFiscalNfe/);
   assert.match(nfe55, /resolverDestinatarioFiscalNfe/);
   assert.match(nfceAvulso, /resolverDestinatarioFiscalNfe/);
-  assert.match(nfceBuilder, /resolverDestinatarioFiscalNfe/);
+  assert.match(nfceBuilder, /camposClienteNfceGeranet/);
 });
 
 test("consulta de snapshot/venda sempre filtra empresa_id", () => {

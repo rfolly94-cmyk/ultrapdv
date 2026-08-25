@@ -53,6 +53,11 @@ import {
   type TransporteVendaFormHandle,
 } from "@/components/vendas/transporte-venda-form";
 import { hrefEdicaoOperacaoFiscal, resolverAcoesEmissaoFiscal } from "@/lib/fiscal/acoes-emissao";
+import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
+import {
+  MENSAGEM_CAIXA_FECHADO_NFE_VENDA,
+} from "@/lib/caixa/mensagens";
+import { nfeVendaNovaExigeCaixa } from "@/lib/caixa/nfe-venda";
 import {
   enderecoEntregaVazio,
   type EnderecoEntregaNfe,
@@ -297,6 +302,8 @@ export function NfeEmissaoForm({
   emitenteCnpj = "",
   seriePrevistaNfce: _seriePrevistaNfce = "",
   numeroPrevistoNfce: _numeroPrevistoNfce = "",
+  caixaAberto = false,
+  podeAbrirCaixa = false,
 }: {
   operacao: {
     id: string | null;
@@ -381,6 +388,8 @@ export function NfeEmissaoForm({
   pixConfig?: PixConfigPdv | null;
   seriePrevistaNfce?: string;
   numeroPrevistoNfce?: string;
+  caixaAberto?: boolean;
+  podeAbrirCaixa?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -529,6 +538,11 @@ export function NfeEmissaoForm({
   const natureza = naturezas.find((item) => item.id === naturezaId) ?? null;
   const tipoAtual = natureza?.tipoOperacaoInterno || operacao.tipo;
   const tipoCatalogo = tiposOperacao.find((item) => item.codigo === tipoAtual) ?? null;
+  const exigeCaixaVendaNova = nfeVendaNovaExigeCaixa({
+    tipoOperacaoInterno: tipoAtual,
+    vinculaVenda: tipoCatalogo?.vinculaVenda,
+    vendaId: operacao.vendaId,
+  });
   const emitivel = tipoOperacaoEmitivelNestaTela(tipoAtual);
   const destTipo = destinatarioTipoPeloTipoOperacao(tipoAtual);
   const nfeAutorizada = emissao?.status === "autorizada";
@@ -577,6 +591,7 @@ export function NfeEmissaoForm({
     emitivel &&
     !bloqueiaRetransmissao &&
     !cabecalhoSujo &&
+    (!exigeCaixaVendaNova || caixaAberto) &&
     (acoesFiscais?.podeRetransmitir === true ||
       (validadaLocalmente && operacaoPodeEmitir(operacao.status)));
   const destinatario = useMemo(() => {
@@ -896,7 +911,11 @@ export function NfeEmissaoForm({
       return;
     }
     if (!podeEmitir) {
-      setErro("Valide a NF-e antes de emitir. A validação não transmite o documento.");
+      setErro(
+        exigeCaixaVendaNova && !caixaAberto
+          ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA
+          : "Valide a NF-e antes de emitir. A validação não transmite o documento."
+      );
       return;
     }
     emitindo.current = true;
@@ -1176,7 +1195,28 @@ export function NfeEmissaoForm({
         </div>
       ) : null}
 
+      {exigeCaixaVendaNova && !caixaAberto ? (
+        <PdvCaixaFechado
+          variante="painel"
+          podeAbrir={podeAbrirCaixa}
+          rotuloContexto="Venda bloqueada"
+          mensagem={MENSAGEM_CAIXA_FECHADO_NFE_VENDA}
+          rotuloSair="Voltar"
+          onSair={() => router.push("/fiscal")}
+        />
+      ) : null}
+
       <div className="sticky top-[var(--header)] z-[15] -mx-4 mb-2 flex flex-wrap justify-end gap-2 border-b border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur-sm lg:top-0">
+        {exigeCaixaVendaNova && caixaAberto ? (
+          <span
+            className="mr-auto self-center text-xs font-medium text-emerald-700"
+            data-nfe-caixa-aberto="true"
+          >
+            Caixa aberto
+          </span>
+        ) : (
+          <span className="mr-auto" />
+        )}
         <a href="/fiscal" className="updv-btn updv-btn-ghost">
           Cancelar
         </a>

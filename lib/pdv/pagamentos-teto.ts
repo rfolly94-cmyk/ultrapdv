@@ -1,3 +1,6 @@
+export const MENSAGEM_TROCO_SEM_FORMA =
+  "Foi informado troco, mas nenhuma forma selecionada permite troco.";
+
 export const MENSAGEM_PAGAMENTOS_ULTRAPASSAM =
   "Valor dos pagamentos ultrapassa o total da venda.";
 
@@ -70,12 +73,9 @@ export function avaliarPagamentosPdv(params: {
   const restanteCentavos = Math.max(0, totalVendaCentavos - totalInformadoCentavos);
   const excedenteCentavos = Math.max(0, totalInformadoCentavos - totalVendaCentavos);
   const naoTrocoEstoura = somaNaoTrocoCentavos > totalVendaCentavos;
-  const mistoComExcedente = somaNaoTrocoCentavos > 0 && excedenteCentavos > 0;
-  const bloqueado = naoTrocoEstoura || mistoComExcedente;
-  const trocoCentavos =
-    !bloqueado && somaNaoTrocoCentavos === 0
-      ? excedenteCentavos
-      : 0;
+  const trocoNaoCoberto = excedenteCentavos > somaTrocoCentavos;
+  const bloqueado = naoTrocoEstoura || trocoNaoCoberto;
+  const trocoCentavos = bloqueado ? 0 : excedenteCentavos;
 
   return {
     totalVendaCentavos,

@@ -341,7 +341,8 @@ export async function POST(
           valor_total,
           troco,
           acrescimo,
-          frete
+          frete,
+          snapshot_fiscal
         `)
         .eq("empresa_id", empresaId)
         .eq("id", vendaId)
@@ -1718,6 +1719,7 @@ export async function POST(
         },
         codigoNumerico:
           emissaoAtual.codigo_numerico,
+        snapshotFiscal: venda.snapshot_fiscal,
       }) as PayloadNfceMutavel;
 
 

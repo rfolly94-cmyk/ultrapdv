@@ -1,3 +1,6 @@
+import { MENSAGEM_CAIXA_FECHADO_FINALIZAR } from "@/lib/caixa/mensagens";
+import { MENSAGEM_TROCO_SEM_FORMA } from "@/lib/pdv/pagamentos-teto";
+
 export function mensagemErroFinalizacaoPublica(erro: unknown) {
   const texto =
     erro instanceof Error
@@ -9,6 +12,14 @@ export function mensagemErroFinalizacaoPublica(erro: unknown) {
   const limpo = String(texto ?? "").trim();
   if (!limpo) {
     return "Não foi possível finalizar a venda.";
+  }
+
+  if (/O caixa foi fechado/i.test(limpo)) {
+    return MENSAGEM_CAIXA_FECHADO_FINALIZAR;
+  }
+
+  if (limpo.includes(MENSAGEM_TROCO_SEM_FORMA)) {
+    return MENSAGEM_TROCO_SEM_FORMA;
   }
 
   if (

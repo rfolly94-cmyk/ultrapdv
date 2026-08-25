@@ -151,7 +151,13 @@ Arquitetura futura recomendada (já é esta): preset do perfil + override por v�
 
 | Entrypoint | Permissão |
 |---|---|
-| `finalizarVendaPdv` | `pdv.finalizar_venda` (+ desconto/fiado se usados) |
+| `finalizarVendaPdv` | `pdv.finalizar_venda` (+ desconto/fiado se usados) e sessão de caixa aberta |
+| `prepararVendaParaEmissaoNfe` (venda comercial nova) | mesmas permissões do PDV + sessão de caixa aberta; abertura na tela com `caixa.abrir` |
+| `POST /api/pdv/finalizar` | mesmas permissões do PDV; **não** exige caixa aberto nesta fase (Caixa mobile futuro) |
+| `abrirCaixa` | `caixa.abrir` + plano `caixa` |
+| `iniciarFechamentoCaixa` / `confirmarFechamentoCaixa` | `caixa.fechar` + plano `caixa` |
+| `definirFechamentoCaixaCego` | `caixa.acessar` + `configuracoes.editar_empresa` |
+| ver esperado no caixa aberto com fechamento cego | `configuracoes.editar_empresa` (sem permissão nova; operador com só `caixa.fechar` não vê) |
 | `editarVendaPdv` | `vendas.editar` |
 | `POST /api/vendas/[id]/cancelar` | `vendas.cancelar` |
 | `cadastrarProduto` / editar / excluir | `produtos.*` |

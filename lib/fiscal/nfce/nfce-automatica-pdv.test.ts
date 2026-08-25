@@ -44,6 +44,8 @@ test("PDV reutiliza a rota existente de NFC-e 65 após o sucesso comercial", () 
   assert.ok(posEmitir > posFinalizar, "NFC-e só depois do sucesso comercial");
   assert.match(shell, /if \(emitirNfceAutomaticoPdv\)/);
   assert.match(shell, /if \(!emitirNfceAutomaticoPdv\)/);
+  assert.match(shell, /PdvConsumidorNota/);
+  assert.match(shell, /cpfNaNota/);
   assert.match(shell, /imprimirApos/);
   assert.match(shell, /resolverAcoesPosVendaPdv/);
   assert.doesNotMatch(shell, /cancelarVenda|desfazerVenda|estornarVenda/);

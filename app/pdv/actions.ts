@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { validarPixNaFinalizacaoComercial } from "@/lib/pagamentos/pix/modo-ativo-servidor";
@@ -15,6 +16,21 @@ import {
   resultadoNegacaoPdv,
 } from "@/lib/pdv/acesso-operacao";
 import { mensagemErroFinalizacaoPublica } from "@/lib/pdv/mensagem-erro-publica";
+import {
+  buscarCaixaAbertoEmpresa,
+} from "@/lib/caixa/sessao-aberta";
+import { MENSAGEM_CAIXA_FECHADO_FINALIZAR } from "@/lib/caixa/mensagens";
+import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
+import {
+  MENSAGEM_CLIENTE_DOCUMENTO_EXIGE_CLIENTE,
+  resolverDocumentoDestinatarioPdv,
+} from "@/lib/fiscal/destinatario/documento";
+import {
+  lerSnapshotDestinatarioFiscal,
+  origemSnapshotAInicializar,
+  snapshotDestinatarioParaPersistir,
+} from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
+import { mesclarSnapshotOperacao } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 
 export type FinalizarVendaPdvInput = {
   idempotencyKey: string;
@@ -34,6 +50,8 @@ export type FinalizarVendaPdvInput = {
     valorCentavos: number;
     pixLocalRecebimentoId?: string | null;
   }>;
+  cpfNaNota?: string | null;
+  usarDocumentoClienteNaNota?: boolean;
 };
 
 export type FinalizarVendaPdvResultado =
@@ -49,8 +67,18 @@ export type FinalizarVendaPdvResultado =
       codigo?:
         | "RECURSO_NAO_CONTRATADO"
         | "NAO_AUTENTICADO"
-        | "SEM_EMPRESA";
+        | "SEM_EMPRESA"
+        | "CAIXA_FECHADO";
     };
+
+export type OpcoesFinalizacaoVendaPdv = {
+  /**
+   * PDV web (`finalizarVendaPdv`) e Nova NF-e → Venda nova: true.
+   * UltraPDV Mobile (`POST /api/pdv/finalizar`): omitir/false nesta fase.
+   * Futuro Caixa mobile: passar true e vincular a venda à sessão.
+   */
+  exigirCaixaAberto?: boolean;
+};
 
 function uuidValido(
   valor: string
@@ -70,7 +98,8 @@ function centavosParaDecimal(
 }
 
 export async function executarFinalizacaoVendaPdv(
-  input: FinalizarVendaPdvInput
+  input: FinalizarVendaPdvInput,
+  opcoes?: OpcoesFinalizacaoVendaPdv
 ): Promise<FinalizarVendaPdvResultado> {
   try {
     const supabase =
@@ -407,11 +436,70 @@ export async function executarFinalizacaoVendaPdv(
       };
     }
 
+    if (opcoes?.exigirCaixaAberto) {
+      const caixaAberto = await buscarCaixaAbertoEmpresa(
+        supabase,
+        String(vinculo.empresa_id)
+      );
+      if (!caixaAberto) {
+        return {
+          ok: false,
+          erro: MENSAGEM_CAIXA_FECHADO_FINALIZAR,
+          codigo: "CAIXA_FECHADO",
+        };
+      }
+    }
+
+    let documentoCliente: string | null = null;
+    if (input.usarDocumentoClienteNaNota) {
+      if (!input.clienteId) {
+        return {
+          ok: false,
+          erro: MENSAGEM_CLIENTE_DOCUMENTO_EXIGE_CLIENTE,
+        };
+      }
+
+      const { data: clienteDocumento } = await supabase
+        .from("clientes")
+        .select("id, empresa_id, cpf_cnpj")
+        .eq("empresa_id", vinculo.empresa_id)
+        .eq("id", input.clienteId)
+        .maybeSingle();
+
+      if (
+        !clienteDocumento ||
+        !registroPertenceAEmpresaAtiva(clienteDocumento, vinculo.empresa_id)
+      ) {
+        return {
+          ok: false,
+          erro: MENSAGEM_CLIENTE_DOCUMENTO_EXIGE_CLIENTE,
+        };
+      }
+
+      documentoCliente = clienteDocumento.cpf_cnpj ?? null;
+    }
+
+    const documentoFiscal = resolverDocumentoDestinatarioPdv({
+      cpfNaNota: input.usarDocumentoClienteNaNota ? null : input.cpfNaNota,
+      usarDocumentoClienteNaNota: Boolean(input.usarDocumentoClienteNaNota),
+      documentoCliente,
+    });
+
+    if (!documentoFiscal.ok) {
+      return { ok: false, erro: documentoFiscal.erro };
+    }
+
+    // PDV web e Nova NF-e → Venda (venda comercial nova): wrapper atômico.
+    // Mobile: rpc_finalizar_venda sem exigir caixa nesta fase.
+    const rpcFinalizacao = opcoes?.exigirCaixaAberto
+      ? "rpc_finalizar_venda_com_caixa"
+      : "rpc_finalizar_venda";
+
     const {
       data,
       error,
     } = await supabase.rpc(
-      "rpc_finalizar_venda",
+      rpcFinalizacao,
       {
         p_empresa_id:
           vinculo.empresa_id,
@@ -472,6 +560,54 @@ export async function executarFinalizacaoVendaPdv(
         erro:
           "A venda foi processada, mas o retorno ficou incompleto.",
       };
+    }
+
+    const { data: vendaSnapshot } = await supabase
+      .from("vendas")
+      .select("id, empresa_id, snapshot_fiscal")
+      .eq("empresa_id", vinculo.empresa_id)
+      .eq("id", registro.venda_id)
+      .maybeSingle();
+
+    if (
+      vendaSnapshot &&
+      registroPertenceAEmpresaAtiva(vendaSnapshot, vinculo.empresa_id)
+    ) {
+      const snapAtual = lerSnapshotDestinatarioFiscal(
+        vendaSnapshot.snapshot_fiscal
+      );
+      if (!snapAtual.documentoDefinido) {
+        const patchDestinatario = snapshotDestinatarioParaPersistir({
+          consumidorFinal: true,
+          origem: origemSnapshotAInicializar({ origemVenda: "pdv" }),
+          indicadorIe: "9",
+          documento: documentoFiscal.documento
+            ? {
+                numero: documentoFiscal.documento.numero,
+                tipo: documentoFiscal.documento.tipo,
+                origem: documentoFiscal.documento.origem,
+              }
+            : null,
+        });
+        const { error: snapErro } = await supabase
+          .from("vendas")
+          .update({
+            snapshot_fiscal: mesclarSnapshotOperacao(
+              vendaSnapshot.snapshot_fiscal,
+              patchDestinatario
+            ),
+          })
+          .eq("empresa_id", vinculo.empresa_id)
+          .eq("id", registro.venda_id);
+
+        if (snapErro) {
+          return {
+            ok: false,
+            erro:
+              "A venda foi registrada, mas não foi possível gravar o destinatário fiscal.",
+          };
+        }
+      }
     }
 
     if (
@@ -558,7 +694,9 @@ export async function executarFinalizacaoVendaPdv(
 export async function finalizarVendaPdv(
   input: FinalizarVendaPdvInput
 ): Promise<FinalizarVendaPdvResultado> {
-  const resultado = await executarFinalizacaoVendaPdv(input);
+  const resultado = await executarFinalizacaoVendaPdv(input, {
+    exigirCaixaAberto: true,
+  });
 
   if (!resultado.ok && resultado.codigo === "NAO_AUTENTICADO") {
     redirect("/login");
@@ -566,6 +704,10 @@ export async function finalizarVendaPdv(
 
   if (!resultado.ok && resultado.codigo === "SEM_EMPRESA") {
     redirect("/onboarding");
+  }
+
+  if (resultado.ok) {
+    revalidatePath("/caixa");
   }
 
   return resultado;

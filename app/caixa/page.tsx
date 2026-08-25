@@ -3,6 +3,7 @@ import { CaixaAbas } from "@/components/caixa/caixa-abas";
 import { CaixaWorkspace } from "@/components/caixa/caixa-workspace";
 import { PageShell } from "@/components/layout/page-shell";
 import { carregarPainelCaixa } from "@/lib/caixa/carregar";
+import { podeRevelarEsperadoCaixaCego } from "@/lib/caixa/conferencia";
 import type { AbaCaixa } from "@/lib/caixa/tipos";
 import { exigirPermissaoOuRedirecionar } from "@/lib/permissoes/exigir-permissao";
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
@@ -46,7 +47,9 @@ export default async function CaixaPage({ searchParams }: PageProps) {
     );
   }
 
-  const painel = await carregarPainelCaixa(sessao.empresaId);
+  const painel = await carregarPainelCaixa(sessao.empresaId, {
+    podeRevelarEsperadoCego: podeRevelarEsperadoCaixaCego(sessao.permissoes),
+  });
 
   return (
     <PageShell

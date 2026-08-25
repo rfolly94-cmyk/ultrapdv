@@ -63,7 +63,7 @@ test("carteira: A não cria débito, não recalcula e não baixa B", () => {
 test("carteira: rota receber filtra cliente da empresa ativa", () => {
   const rota = fonte("app/api/clientes/[id]/carteira/receber/route.ts");
   assert.match(rota, /empresa_id/);
-  assert.match(rota, /rpc_receber_carteira_cliente/);
+  assert.match(rota, /rpc_receber_carteira_com_caixa/);
 });
 
 test("TESTE N: estorno de recebimento isola empresa_id e não altera fiscal", () => {
@@ -91,7 +91,7 @@ test("TESTE N: estorno de recebimento isola empresa_id e não altera fiscal", ()
   assert.doesNotMatch(estorno, /chamarGeranet|nfe\/cancelar|nfce-emitir/);
 
   assert.match(rota, /vinculo\.empresa_id/);
-  assert.match(rota, /rpc_estornar_recebimento_carteira/);
+  assert.match(rota, /rpc_estornar_recebimento_carteira_com_caixa/);
   assert.match(rota, /receber_carteira/);
 });
 

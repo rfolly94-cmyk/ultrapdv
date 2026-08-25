@@ -1,11 +1,12 @@
-import type {
-  ItemGeranet,
+import {
+  IBPT_AUTOMATICO_GERANET,
+  type ItemGeranet,
 } from "./montar-item";
 import { sanitizarConsultaGeranet } from "./classificar-consulta";
 import { aplicarContingenciaContratoGeranet } from "./contingencia-contrato";
 import { resolverOffsetFiscal } from "./data-hora";
 import { assertIcmsContratoGeranet } from "./resolver-icms-geranet";
-import { resolverDestinatarioFiscalNfe } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
+import { camposClienteNfceGeranet } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
 
 export type SegredosFiscaisGeranet = {
   geranet_api_key?: string | null;
@@ -80,6 +81,7 @@ export type MontarPayloadNfceInput = {
   pagamento: PagamentoNfceGeranet;
 
   codigoNumerico: string;
+  snapshotFiscal?: unknown;
 };
 
 function texto(
@@ -140,6 +142,7 @@ export function montarPayloadNfceGeranet({
   item,
   pagamento,
   codigoNumerico,
+  snapshotFiscal,
 }: MontarPayloadNfceInput) {
   const idCsc =
     normalizarIdCscGeranet(
@@ -205,6 +208,9 @@ export function montarPayloadNfceGeranet({
     codigoSegurancaContribuinte:
       texto(segredos.csc),
 
+    // Geranet: cálculo automático IBPT considera valorTotal − desconto.
+    ibptAutomatico: IBPT_AUTOMATICO_GERANET,
+
     razaoSocial:
       texto(
         emitente.razaoSocial
@@ -257,6 +263,8 @@ export function montarPayloadNfceGeranet({
       : {}),
   };
 
+  const destinatarioNfce = camposClienteNfceGeranet(snapshotFiscal);
+
   const payload = {
     acao: "emitir",
     modeloDocumento: "nfe",
@@ -291,30 +299,17 @@ export function montarPayloadNfceGeranet({
 
       empresa,
 
-      // A integração Geranet trabalha com o
-      // objeto nfe.cliente. Para NFC-e com
-      // consumidor não identificado mantemos
-      // o objeto presente, porém vazio.
-      //
-      // Não inventamos CPF, nome ou endereço.
-      // Quando houver cliente selecionado no PDV,
-      // este objeto será preenchido com os dados reais.
+      // Destinatário da NFC-e: flags + CPF/CNPJ só do snapshot fiscal
+      // congelado. Cadastro atual do cliente não entra neste payload.
       cliente: {
-        // Consumidor final NÃO identificado.
-        // Não inventamos CPF/CNPJ, nome ou endereço.
-        // Mantemos as chaves esperadas pelo motor Geranet
-        // para evitar conversões internas de Null.
-        cnpj: "",
-        cpf: "",
+        cnpj: destinatarioNfce.cnpj,
+        cpf: destinatarioNfce.cpf,
         inscricaoEstadual: "",
         razaoSocial: "",
         nomeFantasia: "",
 
-        ...resolverDestinatarioFiscalNfe({
-          modelo: "65",
-          origemVenda: "pdv",
-          contribuinteIcms: false,
-        }),
+        consumidorFinal: destinatarioNfce.consumidorFinal,
+        indicadorIEdestinatario: destinatarioNfce.indicadorIEdestinatario,
 
         telefone: "",
         email: "",

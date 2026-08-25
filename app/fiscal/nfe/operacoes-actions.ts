@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { finalizarVendaPdv } from "@/app/pdv/actions";
+import { executarFinalizacaoVendaPdv } from "@/app/pdv/actions";
+import { MENSAGEM_CAIXA_FECHADO_FINALIZAR, MENSAGEM_CAIXA_FECHADO_NFE_VENDA } from "@/lib/caixa/mensagens";
+import { nfeVendaNovaExigeCaixa } from "@/lib/caixa/nfe-venda";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import {
   MENSAGEM_NATUREZA_BONIFICACAO_INVALIDA,
@@ -2277,18 +2279,36 @@ export async function prepararVendaParaEmissaoNfe(input: {
         return { ok: false, erro: pixModo.erro };
       }
 
-      const finalizada = await finalizarVendaPdv({
-        idempotencyKey: String(operacao.id),
-        clienteId: String(operacao.destinatario_id),
-        descontoCentavos: totaisCentavos.desconto,
-        freteCentavos: totaisCentavos.frete,
-        acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
-        trocoCentavos: 0,
-        itens: itensVenda,
-        pagamentos,
-      });
+      // Motor comercial da NF-e de venda nova: mesmo RPC atômico do PDV web
+      // (venda + pagamentos + estoque + livro do Caixa). Emissão fiscal
+      // posterior não relança Caixa. Sem venda_id = venda nova; com venda_id
+      // este bloco não corre.
+      const finalizada = await executarFinalizacaoVendaPdv(
+        {
+          idempotencyKey: String(operacao.id),
+          clienteId: String(operacao.destinatario_id),
+          descontoCentavos: totaisCentavos.desconto,
+          freteCentavos: totaisCentavos.frete,
+          acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
+          trocoCentavos: 0,
+          itens: itensVenda,
+          pagamentos,
+        },
+        {
+          exigirCaixaAberto: nfeVendaNovaExigeCaixa({
+            tipoOperacaoInterno: operacao.tipo_operacao_interno,
+            vendaId: null,
+          }),
+        }
+      );
       if (!finalizada.ok) {
-        return { ok: false, erro: finalizada.erro };
+        const caixaFechado =
+          finalizada.codigo === "CAIXA_FECHADO" ||
+          finalizada.erro === MENSAGEM_CAIXA_FECHADO_FINALIZAR;
+        return {
+          ok: false,
+          erro: caixaFechado ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA : finalizada.erro,
+        };
       }
       vendaId = finalizada.vendaId;
 

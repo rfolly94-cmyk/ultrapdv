@@ -73,16 +73,16 @@ test("4. venda 100 / dinheiro 40 + PIX 60 → permite", () => {
   assert.equal(r.trocoCentavos, 0);
 });
 
-test("5. venda 100 / dinheiro 40 + PIX 61 → bloqueia", () => {
+test("5. venda 100 / dinheiro 70 + PIX 50 → permite com troco 20", () => {
   const r = avaliarPagamentosPdv({
     totalVendaCentavos: 10000,
     pagamentos: [
-      { valorCentavos: 4000, ...dinheiro },
-      { valorCentavos: 6100, ...pix },
+      { valorCentavos: 7000, ...dinheiro },
+      { valorCentavos: 5000, ...pix },
     ],
   });
-  assert.equal(r.bloqueado, true);
-  assert.equal(r.excedenteCentavos, 100);
+  assert.equal(r.bloqueado, false);
+  assert.equal(r.trocoCentavos, 2000);
 });
 
 test("6. desconto reduz total e trava usa total líquido", () => {
@@ -99,13 +99,10 @@ test("6. desconto reduz total e trava usa total líquido", () => {
   assert.match(r.mensagem ?? "", /R\$\s*100,00/);
 });
 
-test("7. fiado acima do restante bloqueia", () => {
+test("7. fiado acima do total da venda bloqueia", () => {
   const r = avaliarPagamentosPdv({
     totalVendaCentavos: 10000,
-    pagamentos: [
-      { valorCentavos: 7000, ...dinheiro },
-      { valorCentavos: 5000, ...fiado },
-    ],
+    pagamentos: [{ valorCentavos: 11000, ...fiado }],
   });
   assert.equal(r.bloqueado, true);
 });

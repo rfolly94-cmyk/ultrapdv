@@ -535,8 +535,10 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.doesNotMatch(editor, /setErro\(mensagemNaturezaNaoEmitivelNestaTela/);
   assert.doesNotMatch(editor, /Vendas devem ser emitidas a partir do PDV/);
   assert.doesNotMatch(editor, /Venda continua no PDV/);
-  assert.match(actions, /finalizarVendaPdv/);
+  assert.match(actions, /executarFinalizacaoVendaPdv/);
   assert.match(actions, /prepararVendaParaEmissaoNfe/);
+  assert.match(actions, /exigirCaixaAberto:/);
+  assert.match(actions, /nfeVendaNovaExigeCaixa/);
   assert.match(editor, /nfe-emitir-venda/);
   assert.doesNotMatch(editor, /nfce-emitir-venda/);
   assert.doesNotMatch(editor, /Esta venda será emitida como NFC-e/);
@@ -568,7 +570,7 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.doesNotMatch(emitirVendaOp, /rpc_confirmar_saida_operacao_fiscal/);
   assert.match(actions, /Estoque da venda já foi baixado pelo PDV/);
   assert.match(emitirVendaOp, /if \(!vendaId\)/);
-  assert.match(emitirVendaOp, /finalizarVendaPdv/);
+  assert.match(emitirVendaOp, /executarFinalizacaoVendaPdv/);
   assert.match(
     editor,
     /Cabeçalho fiscal salvo\. A venda comercial, o estoque e o pagamento não foram alterados/

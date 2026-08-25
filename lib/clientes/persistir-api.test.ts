@@ -40,7 +40,7 @@ test("APIs de cliente e carteira exigem Bearer e resolvem empresa no servidor", 
   assert.doesNotMatch(editar, /saldo_devedor/);
 
   const receber = fonte("app/api/clientes/[id]/carteira/receber/route.ts");
-  assert.match(receber, /rpc_receber_carteira_cliente/);
+  assert.match(receber, /rpc_receber_carteira_com_caixa/);
   assert.match(receber, /Access-Control-Allow-Origin|aplicarCors/);
 
   const carteiraLoader = fonte("lib/clientes/carregar-carteira-api.ts");

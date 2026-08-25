@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 
 import type { DadosTransporteVenda } from "@/components/vendas/transporte-venda-form";
+import { buscarCaixaAbertoEmpresa } from "@/lib/caixa/sessao-aberta";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
+import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
+import { temPermissao } from "@/lib/permissoes/tem-permissao";
 import { pagamentosRascunhoDoSnapshot } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 import { lerCabecalhoFiscalDoSnapshot } from "@/lib/fiscal/nfe55/cabecalho-fiscal";
 import { totaisNotaDoSnapshot } from "@/lib/fiscal/nfe55/totais-nota";
@@ -422,7 +425,12 @@ export async function carregarFormularioNfeEmissao({
     (numeracoes ?? []).find((item) => String(item.modelo) === "65") ??
     null;
 
-  const [{ data: formasPagamento }, { data: integracaoPix }] = await Promise.all([
+  const [
+    { data: formasPagamento },
+    { data: integracaoPix },
+    caixaAbertoRegistro,
+    sessaoPermissoes,
+  ] = await Promise.all([
     supabase
       .from("formas_pagamento")
       .select(
@@ -436,6 +444,8 @@ export async function carregarFormularioNfeEmissao({
       .select("id, modo, ativo, provedor")
       .eq("empresa_id", empresaId)
       .maybeSingle(),
+    buscarCaixaAbertoEmpresa(supabase, empresaId),
+    obterPermissoesSessao(),
   ]);
 
   const snapDestinatario = lerSnapshotDestinatarioFiscal(operacao?.snapshot_fiscal);
@@ -651,5 +661,11 @@ export async function carregarFormularioNfeEmissao({
     ambienteFiscal: Number(fiscalEmpresa?.ambiente) === 1 ? ("1" as const) : ("2" as const),
     formasPagamento: filtrarFormasPagamentoCheckoutPdv(formasPagamento ?? []),
     pixConfig: pixConfigPublicoPdv(classificarIntegracaoPix(integracaoPix)),
+    caixaAberto: caixaAbertoRegistro !== null,
+    podeAbrirCaixa: temPermissao(
+      sessaoPermissoes?.permissoes,
+      "caixa",
+      "abrir"
+    ),
   };
 }

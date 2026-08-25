@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
+import { mensagemErroCaixaOperacao } from "@/lib/caixa/mensagens";
 import {
   exigirOperacaoCarteira,
 } from "@/lib/carteira/acesso-operacao";
@@ -266,7 +267,7 @@ export async function receberCarteira(
       data,
       error,
     } = await supabase.rpc(
-      "rpc_receber_carteira_cliente",
+      "rpc_receber_carteira_com_caixa",
       {
         p_empresa_id:
           empresaId,
@@ -297,7 +298,7 @@ export async function receberCarteira(
       return {
         ok: false,
         erro:
-          error.message,
+          mensagemErroCaixaOperacao(error.message) || error.message,
       };
     }
 
@@ -321,6 +322,8 @@ export async function receberCarteira(
     revalidatePath(
       "/clientes"
     );
+
+    revalidatePath("/caixa");
 
     return {
       ok: true,
@@ -443,7 +446,7 @@ export async function estornarRecebimentoCarteira(
     }
 
     const { data, error } = await supabase.rpc(
-      "rpc_estornar_recebimento_carteira",
+      "rpc_estornar_recebimento_carteira_com_caixa",
       {
         p_empresa_id: empresaId,
         p_cliente_id: input.clienteId,
@@ -453,11 +456,12 @@ export async function estornarRecebimentoCarteira(
     );
 
     if (error) {
-      return { ok: false, erro: error.message };
+      return { ok: false, erro: mensagemErroCaixaOperacao(error.message) || error.message };
     }
 
     revalidatePath(`/clientes/${input.clienteId}/carteira`);
     revalidatePath("/clientes");
+    revalidatePath("/caixa");
 
     return {
       ok: true,
@@ -469,7 +473,7 @@ export async function estornarRecebimentoCarteira(
       ok: false,
       erro:
         error instanceof Error
-          ? error.message
+          ? mensagemErroCaixaOperacao(error.message) || error.message
           : "Erro inesperado ao estornar recebimento.",
     };
   }

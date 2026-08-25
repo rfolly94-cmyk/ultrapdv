@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
 import { DetailDrawer } from "@/components/ui/detail-drawer";
@@ -9,12 +10,21 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { CaixaMovimentosTabela } from "@/components/caixa/caixa-movimentos-tabela";
 import {
   ModalAbrirCaixa,
-  ModalFecharCaixa,
   ModalMovimentoCaixa,
 } from "@/components/caixa/caixa-modais";
+import { CaixaConferenciaMeios } from "@/components/caixa/caixa-conferencia-meios";
+import { ModalFecharCaixa } from "@/components/caixa/caixa-fechamento-modal";
+import { CaixaResumoSessao } from "@/components/caixa/caixa-resumo-sessao";
 import { CaixaResumoValores } from "@/components/caixa/caixa-resumo-valores";
+import { definirFechamentoCaixaCego, iniciarFechamentoCaixa } from "@/app/caixa/actions";
+import { conferenciaRevelaEsperado } from "@/lib/caixa/conferencia";
 import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
-import type { AbaCaixa, CaixaResumoAnterior, PainelCaixa } from "@/lib/caixa/tipos";
+import type {
+  AbaCaixa,
+  CaixaResumoAnterior,
+  ConferenciaCaixa,
+  PainelCaixa,
+} from "@/lib/caixa/tipos";
 import {
   formatarData,
   formatarDataHora,
@@ -37,14 +47,80 @@ export function CaixaWorkspace({
   const podeAbrir = useTemPermissao("caixa", "abrir");
   const podeMovimentar = useTemPermissao("caixa", "movimentar");
   const podeFechar = useTemPermissao("caixa", "fechar");
+  const podeConfigurar = useTemPermissao("configuracoes", "editar_empresa");
+  const router = useRouter();
+  const [pendingCego, startCego] = useTransition();
+  const [erroCego, setErroCego] = useState<string | null>(null);
+  const [erroFechar, setErroFechar] = useState<string | null>(null);
+  const [pendingFechar, startFechar] = useTransition();
+  const [conferenciaInicial, setConferenciaInicial] =
+    useState<ConferenciaCaixa | null>(null);
   const [modal, setModal] = useState<
     "abrir" | "suprimento" | "sangria" | "fechar" | "resumo" | null
   >(null);
   const [anterior, setAnterior] = useState<CaixaResumoAnterior | null>(null);
   const atual = painel.atual;
 
+  function abrirFechamento() {
+    if (!atual) {
+      return;
+    }
+    startFechar(async () => {
+      const saida = await iniciarFechamentoCaixa({ caixaId: atual.id });
+      if (!saida.ok) {
+        setErroFechar(saida.erro);
+        return;
+      }
+      if (
+        saida.conferencia.fechamento_cego &&
+        conferenciaRevelaEsperado(saida.conferencia)
+      ) {
+        setErroFechar("Não foi possível iniciar a conferência.");
+        return;
+      }
+      setErroFechar(null);
+      setConferenciaInicial(saida.conferencia);
+      setModal("fechar");
+    });
+  }
+
+  function fecharModalFechamento() {
+    setModal(null);
+    setConferenciaInicial(null);
+  }
+
+  function alternarCego(habilitado: boolean) {
+    startCego(async () => {
+      const saida = await definirFechamentoCaixaCego({ habilitado });
+      if (!saida.ok) {
+        setErroCego(saida.erro);
+        return;
+      }
+      setErroCego(null);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-4 px-4 py-4">
+      {erroCego || erroFechar ? (
+        <PageAlert type="erro" className="mx-0 mt-0">
+          {erroCego || erroFechar}
+        </PageAlert>
+      ) : null}
+
+      {podeConfigurar ? (
+        <label className="flex items-center gap-2 text-[13px] text-zinc-700">
+          <input
+            type="checkbox"
+            checked={painel.fechamentoCego}
+            disabled={pendingCego}
+            onChange={(event) => alternarCego(event.target.checked)}
+          />
+          Fechamento cego (não mostra o esperado durante a conferência)
+        </label>
+      ) : null}
+
       {aba === "atual" ? (
         atual ? (
           <section className="space-y-4 rounded-md border border-zinc-200 bg-white p-4">
@@ -84,9 +160,10 @@ export function CaixaWorkspace({
                   <button
                     type="button"
                     className="updv-btn updv-btn-primary"
-                    onClick={() => setModal("fechar")}
+                    disabled={pendingFechar}
+                    onClick={abrirFechamento}
                   >
-                    Fechar Caixa
+                    {pendingFechar ? "Preparando..." : "Fechar Caixa"}
                   </button>
                 ) : null}
                 <button
@@ -99,13 +176,14 @@ export function CaixaWorkspace({
               </div>
             </div>
 
-            <CaixaResumoValores
-              saldoInicial={atual.saldoInicial}
-              suprimentos={atual.suprimentos}
-              sangrias={atual.sangrias}
-              saldoAtual={atual.saldoAtual}
-              rotuloSaldoAtual="Saldo atual em dinheiro"
-            />
+            <CaixaResumoSessao totais={atual} />
+
+            <div>
+              <h3 className="mb-2 text-[13px] font-semibold text-zinc-950">
+                Movimentações
+              </h3>
+              <CaixaMovimentosTabela movimentos={atual.movimentos} />
+            </div>
           </section>
         ) : (
           <section className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-10 text-center">
@@ -199,13 +277,12 @@ export function CaixaWorkspace({
             onClose={() => setModal(null)}
           />
           <ModalFecharCaixa
+            key={conferenciaInicial?.versao_livro ?? "fechamento"}
             open={modal === "fechar"}
             caixaId={atual.id}
-            saldoInicial={atual.saldoInicial}
-            suprimentos={atual.suprimentos}
-            sangrias={atual.sangrias}
-            saldoEsperado={atual.saldoAtual}
-            onClose={() => setModal(null)}
+            operadorNome={atual.usuario_abertura_nome}
+            conferenciaInicial={conferenciaInicial}
+            onClose={fecharModalFechamento}
           />
           <AppResumoAtual
             open={modal === "resumo"}
@@ -224,13 +301,16 @@ export function CaixaWorkspace({
         {anterior ? (
           <div className="space-y-4">
             <PageAlert type="aviso" className="mx-0 mt-0">
-              Caixa fechado em somente leitura nesta fase.
+              Caixa fechado em somente leitura. Reabertura não está disponível
+              nesta fase.
             </PageAlert>
             <p className="text-[13px] text-zinc-500">
               Aberto em {formatarDataHora(anterior.aberto_em)} por{" "}
               {anterior.usuario_abertura_nome || "—"}
               {anterior.fechado_em
-                ? ` · Fechado em ${formatarDataHora(anterior.fechado_em)}`
+                ? ` · Fechado em ${formatarDataHora(anterior.fechado_em)} por ${
+                    anterior.usuario_fechamento_nome || "—"
+                  }`
                 : ""}
             </p>
             <CaixaResumoValores
@@ -238,10 +318,22 @@ export function CaixaWorkspace({
               suprimentos={anterior.suprimentos}
               sangrias={anterior.sangrias}
               saldoAtual={anterior.saldoAtual}
-              rotuloSaldoAtual="Saldo final em dinheiro"
+              rotuloSaldoAtual="Dinheiro físico esperado"
               dinheiroContado={anterior.dinheiro_contado}
               diferenca={anterior.diferenca}
             />
+            <CaixaResumoSessao totais={anterior} />
+            {anterior.conferencia.length > 0 ? (
+              <div>
+                <h3 className="mb-2 text-[13px] font-semibold text-zinc-950">
+                  Conferência por meio
+                </h3>
+                <CaixaConferenciaMeios
+                  meios={anterior.conferencia}
+                  somenteLeitura
+                />
+              </div>
+            ) : null}
             {anterior.observacao_fechamento ? (
               <p className="text-[13px] text-zinc-500">
                 {anterior.observacao_fechamento}
@@ -267,13 +359,7 @@ function AppResumoAtual({
   return (
     <DetailDrawer title={`Resumo · Caixa #${caixa.numero}`} open={open} onClose={onClose} size="md">
       <div className="space-y-4">
-        <CaixaResumoValores
-          saldoInicial={caixa.saldoInicial}
-          suprimentos={caixa.suprimentos}
-          sangrias={caixa.sangrias}
-          saldoAtual={caixa.saldoAtual}
-          rotuloSaldoAtual="Saldo atual em dinheiro"
-        />
+        <CaixaResumoSessao totais={caixa} />
         {caixa.observacao_abertura ? (
           <p className="text-[13px] text-zinc-500">{caixa.observacao_abertura}</p>
         ) : null}

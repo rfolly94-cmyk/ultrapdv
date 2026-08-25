@@ -4,6 +4,7 @@ import {
 } from "next/server";
 
 import { aplicarCors, respostaOptions } from "@/lib/api/cors-mobile";
+import { mensagemErroCaixaOperacao } from "@/lib/caixa/mensagens";
 import {
   exigirOperacaoCarteira,
   respostaNegacaoCarteira,
@@ -313,7 +314,7 @@ export async function POST(
     error,
   } =
     await supabase.rpc(
-      "rpc_receber_carteira_cliente",
+      "rpc_receber_carteira_com_caixa",
       {
         p_empresa_id:
           vinculo.empresa_id,
@@ -339,7 +340,7 @@ export async function POST(
       {
         ok: false,
         erro:
-          error.message,
+          mensagemErroCaixaOperacao(error.message) || error.message,
       },
       422
     );

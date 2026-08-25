@@ -118,6 +118,7 @@ test("RPC de item isola empresa_id, não muta fiscal e devolve só o item", () =
   assert.match(rpc, /p_empresa_id/);
   assert.match(rpc, /estoque_estornar_itens_venda_interno/);
   assert.match(rpc, /ci\.id = ANY\s*\(\s*v_ids\)/);
+  assert.doesNotMatch(rpc, /caixa_movimentacoes/);
   assert.doesNotMatch(rpc, /UPDATE public\.fiscal_emissoes/);
   assert.doesNotMatch(rpc, /chamarGeranet|nfe\/cancelar|nfce-emitir/);
   assert.match(rpc, /status = 'cancelada'/);

@@ -2,6 +2,11 @@ import type {
   ConsumidorFinalNfe,
   IndicadorIeDestinatarioNfe,
 } from "@/lib/fiscal/geranet/montar-payload-nfe";
+import type {
+  OrigemDocumentoDestinatario,
+  TipoDocumentoDestinatario,
+} from "./documento";
+import { somenteDigitosDocumento } from "./documento";
 
 export const MENSAGEM_NAO_CONTRIBUINTE_CONSUMIDOR_FINAL =
   "Operação com destinatário não contribuinte e sem consumidor final. A SEFAZ pode rejeitar esta combinação; revise as informações fiscais da operação se não for o caso pretendido.";
@@ -26,6 +31,10 @@ export type SnapshotDestinatarioFiscal = {
   consumidorFinalDefinido: boolean;
   origem: OrigemConsumidorFinalFiscal | null;
   indicadorIe: IndicadorIeDestinatarioNfe | null;
+  documentoNumero: string | null;
+  documentoTipo: TipoDocumentoDestinatario | null;
+  documentoOrigem: OrigemDocumentoDestinatario | null;
+  documentoDefinido: boolean;
 };
 
 function texto(valor: unknown) {
@@ -99,6 +108,10 @@ export function lerSnapshotDestinatarioFiscal(
       consumidorFinalDefinido: false,
       origem: null,
       indicadorIe: null,
+      documentoNumero: null,
+      documentoTipo: null,
+      documentoOrigem: null,
+      documentoDefinido: false,
     };
   }
   const bruto = snapshot as Record<string, unknown>;
@@ -111,6 +124,9 @@ export function lerSnapshotDestinatarioFiscal(
       ? origemBruta
       : null;
   const indicador = texto(bruto.indicador_ie_destinatario);
+  const tipoBruto = texto(bruto.destinatario_documento_tipo);
+  const origemDocBruta = texto(bruto.destinatario_documento_origem);
+  const numero = somenteDigitosDocumento(bruto.destinatario_documento) || null;
   return {
     consumidorFinal:
       bruto.consumidor_final == null
@@ -122,6 +138,16 @@ export function lerSnapshotDestinatarioFiscal(
       indicador === "1" || indicador === "2" || indicador === "9"
         ? indicador
         : null,
+    documentoNumero: numero,
+    documentoTipo: tipoBruto === "cpf" || tipoBruto === "cnpj" ? tipoBruto : null,
+    documentoOrigem:
+      origemDocBruta === "cpf_na_nota" || origemDocBruta === "cliente"
+        ? origemDocBruta
+        : null,
+    documentoDefinido: Object.prototype.hasOwnProperty.call(
+      bruto,
+      "destinatario_documento"
+    ),
   };
 }
 
@@ -174,11 +200,59 @@ export function snapshotDestinatarioParaPersistir(params: {
   consumidorFinal: boolean;
   origem: OrigemConsumidorFinalFiscal;
   indicadorIe: IndicadorIeDestinatarioNfe;
+  documento?: {
+    numero: string | null;
+    tipo: TipoDocumentoDestinatario | null;
+    origem: OrigemDocumentoDestinatario | null;
+  } | null;
 }): Record<string, unknown> {
-  return {
+  const base: Record<string, unknown> = {
     consumidor_final: params.consumidorFinal,
     consumidor_final_origem: params.origem,
     indicador_ie_destinatario: params.indicadorIe,
+  };
+
+  if (params.documento === undefined) {
+    return base;
+  }
+
+  if (params.documento === null) {
+    return {
+      ...base,
+      destinatario_documento: null,
+      destinatario_documento_tipo: null,
+      destinatario_documento_origem: null,
+    };
+  }
+
+  return {
+    ...base,
+    destinatario_documento: params.documento.numero,
+    destinatario_documento_tipo: params.documento.tipo,
+    destinatario_documento_origem: params.documento.origem,
+  };
+}
+
+/**
+ * NFC-e 65: documento e flags vêm do snapshot congelado.
+ * Não consulta o cadastro atual do cliente.
+ */
+export function camposClienteNfceGeranet(snapshot: unknown) {
+  const snap = lerSnapshotDestinatarioFiscal(snapshot);
+  const flags = resolverDestinatarioFiscalNfe({
+    modelo: "65",
+    origemVenda: "pdv",
+    contribuinteIcms: false,
+    indicadorIeSnapshot: snap.indicadorIe,
+    consumidorFinalSnapshot: snap.consumidorFinal,
+    consumidorFinalDefinidoNoSnapshot: snap.consumidorFinalDefinido,
+  });
+
+  return {
+    cpf: snap.documentoTipo === "cpf" ? snap.documentoNumero ?? "" : "",
+    cnpj: snap.documentoTipo === "cnpj" ? snap.documentoNumero ?? "" : "",
+    consumidorFinal: flags.consumidorFinal,
+    indicadorIEdestinatario: flags.indicadorIEdestinatario,
   };
 }
 

@@ -159,6 +159,12 @@ export type ItemGeranet = {
   /** Bruto Geranet: quantidade * valorUnitario. Não é o líquido. */
   valorTotal: string;
 
+  /**
+   * NF-e 55 e NFC-e 65: string vazia pede o cálculo automático da Geranet
+   * (valorTotal − desconto). Não é um valor IBPT calculado pelo UltraPDV.
+   */
+  vTotTrib?: string;
+
   informacaoAdicional: string;
 
   ncmProduto: string;
@@ -197,6 +203,15 @@ export type ItemGeranet = {
       numeroItem: number;
     };
   }>;
+
+/** Contrato oficial Geranet: cálculo automático IBPT considera desconto. */
+export const IBPT_AUTOMATICO_GERANET = "sim" as const;
+
+/**
+ * String vazia no item pede o cálculo automático da Geranet.
+ * O UltraPDV não envia percentual IBPT nem valor aproximado.
+ */
+export const VTOTTRIB_CALCULO_AUTOMATICO_GERANET = "" as const;
 
 export type TotaisItemGeranet = {
   valorBrutoItem: number;
@@ -239,6 +254,53 @@ export function calcularTotaisItemGeranet(input: {
     seguro,
     outro,
   };
+}
+
+export function arredondarMoedaFiscal(valor: number) {
+  if (!Number.isFinite(valor)) {
+    return 0;
+  }
+  return Math.round(valor * 100) / 100;
+}
+
+/**
+ * Base informativa da Lei 12.741 para o item: líquido após desconto
+ * incondicional (e acréscimos de frete/seguro/outro já rateados).
+ * Não é vProd. Não altera vNF comercial.
+ */
+export function baseInformativaTributosItem(
+  totais: TotaisItemGeranet
+) {
+  return Math.max(0, arredondarMoedaFiscal(totais.valorLiquidoFiscal));
+}
+
+/**
+ * Helper interno. O UltraPDV não calcula nem envia percentual IBPT
+ * no payload Geranet (NF-e 55 e NFC-e 65 usam vTotTrib vazio +
+ * ibptAutomatico=sim).
+ */
+export function valorAproximadoTributosSobreBase(
+  base: number,
+  percentual: number
+) {
+  if (!Number.isFinite(percentual) || percentual < 0) {
+    throw new Error("Percentual tributário aproximado inválido.");
+  }
+  return Math.max(
+    0,
+    arredondarMoedaFiscal((Math.max(0, arredondarMoedaFiscal(base)) * percentual) / 100)
+  );
+}
+
+export function valorAproximadoTributosNota(
+  valoresItens: number[]
+) {
+  return Math.max(
+    0,
+    arredondarMoedaFiscal(
+      valoresItens.reduce((soma, valor) => soma + Number(valor ?? 0), 0)
+    )
+  );
 }
 
 function numero(
@@ -669,10 +731,15 @@ export function montarItemGeranet(
     valorUnitario:
       valorUnitario.toFixed(8),
 
-    // Geranet: valorTotal = bruto (qtd * unitário).
-    // O líquido fica em valorLiquidoFiscal, só para conferência.
+    // Geranet: valorTotal = bruto (qtd * unitário) → XML vProd.
+    // O líquido (vNF do item) fica em valorLiquidoFiscal, só para conferência.
+    // NF-e 55 e NFC-e 65: vTotTrib vazio + nfe.empresa.ibptAutomatico=sim
+    // pede o cálculo automático da Geranet sobre valorTotal − desconto.
+    // O UltraPDV não calcula percentual IBPT nem envia valor numérico.
     valorTotal:
       valorBrutoItem.toFixed(2),
+
+    vTotTrib: VTOTTRIB_CALCULO_AUTOMATICO_GERANET,
 
     informacaoAdicional:
       input.informacaoAdicional

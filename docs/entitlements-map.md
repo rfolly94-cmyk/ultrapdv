@@ -97,9 +97,11 @@ Usuário nunca eleva o plano.
 - **UI:** item do menu some se `pdv=false` e `vendas=false`; com `vendas=true` o item permanece em `/vendas`. Acesso direto a `/pdv` e `/pdv/editar/[id]` mostra `RecursoNaoContratado`
 - **Permissão de usuário (já existente):** `pdv.acessar`, `pdv.finalizar_venda`, `pdv.aplicar_desconto`, `pdv.usar_fiado`. Edição pelo caixa reutiliza `vendas.editar` **com plano `pdv`**, sem exigir plano `vendas`. `pdv.cancelar_venda` existe na matriz, mas o cancelamento HTTP continua em `vendas.cancelar`
 - **Guards:**
-  - UI: sidebar
+  - UI: sidebar; `/pdv` bloqueia operação se não houver caixa aberto (modal "Caixa fechado"; abertura só com `caixa.abrir` via `rpc_abrir_caixa`, nunca automática)
   - ROUTE_GUARD: proxy exige `pdv.acessar`; páginas consultam o plano antes de carregar produtos/clientes
-  - SERVER_GUARD: `exigirOperacaoPdv` / `exigirEdicaoPdv` **antes** das RPCs
+  - SERVER_GUARD: `exigirOperacaoPdv` / `exigirEdicaoPdv` **antes** das RPCs; `finalizarVendaPdv` também exige sessão de caixa aberta (`exigirCaixaAberto: true`)
+- **Mobile:** `POST /api/pdv/finalizar` **não** exige caixa aberto nesta fase. Futura integração Caixa mobile: passar a flag, bloquear o PDV mobile sem sessão, permitir `rpc_abrir_caixa` a quem tiver permissão e vincular a venda à sessão — sem abrir caixa automaticamente.
+- **Nova NF-e → Venda:** `prepararVendaParaEmissaoNfe` materializa venda comercial nova com `exigirCaixaAberto: true` (`rpc_finalizar_venda_com_caixa`). Transferência, bonificação, devolução e NF-e sobre venda já existente não exigem caixa. Emissão/reemissão/reconciliação/consulta fiscal não relançam o livro.
 - **Interno:** RPCs, Geranet, estoque, carteira, PIX e recibo **não** consultam o plano `pdv`
 - **Compatibilidade:** chave ausente libera; só `pdv = false` explícito nega
 - **Outros recursos false:** `vendas`/`estoque`/`clientes`/`produtos`/`carteira` não impedem o caixa; fiado continua só com `pdv.usar_fiado`

@@ -8,6 +8,23 @@ import { extrairBearerAuthorization } from "@/lib/supabase/bearer";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * UltraPDV Mobile — finalização comercial.
+ *
+ * Reusa executarFinalizacaoVendaPdv sem a exigência de caixa aberto nesta fase.
+ * O app mobile ainda não tem módulo Caixa; vendas mobile ainda não
+ * pertencem a uma sessão de conferência.
+ *
+ * Futura integração Caixa mobile:
+ * - exigir sessão aberta no mesmo critério empresa/filial do PDV web;
+ * - bloquear o PDV mobile quando não houver sessão aberta;
+ * - permitir abertura via rpc_abrir_caixa a quem tiver caixa.abrir;
+ * - não abrir caixa automaticamente;
+ * - vincular a venda à sessão aberta.
+ *
+ * A empresa ativa vem da sessão Bearer; o body não é fonte de verdade.
+ */
+
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

@@ -5,15 +5,23 @@ import { redirect } from "next/navigation";
 
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
 import { exigirOperacaoCaixa } from "@/lib/caixa/acesso-operacao";
-import { carregarDetalheCaixa } from "@/lib/caixa/carregar";
+import {
+  conferenciaAbertaParaCliente,
+  conferenciaRevelaEsperado,
+  mapearConferenciaCaixa,
+  mapearMeioConferenciaRpc,
+  podeRevelarEsperadoCaixaCego,
+} from "@/lib/caixa/conferencia";
+import { carregarDetalheCaixa, carregarFechamentoCego } from "@/lib/caixa/carregar";
+import type { ConferenciaCaixa, MeioConferenciaCaixa } from "@/lib/caixa/tipos";
 import { mensagemErroCaixa, parseValorCaixa, uuidCaixaValido } from "@/lib/caixa/valor";
+import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 import { ErroPermissao } from "@/lib/permissoes/erro";
 import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
 import { createClient } from "@/lib/supabase/server";
 
-type Resultado =
-  | { ok: true }
-  | { ok: false; erro: string };
+type ResultadoErro = { ok: false; erro: string };
+type Resultado = { ok: true } | ResultadoErro;
 
 async function getContexto() {
   const supabase = await createClient();
@@ -44,7 +52,7 @@ async function getContexto() {
   };
 }
 
-function resultadoNegacao(error: unknown): Resultado {
+function resultadoNegacao(error: unknown): ResultadoErro {
   if (error instanceof ErroPermissao && error.status === 401) {
     redirect("/login");
   }
@@ -92,6 +100,10 @@ export async function abrirCaixa(input: {
     }
 
     revalidatePath("/caixa");
+    revalidatePath("/pdv");
+    revalidatePath("/fiscal");
+    revalidatePath("/fiscal/nfe/nova");
+    revalidatePath("/fiscal/nfe", "layout");
     return { ok: true };
   } catch (error) {
     return {
@@ -165,11 +177,92 @@ export async function movimentarCaixa(input: {
   }
 }
 
-export async function fecharCaixa(input: {
+function numeroJson(valor: unknown) {
+  const n = Number(valor ?? 0);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+
+export async function iniciarFechamentoCaixa(input: {
   caixaId: string;
-  dinheiroContado: string;
+}): Promise<
+  { ok: true; conferencia: ConferenciaCaixa } | { ok: false; erro: string }
+> {
+  try {
+    const { supabase, empresaId } = await getContexto();
+    let podeRevelarEsperadoCego = false;
+
+    try {
+      const sessao = await exigirOperacaoCaixa({
+        empresaId,
+        acao: "fechar",
+        origem: "iniciarFechamentoCaixa",
+      });
+      podeRevelarEsperadoCego = podeRevelarEsperadoCaixaCego(sessao.permissoes);
+    } catch (error) {
+      return resultadoNegacao(error);
+    }
+
+    if (!uuidCaixaValido(input.caixaId)) {
+      return { ok: false, erro: "Caixa inválido." };
+    }
+
+    const [cegoEmpresa, rpc] = await Promise.all([
+      carregarFechamentoCego(supabase, empresaId),
+      supabase.rpc("rpc_iniciar_fechamento_caixa", {
+        p_caixa_id: input.caixaId,
+      }),
+    ]);
+
+    if (rpc.error) {
+      return {
+        ok: false,
+        erro: mensagemErroCaixa(rpc.error, "Não foi possível iniciar a conferência."),
+      };
+    }
+
+    const conferencia = mapearConferenciaCaixa(rpc.data);
+    if (!conferencia || conferencia.caixa_id !== input.caixaId) {
+      return { ok: false, erro: "Não foi possível iniciar a conferência." };
+    }
+
+    const conferenciaCliente = conferenciaAbertaParaCliente({
+      conferencia,
+      fechamentoCegoEmpresa: cegoEmpresa,
+    });
+    if (
+      !podeRevelarEsperadoCego &&
+      conferenciaRevelaEsperado(conferenciaCliente)
+    ) {
+      return { ok: false, erro: "Não foi possível iniciar a conferência." };
+    }
+
+    return {
+      ok: true,
+      conferencia: conferenciaCliente,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      erro: mensagemErroCaixa(error, "Não foi possível iniciar a conferência."),
+    };
+  }
+}
+
+export async function confirmarFechamentoCaixa(input: {
+  caixaId: string;
+  versaoLivro: string;
+  meios: Array<{ chave: string; valorInformado: string }>;
   observacao?: string;
-}): Promise<Resultado> {
+}): Promise<
+  | {
+      ok: true;
+      dinheiroContado: number;
+      dinheiroEsperado: number;
+      diferenca: number;
+      meios: MeioConferenciaCaixa[];
+    }
+  | { ok: false; erro: string }
+> {
   try {
     const { supabase, empresaId } = await getContexto();
 
@@ -177,7 +270,7 @@ export async function fecharCaixa(input: {
       await exigirOperacaoCaixa({
         empresaId,
         acao: "fechar",
-        origem: "fecharCaixa",
+        origem: "confirmarFechamentoCaixa",
       });
     } catch (error) {
       return resultadoNegacao(error);
@@ -187,17 +280,31 @@ export async function fecharCaixa(input: {
       return { ok: false, erro: "Caixa inválido." };
     }
 
-    const contado = parseValorCaixa(input.dinheiroContado);
-    if (contado === null) {
-      return { ok: false, erro: "Informe o dinheiro contado." };
-    }
-    if (contado < 0) {
-      return { ok: false, erro: "O dinheiro contado não pode ser negativo." };
+    const versao = String(input.versaoLivro ?? "").trim();
+    if (!versao) {
+      return { ok: false, erro: "Atualize a conferência antes de fechar." };
     }
 
-    const { error } = await supabase.rpc("rpc_fechar_caixa", {
+    const meios: Array<{ chave: string; valor_informado: number }> = [];
+    for (const item of input.meios ?? []) {
+      const chave = String(item.chave ?? "").trim();
+      const informado = parseValorCaixa(item.valorInformado);
+      if (!chave) {
+        return { ok: false, erro: "Informe o valor conferido de todas as formas." };
+      }
+      if (informado === null) {
+        return { ok: false, erro: "Informe o valor conferido de todas as formas." };
+      }
+      if (informado < 0) {
+        return { ok: false, erro: "O valor informado não pode ser negativo." };
+      }
+      meios.push({ chave, valor_informado: informado });
+    }
+
+    const { data, error } = await supabase.rpc("rpc_confirmar_fechamento_caixa", {
       p_caixa_id: input.caixaId,
-      p_dinheiro_contado: contado,
+      p_versao_livro: versao,
+      p_meios: meios,
       p_observacao: String(input.observacao ?? "").trim() || null,
     });
 
@@ -208,8 +315,22 @@ export async function fecharCaixa(input: {
       };
     }
 
+    const bruto = (data ?? {}) as Record<string, unknown>;
+    const meiosBrutos = Array.isArray(bruto.meios) ? bruto.meios : [];
+
     revalidatePath("/caixa");
-    return { ok: true };
+    revalidatePath("/pdv");
+    revalidatePath("/fiscal");
+    revalidatePath("/fiscal/nfe", "layout");
+    return {
+      ok: true,
+      dinheiroContado: numeroJson(bruto.dinheiro_contado),
+      dinheiroEsperado: numeroJson(bruto.dinheiro_fisico_esperado),
+      diferenca: numeroJson(bruto.diferenca),
+      meios: meiosBrutos
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .map(mapearMeioConferenciaRpc),
+    };
   } catch (error) {
     return {
       ok: false,
@@ -218,16 +339,65 @@ export async function fecharCaixa(input: {
   }
 }
 
-export async function carregarResumoCaixa(caixaId: string) {
+export async function definirFechamentoCaixaCego(input: {
+  habilitado: boolean;
+}): Promise<Resultado> {
   try {
-    const { empresaId } = await getContexto();
+    const { supabase, empresaId } = await getContexto();
 
     try {
       await exigirOperacaoCaixa({
         empresaId,
         acao: "acessar",
+        origem: "definirFechamentoCaixaCego",
+      });
+      await exigirPermissao({
+        modulo: "configuracoes",
+        acao: "editar_empresa",
+      });
+    } catch (error) {
+      return resultadoNegacao(error);
+    }
+
+    const { error } = await supabase.rpc("rpc_definir_fechamento_caixa_cego", {
+      p_habilitado: Boolean(input.habilitado),
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        erro: mensagemErroCaixa(
+          error,
+          "Não foi possível atualizar o fechamento cego."
+        ),
+      };
+    }
+
+    revalidatePath("/caixa");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      erro: mensagemErroCaixa(
+        error,
+        "Não foi possível atualizar o fechamento cego."
+      ),
+    };
+  }
+}
+
+export async function carregarResumoCaixa(caixaId: string) {
+  try {
+    const { empresaId } = await getContexto();
+    let podeRevelarEsperadoCego = false;
+
+    try {
+      const sessao = await exigirOperacaoCaixa({
+        empresaId,
+        acao: "acessar",
         origem: "carregarResumoCaixa",
       });
+      podeRevelarEsperadoCego = podeRevelarEsperadoCaixaCego(sessao.permissoes);
     } catch (error) {
       if (error instanceof ErroPermissao && error.status === 401) {
         redirect("/login");
@@ -245,7 +415,11 @@ export async function carregarResumoCaixa(caixaId: string) {
       return { ok: false as const, erro: "Caixa inválido." };
     }
 
-    const detalhe = await carregarDetalheCaixa({ empresaId, caixaId });
+    const detalhe = await carregarDetalheCaixa({
+      empresaId,
+      caixaId,
+      podeRevelarEsperadoCego,
+    });
     if (!detalhe) {
       return { ok: false as const, erro: "Caixa não encontrado." };
     }

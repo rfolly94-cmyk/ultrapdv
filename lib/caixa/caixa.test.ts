@@ -24,6 +24,8 @@ test("saldo do caixa deriva das movimentações e não de coluna mutável", () =
   assert.equal(totais.suprimentos, 50);
   assert.equal(totais.sangrias, 30);
   assert.equal(totais.saldoAtual, 120);
+  assert.equal(totais.vendasTotal, 0);
+  assert.equal(totais.vendasPix, 0);
   assert.equal(parseValorCaixa("1.250,50"), 1250.5);
 
   const sql = fonte(MIGRATION);
@@ -53,7 +55,8 @@ test("abertura, sangria e fechamento são atômicos no servidor", () => {
   assert.match(actions, /eq\("ativo", true\)/);
   assert.match(actions, /rpc_abrir_caixa/);
   assert.match(actions, /rpc_movimentar_caixa/);
-  assert.match(actions, /rpc_fechar_caixa/);
+  assert.match(actions, /rpc_iniciar_fechamento_caixa/);
+  assert.match(actions, /rpc_confirmar_fechamento_caixa/);
   assert.match(actions, /exigirOperacaoCaixa/);
   assert.doesNotMatch(actions, /createAdminClient|SUPABASE_SECRET_KEY|service_role/);
   assert.doesNotMatch(actions, /searchParams\.get\("empresa_id"\)|input\.empresaId/);
@@ -61,7 +64,7 @@ test("abertura, sangria e fechamento são atômicos no servidor", () => {
   assert.doesNotMatch(fonte("app/caixa/page.tsx"), /createAdminClient/);
 });
 
-test("módulo /caixa respeita plano e permissão, sem integrar PDV nesta fase", () => {
+test("módulo /caixa respeita plano e permissão; PDV web só consulta sessão aberta", () => {
   assert.equal(modoEntitlementDoRecurso("caixa"), "enforce");
   assert.equal(temPermissao(presetDoPerfil("caixa"), "caixa", "abrir"), true);
   assert.equal(temPermissao(presetDoPerfil("vendedor"), "caixa", "abrir"), false);
@@ -96,6 +99,10 @@ test("módulo /caixa respeita plano e permissão, sem integrar PDV nesta fase", 
   assert.match(fonte("lib/permissoes/menu.ts"), /href: "\/caixa"/);
   assert.match(fonte("components/layout/app-sidebar.tsx"), /useRecursoLiberado\("caixa"\)/);
   assert.match(fonte("lib/permissoes/rotas.ts"), /modulo: "caixa"/);
-  assert.doesNotMatch(fonte("app/pdv/actions.ts"), /rpc_abrir_caixa|rpc_movimentar_caixa|rpc_fechar_caixa/);
+  assert.doesNotMatch(
+    fonte("app/pdv/actions.ts"),
+    /rpc_abrir_caixa|rpc_movimentar_caixa|rpc_fechar_caixa/
+  );
+  assert.match(fonte("app/pdv/actions.ts"), /buscarCaixaAbertoEmpresa/);
   assert.doesNotMatch(fonte("app/caixa/actions.ts"), /carteira_|pix_|rpc_cancelar_venda|finalizarVenda/);
 });

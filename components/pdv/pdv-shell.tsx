@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 
 import { finalizarVendaPdv } from "../../app/pdv/actions";
+import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
+import { PdvConsumidorNota } from "@/components/pdv/pdv-consumidor-nota";
 import {
   buscarConfiguracoesImpressaoAction,
 } from "@/app/configuracoes/impressao/actions";
@@ -58,6 +60,11 @@ import { nomeProvedorPix } from "@/lib/pagamentos/pix/provedores-geranet";
 import type { PedidoPdvInicial } from "@/lib/catalogo/tipos";
 import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
 import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
+import {
+  cpfValido,
+  MENSAGEM_CPF_INVALIDO,
+  somenteDigitosDocumento,
+} from "@/lib/fiscal/destinatario/documento";
 import { MENSAGEM_CONECTOR_NAO_CONTRATADO } from "@/lib/impressao/mensagens";
 import {
   decidirQrAposMudancaValorGeranet,
@@ -198,6 +205,8 @@ type Props = {
   pixIntegradoLiberado?: boolean;
   emitirNfceAutomaticoPdv?: boolean;
   ambienteFiscal?: 1 | 2;
+  caixaAberto: boolean;
+  podeAbrirCaixa: boolean;
 };
 
 type FiscalUltimaVenda = {
@@ -389,6 +398,8 @@ export function PdvShell({
   pixIntegradoLiberado = true,
   emitirNfceAutomaticoPdv = false,
   ambienteFiscal = 2,
+  caixaAberto,
+  podeAbrirCaixa,
 }: Props) {
   const router = useRouter();
   const podeDesconto = useTemPermissao("pdv", "aplicar_desconto");
@@ -463,6 +474,21 @@ export function PdvShell({
     modalPagamento,
     setModalPagamento,
   ] = useState(false);
+
+  const [
+    cpfNaNotaAtivo,
+    setCpfNaNotaAtivo,
+  ] = useState(false);
+
+  const [
+    cpfNaNota,
+    setCpfNaNota,
+  ] = useState("");
+
+  const [
+    usarDocumentoClienteNaNota,
+    setUsarDocumentoClienteNaNota,
+  ] = useState(true);
 
   const [
     contextoCliente,
@@ -1229,6 +1255,10 @@ export function PdvShell({
   }
 
   function abrirPagamento() {
+    if (!caixaAberto) {
+      return;
+    }
+
     if (
       carrinho.length === 0
     ) {
@@ -1482,6 +1512,10 @@ export function PdvShell({
   }
 
   function finalizar() {
+    if (!caixaAberto) {
+      return;
+    }
+
     setErroPagamento(
       null
     );
@@ -1542,6 +1576,19 @@ export function PdvShell({
         avaliacaoPagamentos.mensagem ?? MENSAGEM_PAGAMENTOS_ULTRAPASSAM
       );
       return;
+    }
+
+    const documentoClienteDigitos = somenteDigitosDocumento(
+      clienteSelecionado?.cpf_cnpj
+    );
+    const usarDocumentoCliente =
+      Boolean(documentoClienteDigitos) && usarDocumentoClienteNaNota;
+    if (cpfNaNotaAtivo && !usarDocumentoCliente) {
+      const digitado = somenteDigitosDocumento(cpfNaNota);
+      if (digitado && !cpfValido(digitado)) {
+        setErroPagamento(MENSAGEM_CPF_INVALIDO);
+        return;
+      }
     }
 
     if (
@@ -1647,6 +1694,12 @@ export function PdvShell({
                 ),
               observacao: pedidoObservacao,
               catalogoPedidoId,
+              cpfNaNota:
+                cpfNaNotaAtivo &&
+                !usarDocumentoCliente
+                  ? cpfNaNota
+                  : null,
+              usarDocumentoClienteNaNota: usarDocumentoCliente,
             }
           );
 
@@ -1696,6 +1749,9 @@ export function PdvShell({
         setPixLocal(null);
         resetarCheckoutPixGeranet();
         setUsarFiado(false);
+        setCpfNaNotaAtivo(false);
+        setCpfNaNota("");
+        setUsarDocumentoClienteNaNota(true);
         setModalPagamento(
           false
         );
@@ -1755,6 +1811,17 @@ export function PdvShell({
     function teclado(
       event: KeyboardEvent
     ) {
+      if (!caixaAberto) {
+        if (
+          event.key === "F2" ||
+          event.key === "F3" ||
+          event.key === "F5"
+        ) {
+          event.preventDefault();
+        }
+        return;
+      }
+
       if (
         event.key === "F3"
       ) {
@@ -1881,6 +1948,12 @@ export function PdvShell({
       data-pdv-palette={preferencias.paleta}
       style={estiloTokensPdv(preferencias.paleta) as CSSProperties}
     >
+      {!caixaAberto ? (
+        <PdvCaixaFechado
+          podeAbrir={podeAbrirCaixa}
+          onSair={fecharPdv}
+        />
+      ) : null}
       {ultimaVenda && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
@@ -2838,6 +2911,16 @@ export function PdvShell({
                 Troco {dinheiroCentavos(trocoCentavos)}
               </p>
             )}
+
+            <PdvConsumidorNota
+              clienteDocumento={clienteSelecionado?.cpf_cnpj ?? null}
+              usarDocumentoCliente={usarDocumentoClienteNaNota}
+              onUsarDocumentoCliente={setUsarDocumentoClienteNaNota}
+              cpfNaNotaAtivo={cpfNaNotaAtivo}
+              onCpfNaNotaAtivo={setCpfNaNotaAtivo}
+              cpfNaNota={cpfNaNota}
+              onCpfNaNota={setCpfNaNota}
+            />
 
             <div className="mt-4 flex items-center justify-between text-sm text-zinc-700">
               <label className="flex items-center gap-2">

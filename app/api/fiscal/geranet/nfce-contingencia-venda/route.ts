@@ -431,7 +431,8 @@ export async function POST(
             desconto,
             valor_total,
             troco,
-            observacao
+            observacao,
+            snapshot_fiscal
           `)
           .eq(
             "empresa_id",
@@ -2151,6 +2152,7 @@ export async function POST(
         codigoNumerico:
           emissao
             .codigo_numerico,
+        snapshotFiscal: venda.snapshot_fiscal,
       });
 
     const payload =

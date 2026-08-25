@@ -4,6 +4,7 @@ import {
 import { sanitizarConsultaGeranet } from "@/lib/fiscal/geranet/classificar-consulta";
 import { aplicarContingenciaContratoGeranet } from "@/lib/fiscal/geranet/contingencia-contrato";
 import { resolverOffsetFiscal } from "@/lib/fiscal/geranet/data-hora";
+import { IBPT_AUTOMATICO_GERANET } from "@/lib/fiscal/geranet/montar-item";
 import { assertIcmsContratoGeranet } from "@/lib/fiscal/geranet/resolver-icms-geranet";
 
 export type AmbienteNfeGeranet =
@@ -889,6 +890,9 @@ export function montarPayloadNfeGeranet(
 
         codigoSegurancaContribuinte:
           "",
+
+        // Geranet: cálculo automático IBPT considera valorTotal − desconto.
+        ibptAutomatico: IBPT_AUTOMATICO_GERANET,
 
         informacaoComplementar:
           texto(
