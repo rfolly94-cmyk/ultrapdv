@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { test } from "node:test";
 
 import { arquivoConfigMaquina, carregarConfigLocal } from "./config-local.mjs";
@@ -7,6 +8,7 @@ import {
   escolherPortaLivre,
   mensagemPortaForaDaFaixa,
   mensagemPortaOcupada,
+  portaOcupadaLoopback,
   portaValida,
   PORTA_PADRAO,
 } from "./portas.mjs";
@@ -36,6 +38,39 @@ test("cenário C: 18181 e 18182 ocupadas usa a próxima", async () => {
     ocupada: async (p) => p === 18181 || p === 18182,
   });
   assert.equal(r.porta, 18183);
+});
+
+test("18181 realmente ocupada escolhe a próxima porta livre", async () => {
+  const dummy = http.createServer();
+  try {
+    await new Promise((resolve, reject) => {
+      dummy.once("error", reject);
+      dummy.listen(18181, "127.0.0.1", resolve);
+    });
+  } catch (erro) {
+    await new Promise((resolve) => dummy.close(resolve));
+    if (erro && erro.code === "EADDRINUSE") {
+      const r = await escolherPortaLivre({
+        preferred: 18181,
+        ocupada: portaOcupadaLoopback,
+      });
+      assert.notEqual(r.porta, 18181);
+      assert.ok(r.porta >= 18182 && r.porta <= 18190);
+      return;
+    }
+    throw erro;
+  }
+  try {
+    const r = await escolherPortaLivre({
+      preferred: 18181,
+      ocupada: portaOcupadaLoopback,
+    });
+    assert.notEqual(r.porta, 18181);
+    assert.ok(r.porta >= 18182 && r.porta <= 18190);
+    assert.ok(r.conflitos.includes(18181));
+  } finally {
+    await new Promise((resolve) => dummy.close(resolve));
+  }
 });
 
 test("cenário D: porta escolhida 18185 livre usa 18185", async () => {

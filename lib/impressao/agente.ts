@@ -4,48 +4,13 @@ import {
 } from "./tipos";
 import {
   descobrirUltraPdvConector,
-  invalidarOrigemConector,
+  fetchConector,
   MENSAGEM_CONECTOR_AUSENTE,
 } from "./descobrir";
 import { normalizarErroImpressaoConector } from "./mensagens";
 
 const TIMEOUT_MS = 2500;
 const TIMEOUT_PRINT_MS = 20000;
-
-async function fetchAgente(
-  path: string,
-  init?: RequestInit,
-  timeoutMs = TIMEOUT_MS
-) {
-  const descoberto = await descobrirUltraPdvConector();
-  if (!descoberto.ok) {
-    throw new Error(descoberto.erro);
-  }
-
-  const executar = async (origem: string) => {
-    const controlador = new AbortController();
-    const timer = window.setTimeout(() => controlador.abort(), timeoutMs);
-    try {
-      return await fetch(`${origem}${path}`, {
-        ...init,
-        signal: controlador.signal,
-      });
-    } finally {
-      window.clearTimeout(timer);
-    }
-  };
-
-  try {
-    return await executar(descoberto.origem);
-  } catch {
-    invalidarOrigemConector();
-    const novo = await descobrirUltraPdvConector();
-    if (!novo.ok) {
-      throw new Error(novo.erro);
-    }
-    return executar(novo.origem);
-  }
-}
 
 export async function consultarSaudeAgente(): Promise<StatusAgenteImpressao> {
   try {
@@ -61,7 +26,7 @@ export async function consultarSaudeAgente(): Promise<StatusAgenteImpressao> {
 
 export async function listarImpressorasAgente(): Promise<ImpressoraWindows[]> {
   try {
-    const resposta = await fetchAgente("/printers");
+    const resposta = await fetchConector("/printers", undefined, TIMEOUT_MS);
     if (!resposta.ok) {
       return [];
     }
@@ -106,7 +71,7 @@ export async function enviarImpressaoAgente(input: {
   }
 
   try {
-    const resposta = await fetchAgente(
+    const resposta = await fetchConector(
       "/print",
       {
         method: "POST",

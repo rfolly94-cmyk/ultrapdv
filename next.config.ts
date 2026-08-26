@@ -6,6 +6,19 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "10mb",
     },
   },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Permissions-Policy",
+            value: "local-network-access=(self), loopback-network=(self)",
+          },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       {

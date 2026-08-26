@@ -26,7 +26,7 @@ import {
 import { criarServidor } from "./server.mjs";
 import { obterOuCriarDispositivoId } from "./identidade.mjs";
 import { ehConectorUltraPdv } from "./instancia.mjs";
-import { carregarOrigens } from "./origens.mjs";
+import { carregarOrigens, origemPermitidaCors } from "./origens.mjs";
 import { carregarVersao, NOME_CONECTOR } from "./versao.mjs";
 
 const raiz = path.dirname(fileURLToPath(import.meta.url));
@@ -262,7 +262,13 @@ test("POST /print recusa comando, impressora inexistente e PDF inválido", async
         pdfBase64: pdfValido.toString("base64"),
       });
       assert.equal(inexistente.body.ok, false);
-      assert.equal(inexistente.body.erro, MENSAGEM_IMPRESSORA_INDISPONIVEL);
+      assert.equal(inexistente.body.erro, MENSAGEM_IMPRESSORA_AUSENTE);
+
+      const semImpressora = await postJson(`${base}/print`, {
+        pdfBase64: pdfValido.toString("base64"),
+      });
+      assert.equal(semImpressora.body.ok, false);
+      assert.equal(semImpressora.body.erro, MENSAGEM_IMPRESSORA_INDISPONIVEL);
 
       const invalido = await postJson(`${base}/print`, {
         impressora: "ELGIN i9",
@@ -471,6 +477,21 @@ test("origens de produção incluem ultrapdv.app sem wildcard", async () => {
   assert.doesNotMatch(fonteOrigens, /Access-Control-Allow-Origin:\s*\*/);
 });
 
+test("CORS autoriza produção, loopback/LAN e recusa origem pública estranha", () => {
+  const origens = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://ultrapdv.app",
+    "https://www.ultrapdv.app",
+  ];
+  assert.equal(origemPermitidaCors("https://ultrapdv.app", origens), true);
+  assert.equal(origemPermitidaCors("http://127.0.0.1:18185", origens), true);
+  assert.equal(origemPermitidaCors("http://192.168.1.20:3000", origens), true);
+  assert.equal(origemPermitidaCors("http://10.0.0.8", origens), true);
+  assert.equal(origemPermitidaCors("https://evil.example", origens), false);
+  assert.equal(origemPermitidaCors("", origens), true);
+});
+
 test("CORS aceita https://ultrapdv.app e recusa origem estranha", async () => {
   await comServidor(
     {
@@ -489,7 +510,7 @@ test("CORS aceita https://ultrapdv.app e recusa origem estranha", async () => {
       assert.equal(ok.headers["access-control-allow-origin"], "https://ultrapdv.app");
       assert.equal(ok.headers["access-control-allow-private-network"], "true");
 
-      const preflight = await optionsReq(`${base}/status`, {
+      const preflight = await optionsReq(`${base}/health`, {
         Origin: "https://ultrapdv.app",
         "Access-Control-Request-Method": "GET",
         "Access-Control-Request-Private-Network": "true",
@@ -503,6 +524,36 @@ test("CORS aceita https://ultrapdv.app e recusa origem estranha", async () => {
         preflight.headers["access-control-allow-private-network"],
         "true"
       );
+      assert.match(
+        String(preflight.headers["access-control-allow-methods"]),
+        /GET/
+      );
+      assert.match(
+        String(preflight.headers["access-control-allow-headers"]),
+        /Content-Type/i
+      );
+
+      const preflightPrint = await optionsReq(`${base}/print`, {
+        Origin: "https://ultrapdv.app",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+        "Access-Control-Request-Private-Network": "true",
+      });
+      assert.equal(preflightPrint.status, 204);
+      assert.equal(
+        preflightPrint.headers["access-control-allow-private-network"],
+        "true"
+      );
+
+      const lan = await getJson(`${base}/health`, {
+        Origin: "http://192.168.1.20:3000",
+      });
+      assert.equal(lan.status, 200);
+      assert.equal(
+        lan.headers["access-control-allow-origin"],
+        "http://192.168.1.20:3000"
+      );
+      assert.equal(lan.headers["access-control-allow-private-network"], "true");
 
       const www = await getJson(`${base}/health`, {
         Origin: "https://www.ultrapdv.app",
@@ -682,6 +733,44 @@ test("cenário C/D: lastPrinter Bematech vence Print to PDF", () => {
     }),
     null
   );
+  assert.equal(
+    escolherImpressora({
+      pedida: "Impressora Fantasma",
+      lastPrinter: bematech,
+      impressoras: listaMista,
+    }),
+    null
+  );
+});
+
+test("POST /print com impressora pedida inexistente não usa lastPrinter", async () => {
+  let impressoraUsada = null;
+  await comServidor(
+    {
+      obterConfigLocal: async () => ({
+        lastPrinter: bematech,
+        lastPaper: "80mm",
+      }),
+      listarImpressoras: async () => listaMista,
+      localizarMotorPdf: async () => ({
+        encontrado: true,
+        tipo: "sumatrapdf",
+        caminho: "C:\\SumatraPDF\\SumatraPDF.exe",
+      }),
+      imprimirPdfComSumatra: async (opts) => {
+        impressoraUsada = opts.impressora;
+      },
+    },
+    async (base) => {
+      const r = await postJson(`${base}/print`, {
+        impressora: "Impressora Fantasma",
+        pdfBase64: pdfValido.toString("base64"),
+      });
+      assert.equal(r.body.ok, false);
+      assert.equal(r.body.erro, MENSAGEM_IMPRESSORA_AUSENTE);
+      assert.equal(impressoraUsada, null);
+    }
+  );
 });
 
 test("cenário E: teste de impressão usa a impressora selecionada", async () => {
@@ -835,9 +924,9 @@ test("log de impressão registra motor, exit code e apaga o temporário", async 
   assert.equal(removidos.length, 1);
 });
 
-test("versão 1.3.2 e faixa de portas 18181–18190 permanecem", () => {
+test("versão 1.3.3 e faixa de portas 18181–18190 permanecem", () => {
   const versao = JSON.parse(fonte("../version.json"));
-  assert.equal(versao.version, "1.3.2");
+  assert.equal(versao.version, "1.3.3");
   assert.match(fonte("portas.mjs"), /PORTA_PADRAO = 18181/);
   assert.match(fonte("portas.mjs"), /PORTA_AUTO_MAX = 18190/);
 });

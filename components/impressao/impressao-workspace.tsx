@@ -243,15 +243,19 @@ export function ImpressaoWorkspace() {
             </p>
             <p className="mt-2 text-sm font-semibold text-amber-950">
               {motivoDescoberta === "bloqueado"
-                ? "UltraPDV Connector bloqueado pelo navegador"
-                : motivoDescoberta === "timeout"
-                  ? "UltraPDV Connector não respondeu a tempo"
-                  : "UltraPDV Conector não encontrado"}
+                ? "O navegador bloqueou o UltraPDV Connector"
+                : motivoDescoberta === "timeout" ||
+                    motivoDescoberta === "sem_porta"
+                  ? "O UltraPDV Connector não respondeu"
+                  : "UltraPDV Connector não encontrado"}
             </p>
             <p className="mt-1 text-[13px] leading-5 text-amber-900">
               {motivoDescoberta === "bloqueado"
-                ? "O Connector está em execução, mas esta página não foi autorizada a acessá-lo. Atualize o UltraPDV Connector para 1.3.2."
-                : "Para utilizar impressão automática neste computador, baixe e instale o Impressão UltraPDV."}
+                ? "Permita o acesso à rede local para este site e clique em Verificar novamente."
+                : motivoDescoberta === "timeout" ||
+                    motivoDescoberta === "sem_porta"
+                  ? "O Connector não respondeu nas portas 18181 a 18190. Verifique se ele está em execução neste computador."
+                  : "Instale o UltraPDV Connector neste computador e aguarde ele iniciar. Não é necessário informar porta."}
             </p>
             <a
               href={ULTRAPDV_CONNECTOR_DOWNLOAD_URL}

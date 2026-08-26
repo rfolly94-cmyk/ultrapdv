@@ -48,17 +48,22 @@ export function ehImpressoraSomenteArquivo(nome) {
 
 export function escolherImpressora({ pedida, lastPrinter, impressoras } = {}) {
   const lista = Array.isArray(impressoras) ? impressoras : [];
-  if (impressoraExiste(lista, pedida)) {
-    return impressoraSegura(pedida);
+  const nomePedido = impressoraSegura(pedida);
+  if (nomePedido) {
+    return impressoraExiste(lista, nomePedido) ? nomePedido : null;
   }
-  if (impressoraExiste(lista, lastPrinter)) {
-    return impressoraSegura(lastPrinter);
-  }
-  const padrao = lista.find((item) => item.padrao)?.nome;
-  if (impressoraExiste(lista, padrao) && !ehImpressoraSomenteArquivo(padrao)) {
-    return impressoraSegura(padrao);
+  const previa = impressoraSegura(lastPrinter);
+  if (previa && impressoraExiste(lista, previa)) {
+    return previa;
   }
   return null;
+}
+
+export function mensagemErroImpressora({ pedida, lastPrinter } = {}) {
+  if (impressoraSegura(pedida) || impressoraSegura(lastPrinter)) {
+    return MENSAGEM_IMPRESSORA_AUSENTE;
+  }
+  return MENSAGEM_IMPRESSORA_INDISPONIVEL;
 }
 
 export function validarPdf(buffer) {

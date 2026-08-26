@@ -19,7 +19,6 @@ export const PRINT_AGENT_PORT = 18181;
 export const PRINT_AGENT_PORTA_MAX_AUTO = 18190;
 export const PRINT_AGENT_APP = "UltraPDV-Conector";
 export const PRINT_AGENT_SERVICO = "ultrapdv-connector";
-export const PRINT_AGENT_ORIGIN = `http://${PRINT_AGENT_HOST}:${PRINT_AGENT_PORT}`;
 
 export const DISPOSITIVO_STORAGE_KEY = "ultrapdv_dispositivo_id";
 
@@ -67,7 +66,7 @@ export type StatusAgenteImpressao = {
     tipo?: string | null;
     caminho?: string | null;
   };
-  motivoDescoberta?: "ausente" | "timeout" | "bloqueado" | "invalido";
+  motivoDescoberta?: "ausente" | "timeout" | "bloqueado" | "invalido" | "sem_porta";
 };
 
 export type ImpressoraWindows = {

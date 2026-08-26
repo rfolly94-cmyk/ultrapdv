@@ -232,7 +232,7 @@ test("frontend encontra qualquer Conector entre 18181 e 18190", () => {
       app: "UltraPDV-Conector",
       servico: "ultrapdv-connector",
       porta: 18181,
-      versao: "1.3.2",
+      versao: "1.3.3",
     }),
     true
   );
@@ -252,7 +252,7 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   const cliente = fonte("lib/impressao/agente.ts");
   const versao = JSON.parse(fonte("print-agent/version.json"));
   assert.equal(versao.name, "UltraPDV Connector");
-  assert.equal(versao.version, "1.3.2");
+  assert.equal(versao.version, "1.3.3");
   assert.match(agente, /127\.0\.0\.1/);
   assert.match(agente, /PORTA_PADRAO/);
   assert.match(portas, /PORTA_PADRAO = 18181/);
@@ -277,10 +277,12 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   assert.match(descobrir, /export async function descobrirUltraPdvConector/);
   assert.match(descobrir, /PRINT_AGENT_APP/);
   assert.match(descobrir, /PRINT_AGENT_SERVICO/);
-  assert.match(descobrir, /CAMINHOS_DESCOBERTA_CONECTOR/);
-  assert.match(descobrir, /\/status/);
+  assert.match(descobrir, /CAMINHO_SAUDE_CONECTOR/);
   assert.match(descobrir, /\/health/);
+  assert.match(descobrir, /targetAddressSpace/);
   assert.match(descobrir, /PRINT_AGENT_PORTA_MAX_AUTO/);
+  assert.doesNotMatch(descobrir, /Promise\.all/);
+  assert.doesNotMatch(descobrir, /\/status/);
   assert.match(agente, /pathname === "\/status"/);
   assert.match(agente, /Access-Control-Allow-Private-Network/);
   assert.match(tipos, /UltraPDV-Conector/);
@@ -289,7 +291,10 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   assert.match(tipos, /PRINT_AGENT_PORTA_MAX_AUTO = 18190/);
   assert.doesNotMatch(descobrir, /19000/);
   assert.match(cliente, /descobrirUltraPdvConector/);
+  assert.match(cliente, /fetchConector/);
   assert.doesNotMatch(cliente, /PRINT_AGENT_ORIGIN/);
+  assert.doesNotMatch(tipos, /PRINT_AGENT_ORIGIN/);
+  assert.match(fonte("next.config.ts"), /local-network-access=\(self\)/);
   const painel = fonte("print-agent/src/pagina-status.html");
   assert.match(painel, /18181–18190/);
   assert.match(painel, /O UltraPDV Conector utiliza portas entre 18181 e 18190/);
@@ -383,7 +388,7 @@ test("Imprimir no PDV, Vendas, Carteira, CC-e e Relatórios passa pelo Conector"
     fonte("components/relatorios/relatorio-acoes.tsx"),
     /BotaoImprimirConector/
   );
-  assert.match(MENSAGEM_CONECTOR_AUSENTE, /UltraPDV Conector não encontrado/);
+  assert.match(MENSAGEM_CONECTOR_AUSENTE, /UltraPDV Connector não encontrado/);
   assert.equal(
     mensagemDocumentoEnviado("\\\\SERVIDOR\\Bematech MP-4200 HS"),
     "Documento enviado para \\\\SERVIDOR\\Bematech MP-4200 HS."

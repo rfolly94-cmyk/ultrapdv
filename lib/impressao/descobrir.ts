@@ -1,4 +1,8 @@
-import { MENSAGEM_CONECTOR_AUSENTE } from "./mensagens";
+import {
+  MENSAGEM_CONECTOR_AUSENTE,
+  MENSAGEM_CONECTOR_BLOQUEADO,
+  MENSAGEM_CONECTOR_SEM_PORTA,
+} from "./mensagens";
 import {
   PRINT_AGENT_APP,
   PRINT_AGENT_HOST,
@@ -11,17 +15,28 @@ import { ehUuid } from "./regras";
 
 export { MENSAGEM_CONECTOR_AUSENTE };
 
-export const CAMINHOS_DESCOBERTA_CONECTOR = ["/status", "/health"] as const;
-const STORAGE_ORIGEM = "ultrapdv_conector_origem";
-const TIMEOUT_DESCOBERTA_MS = 900;
+export const CAMINHO_SAUDE_CONECTOR = "/health";
+const STORAGE_PORTA = "ultrapdv_conector_porta";
+const TIMEOUT_CACHE_MS = 1500;
+const TIMEOUT_PRIMEIRA_PORTA_MS = 2200;
+const TIMEOUT_DEMAIS_PORTAS_MS = 450;
 
 export type MotivoFalhaDescoberta =
   | "ausente"
   | "timeout"
   | "bloqueado"
-  | "invalido";
+  | "invalido"
+  | "sem_porta";
+
+type ResultadoDescoberta =
+  | { ok: true; origem: string; saude: StatusAgenteImpressao }
+  | { ok: false; erro: string; motivo: MotivoFalhaDescoberta };
+
+type PingOk = { ok: true; saude: StatusAgenteImpressao };
+type PingErro = { ok: false; motivo: MotivoFalhaDescoberta };
 
 let origemCache: string | null = null;
+let descobertaEmAndamento: Promise<ResultadoDescoberta> | null = null;
 
 export function portasDescobertaConector() {
   const lista: number[] = [];
@@ -50,10 +65,55 @@ export function ehSaudeConector(data: unknown): data is StatusAgenteImpressao {
 
 export function invalidarOrigemConector() {
   origemCache = null;
+  escreverPortaMemorizada(null);
+}
+
+export function resetarDescobertaConectorParaTestes() {
+  origemCache = null;
+  descobertaEmAndamento = null;
+  escreverPortaMemorizada(null);
+}
+
+function storageDisponivel() {
   try {
-    window.sessionStorage.removeItem(STORAGE_ORIGEM);
+    return typeof window !== "undefined" && Boolean(window.localStorage);
+  } catch {
+    return false;
+  }
+}
+
+function lerPortaMemorizada(): number | null {
+  if (!storageDisponivel()) {
+    return null;
+  }
+  try {
+    const bruto = window.localStorage.getItem(STORAGE_PORTA);
+    const porta = Number(bruto);
+    if (
+      Number.isInteger(porta) &&
+      porta >= PRINT_AGENT_PORT &&
+      porta <= PRINT_AGENT_PORTA_MAX_AUTO
+    ) {
+      return porta;
+    }
   } catch {
     // sem storage
+  }
+  return null;
+}
+
+function escreverPortaMemorizada(porta: number | null) {
+  if (!storageDisponivel()) {
+    return;
+  }
+  try {
+    if (porta == null) {
+      window.localStorage.removeItem(STORAGE_PORTA);
+      return;
+    }
+    window.localStorage.setItem(STORAGE_PORTA, String(porta));
+  } catch {
+    // ignore
   }
 }
 
@@ -86,12 +146,12 @@ function mapearSaude(data: StatusAgenteImpressao): StatusAgenteImpressao {
   };
 }
 
-function motivoDeFalhaHttp(status: number, corpo: unknown): MotivoFalhaDescoberta {
+function motivoDeFalhaHttp(
+  status: number,
+  corpo: unknown
+): MotivoFalhaDescoberta {
   if (status === 403) {
     return "bloqueado";
-  }
-  if (status === 404) {
-    return "invalido";
   }
   if (
     corpo &&
@@ -104,35 +164,53 @@ function motivoDeFalhaHttp(status: number, corpo: unknown): MotivoFalhaDescobert
   return "invalido";
 }
 
-async function pingCaminho(
+type InitFetchConector = RequestInit & {
+  targetAddressSpace?: "loopback" | "local";
+};
+
+export function initFetchConector(init: RequestInit = {}): RequestInit {
+  const base: InitFetchConector = {
+    ...init,
+    mode: "cors",
+    cache: "no-store",
+    credentials: "omit",
+  };
+  for (const space of ["loopback", "local"] as const) {
+    const candidato = { ...base, targetAddressSpace: space };
+    try {
+      void new Request("http://127.0.0.1", candidato);
+      return candidato;
+    } catch {
+      continue;
+    }
+  }
+  return base;
+}
+
+export async function fetchLocalConector(
+  url: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  return fetch(url, initFetchConector(init));
+}
+
+async function pingHealth(
   origem: string,
-  caminho: (typeof CAMINHOS_DESCOBERTA_CONECTOR)[number],
   timeoutMs: number
-): Promise<
-  | { ok: true; saude: StatusAgenteImpressao }
-  | { ok: false; motivo: MotivoFalhaDescoberta; tentarOutroCaminho: boolean }
-> {
+): Promise<PingOk | PingErro> {
   const controlador = new AbortController();
   const timer = window.setTimeout(() => controlador.abort(), timeoutMs);
   try {
-    const resposta = await fetch(`${origem}${caminho}`, {
-      signal: controlador.signal,
-      cache: "no-store",
-    });
+    const resposta = await fetchLocalConector(
+      `${origem}${CAMINHO_SAUDE_CONECTOR}`,
+      { signal: controlador.signal }
+    );
     const data = await resposta.json().catch(() => null);
-    if (resposta.status === 404) {
-      return { ok: false, motivo: "invalido", tentarOutroCaminho: true };
-    }
     if (!resposta.ok) {
-      const motivo = motivoDeFalhaHttp(resposta.status, data);
-      return {
-        ok: false,
-        motivo,
-        tentarOutroCaminho: false,
-      };
+      return { ok: false, motivo: motivoDeFalhaHttp(resposta.status, data) };
     }
     if (!ehSaudeConector(data)) {
-      return { ok: false, motivo: "invalido", tentarOutroCaminho: true };
+      return { ok: false, motivo: "invalido" };
     }
     return { ok: true, saude: mapearSaude(data) };
   } catch (erro) {
@@ -141,113 +219,126 @@ async function pingCaminho(
         ? String((erro as { name?: unknown }).name)
         : "";
     if (nome === "AbortError") {
-      return { ok: false, motivo: "timeout", tentarOutroCaminho: false };
+      return { ok: false, motivo: "timeout" };
     }
-    return { ok: false, motivo: "ausente", tentarOutroCaminho: false };
+    return { ok: false, motivo: "ausente" };
   } finally {
     window.clearTimeout(timer);
   }
 }
 
-async function pingOrigem(
-  origem: string,
-  timeoutMs = TIMEOUT_DESCOBERTA_MS
-): Promise<
-  | { ok: true; saude: StatusAgenteImpressao }
-  | { ok: false; motivo: MotivoFalhaDescoberta }
-> {
-  let ultimo: MotivoFalhaDescoberta = "ausente";
-  let identidade: StatusAgenteImpressao | null = null;
-
-  for (const caminho of CAMINHOS_DESCOBERTA_CONECTOR) {
-    const resultado = await pingCaminho(origem, caminho, timeoutMs);
-    if (resultado.ok) {
-      identidade = resultado.saude;
-      if (identidade.motorImpressao) {
-        return { ok: true, saude: identidade };
-      }
-      continue;
-    }
-    ultimo = resultado.motivo;
-    if (!resultado.tentarOutroCaminho) {
-      if (identidade) {
-        return { ok: true, saude: identidade };
-      }
-      return { ok: false, motivo: resultado.motivo };
-    }
+function memorizar(origem: string, saude: StatusAgenteImpressao) {
+  origemCache = origem;
+  const porta =
+    typeof saude.port === "number"
+      ? saude.port
+      : typeof saude.porta === "number"
+        ? saude.porta
+        : Number(new URL(origem).port);
+  if (Number.isInteger(porta)) {
+    escreverPortaMemorizada(porta);
   }
-
-  if (identidade) {
-    return { ok: true, saude: identidade };
-  }
-  return { ok: false, motivo: ultimo };
 }
 
 function erroPorMotivo(motivo: MotivoFalhaDescoberta) {
-  if (motivo === "timeout") {
-    return "O UltraPDV Connector não respondeu a tempo neste computador.";
+  if (motivo === "timeout" || motivo === "sem_porta") {
+    return MENSAGEM_CONECTOR_SEM_PORTA;
   }
   if (motivo === "bloqueado") {
-    return "O navegador bloqueou o acesso ao UltraPDV Connector (CORS ou rede privada). Atualize o Connector para 1.3.2.";
+    return MENSAGEM_CONECTOR_BLOQUEADO;
   }
   if (motivo === "invalido") {
-    return "Há um serviço em 127.0.0.1, mas a resposta não identificou o UltraPDV Connector.";
+    return "Há um serviço neste computador, mas a resposta não identificou o UltraPDV Connector.";
   }
   return MENSAGEM_CONECTOR_AUSENTE;
 }
 
-export async function descobrirUltraPdvConector(): Promise<
-  | { ok: true; origem: string; saude: StatusAgenteImpressao }
-  | { ok: false; erro: string; motivo: MotivoFalhaDescoberta }
-> {
+async function varrerPortas(
+  portas: number[]
+): Promise<ResultadoDescoberta> {
+  let ultimo: MotivoFalhaDescoberta = "ausente";
+  for (let i = 0; i < portas.length; i += 1) {
+    const porta = portas[i];
+    const origem = origemConectorNaPorta(porta);
+    const timeoutMs =
+      i === 0 ? TIMEOUT_PRIMEIRA_PORTA_MS : TIMEOUT_DEMAIS_PORTAS_MS;
+    const ping = await pingHealth(origem, timeoutMs);
+    if (ping.ok) {
+      memorizar(origem, ping.saude);
+      return { ok: true, origem, saude: ping.saude };
+    }
+    ultimo = ping.motivo;
+  }
+  const motivo = ultimo === "ausente" ? "sem_porta" : ultimo;
+  return { ok: false, erro: erroPorMotivo(motivo), motivo };
+}
+
+async function descobrirInterno(): Promise<ResultadoDescoberta> {
   if (origemCache) {
-    const atual = await pingOrigem(origemCache, 1200);
+    const atual = await pingHealth(origemCache, TIMEOUT_CACHE_MS);
     if (atual.ok) {
+      memorizar(origemCache, atual.saude);
       return { ok: true, origem: origemCache, saude: atual.saude };
     }
     origemCache = null;
+    escreverPortaMemorizada(null);
+  } else {
+    const gravada = lerPortaMemorizada();
+    if (gravada) {
+      const origem = origemConectorNaPorta(gravada);
+      const atual = await pingHealth(origem, TIMEOUT_CACHE_MS);
+      if (atual.ok) {
+        memorizar(origem, atual.saude);
+        return { ok: true, origem, saude: atual.saude };
+      }
+      escreverPortaMemorizada(null);
+    }
+  }
+
+  return varrerPortas(portasDescobertaConector());
+}
+
+export async function descobrirUltraPdvConector(): Promise<ResultadoDescoberta> {
+  if (descobertaEmAndamento) {
+    return descobertaEmAndamento;
+  }
+  descobertaEmAndamento = descobrirInterno().finally(() => {
+    descobertaEmAndamento = null;
+  });
+  return descobertaEmAndamento;
+}
+
+export async function fetchConector(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = 2500
+): Promise<Response> {
+  const executar = async (origem: string) => {
+    const controlador = new AbortController();
+    const timer = window.setTimeout(() => controlador.abort(), timeoutMs);
+    try {
+      return await fetchLocalConector(`${origem}${path}`, {
+        ...init,
+        signal: controlador.signal,
+      });
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+
+  const descoberto = await descobrirUltraPdvConector();
+  if (!descoberto.ok) {
+    throw new Error(descoberto.erro);
   }
 
   try {
-    const gravada = window.sessionStorage.getItem(STORAGE_ORIGEM);
-    if (gravada) {
-      const atual = await pingOrigem(gravada, 1200);
-      if (atual.ok) {
-        origemCache = gravada;
-        return { ok: true, origem: gravada, saude: atual.saude };
-      }
-    }
+    return await executar(descoberto.origem);
   } catch {
-    // sem sessionStorage
-  }
-
-  const encontrados = await Promise.all(
-    portasDescobertaConector().map(async (porta) => {
-      const origem = origemConectorNaPorta(porta);
-      const ping = await pingOrigem(origem);
-      return ping.ok
-        ? { origem, saude: ping.saude, motivo: null }
-        : { origem: null, saude: null, motivo: ping.motivo };
-    })
-  );
-  const hit = encontrados.find((item) => item.origem && item.saude);
-  if (hit && hit.origem && hit.saude) {
-    origemCache = hit.origem;
-    try {
-      window.sessionStorage.setItem(STORAGE_ORIGEM, hit.origem);
-    } catch {
-      // ignore
+    invalidarOrigemConector();
+    const novo = await descobrirUltraPdvConector();
+    if (!novo.ok) {
+      throw new Error(novo.erro);
     }
-    return { ok: true, origem: hit.origem, saude: hit.saude };
+    return executar(novo.origem);
   }
-
-  const motivos = encontrados
-    .map((item) => item.motivo)
-    .filter((motivo): motivo is MotivoFalhaDescoberta => Boolean(motivo));
-  const motivo =
-    motivos.find((item) => item === "bloqueado") ??
-    motivos.find((item) => item === "timeout") ??
-    motivos.find((item) => item === "invalido") ??
-    "ausente";
-  return { ok: false, erro: erroPorMotivo(motivo), motivo };
 }

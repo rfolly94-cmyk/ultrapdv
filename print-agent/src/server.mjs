@@ -14,7 +14,7 @@ import {
   imprimirPdfComSumatra,
   impressoraExiste,
   impressoraSegura,
-  MENSAGEM_IMPRESSORA_INDISPONIVEL,
+  mensagemErroImpressora,
 } from "./imprimir.mjs";
 import { obterOuCriarDispositivoId } from "./identidade.mjs";
 import {
@@ -30,7 +30,7 @@ import {
   avisarInstanciaExistente,
   obterMutexExclusivo,
 } from "./mutex.mjs";
-import { carregarOrigens, ORIGENS_FIXAS } from "./origens.mjs";
+import { carregarOrigens, ORIGENS_FIXAS, origemPermitidaCors } from "./origens.mjs";
 import {
   candidatosPorta,
   escolherPortaLivre,
@@ -55,7 +55,7 @@ const PAGINA_STATUS = readFileSync(
 );
 
 function aplicarCors(headers, origem, origens) {
-  if (origem && origens.includes(origem)) {
+  if (origem && origemPermitidaCors(origem, origens)) {
     headers["Access-Control-Allow-Origin"] = origem;
     headers["Vary"] = "Origin";
     headers["Access-Control-Allow-Private-Network"] = "true";
@@ -107,7 +107,10 @@ function origemPermitida(req, origens, porta) {
   if (!origem) {
     return { ok: true, origem: "" };
   }
-  if (origens.includes(origem) || origemPainelLocal(origem, porta)) {
+  if (
+    origemPermitidaCors(origem, origens) ||
+    origemPainelLocal(origem, porta)
+  ) {
     return { ok: true, origem };
   }
   return { ok: false, origem };
@@ -223,7 +226,10 @@ export function criarServidor(deps = {}) {
       impressoras,
     });
     if (!impressora) {
-      throw new Error(MENSAGEM_IMPRESSORA_INDISPONIVEL);
+      throw new Error(mensagemErroImpressora({
+        pedida: input.impressora,
+        lastPrinter: cfg.lastPrinter,
+      }));
     }
     const papel = input.papel || cfg.lastPaper || "80mm";
     const pdf = gerarPdfTesteConector({
@@ -271,7 +277,7 @@ export function criarServidor(deps = {}) {
       const headers = aplicarCors(
         {
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Headers": "Content-Type, Cache-Control, Pragma",
           "Access-Control-Max-Age": "600",
         },
         origemCheck.origem,
@@ -541,7 +547,12 @@ export function criarServidor(deps = {}) {
           impressoras,
         });
         if (!impressora) {
-          throw new Error(MENSAGEM_IMPRESSORA_INDISPONIVEL);
+          throw new Error(
+            mensagemErroImpressora({
+              pedida: payload.impressora,
+              lastPrinter: cfg.lastPrinter,
+            })
+          );
         }
         const papel = payload.papel || cfg.lastPaper || "80mm";
         await imprimir({
@@ -683,7 +694,12 @@ async function iniciar() {
           impressoras,
         });
         if (!impressora) {
-          throw new Error(MENSAGEM_IMPRESSORA_INDISPONIVEL);
+          throw new Error(
+            mensagemErroImpressora({
+              pedida: payload.impressora,
+              lastPrinter: cfg.lastPrinter,
+            })
+          );
         }
         const papel = payload.papel || cfg.lastPaper || "80mm";
         const pdf = gerarPdfTesteConector({
