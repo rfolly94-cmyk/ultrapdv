@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ControlesImpressao } from "@/components/impressao/controles-impressao";
 import { ReciboTermico } from "@/components/impressao/recibo-termico";
 import { carregarReciboVendaDaEmpresaAtiva } from "@/lib/impressao/carregar-recibo";
-import { montarReciboVenda } from "@/lib/impressao/recibo-layout";
+import { montarReciboVenda, urlLogoReciboEfetiva } from "@/lib/impressao/recibo-layout";
 import { carregarLayoutReciboDaEmpresaAtiva } from "@/lib/impressao/recibo-layout-servidor";
 import { createClient } from "@/lib/supabase/server";
 
@@ -68,7 +68,7 @@ export default async function ReciboVendaPage({
           <ReciboTermico
             blocos={montado.blocos}
             papel={montado.papel}
-            logoUrl={recibo.empresa.logoUrl}
+            logoUrl={urlLogoReciboEfetiva(layout, recibo.empresa)}
           />
         </div>
       </div>

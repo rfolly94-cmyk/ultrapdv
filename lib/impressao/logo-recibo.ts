@@ -4,19 +4,21 @@ import {
   type TipoLogoEmpresa,
 } from "@/lib/empresa/logo";
 import { logoUrlUtilizavel } from "@/lib/empresa/logo-url";
-import type { AlinhamentoRecibo } from "./recibo-layout";
+import type { AlinhamentoLogoRecibo, TamanhoLogoRecibo, TipoLogoRecibo } from "./logo-recibo-personalizada";
 
 export type LogoReciboResolvida = {
+  origem: "empresa" | "personalizada" | null;
   path: string | null;
   url: string | null;
   bytes: Buffer | null;
-  mime: TipoLogoEmpresa | null;
+  mime: TipoLogoRecibo | TipoLogoEmpresa | null;
 };
 
 export type LogoPdfRecibo = {
   bytes: Buffer;
-  mime: TipoLogoEmpresa;
-  alinhamento?: AlinhamentoRecibo;
+  mime: TipoLogoRecibo | TipoLogoEmpresa;
+  alinhamento?: AlinhamentoLogoRecibo;
+  tamanho?: TamanhoLogoRecibo;
 };
 
 /** Mesma regra da sidebar/cabeçalho: `empresas.logo_path` da empresa ativa. */
@@ -30,5 +32,5 @@ export function urlLogoReciboEmpresa(
 }
 
 export function logoReciboVazia(): LogoReciboResolvida {
-  return { path: null, url: null, bytes: null, mime: null };
+  return { origem: null, path: null, url: null, bytes: null, mime: null };
 }

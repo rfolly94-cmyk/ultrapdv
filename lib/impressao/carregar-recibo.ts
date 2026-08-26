@@ -6,9 +6,12 @@ import type { createClient } from "@/lib/supabase/server";
 import {
   layoutReciboPadrao,
   montarReciboVenda,
+  sanitizarLayoutRecibo,
+  urlLogoReciboEfetiva,
   type ReciboLayoutConfig,
   type ReciboVendaCompleto,
 } from "./recibo-layout";
+import { urlLogoReciboPersonalizada } from "./logo-recibo-personalizada";
 import { resolverLogoReciboEmpresa } from "./resolver-logo-recibo";
 
 type SupabaseServidor = Awaited<ReturnType<typeof createClient>>;
@@ -71,6 +74,7 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
     formasResult,
     vendedorResult,
     tituloResult,
+    layoutResult,
   ] = await Promise.all([
     supabase
       .from("empresas")
@@ -133,6 +137,11 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
       .then((resultado) =>
         resultado.error ? { data: null } : resultado
       ),
+    supabase
+      .from("recibos_layout_config")
+      .select("empresa_id, layout")
+      .eq("empresa_id", empresaId)
+      .maybeSingle(),
   ]);
 
   const empresa = empresaResult.data;
@@ -190,6 +199,30 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
     logoPath: empresa?.logo_path,
     incorporar: false,
   });
+  const layoutSanitizado = sanitizarLayoutRecibo(layoutResult.data?.layout);
+  const layoutRecibo =
+    layoutResult.data?.empresa_id === empresaId && layoutSanitizado.ok
+      ? layoutSanitizado.valor
+      : layoutReciboPadrao();
+  const logoEmpresaUrl = logo.url;
+  const logoPersonalizadaUrl = urlLogoReciboPersonalizada(
+    empresaId,
+    layoutRecibo.cabecalho.logoPersonalizadaPath
+  );
+  const empresaRecibo = {
+    nomeFantasia:
+      texto(empresa?.nome_fantasia) || texto(empresa?.razao_social) || "Empresa",
+    razaoSocial: texto(empresa?.razao_social),
+    documento: texto(empresa?.cnpj),
+    ie: texto(fiscal?.inscricao_estadual),
+    endereco: montarEndereco(fiscal),
+    telefone: texto(fiscal?.telefone),
+    email: texto(fiscal?.email),
+    whatsapp: texto(catalogoResult.data?.whatsapp_numero),
+    logoUrl: logoEmpresaUrl,
+    logoEmpresaUrl,
+    logoPersonalizadaUrl,
+  };
 
   return {
     vendaId: String(venda.id),
@@ -201,16 +234,8 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
     clienteTelefone: texto(cliente?.telefone),
     vendedorNome: texto(vendedorResult.data?.nome),
     empresa: {
-      nomeFantasia:
-        texto(empresa?.nome_fantasia) || texto(empresa?.razao_social) || "Empresa",
-      razaoSocial: texto(empresa?.razao_social),
-      documento: texto(empresa?.cnpj),
-      ie: texto(fiscal?.inscricao_estadual),
-      endereco: montarEndereco(fiscal),
-      telefone: texto(fiscal?.telefone),
-      email: texto(fiscal?.email),
-      whatsapp: texto(catalogoResult.data?.whatsapp_numero),
-      logoUrl: logo.url,
+      ...empresaRecibo,
+      logoUrl: urlLogoReciboEfetiva(layoutRecibo, empresaRecibo),
     },
     itens: (itensResult.data ?? [])
       .filter((item) => item.empresa_id === empresaId)

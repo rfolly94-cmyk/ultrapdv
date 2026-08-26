@@ -98,6 +98,7 @@ export function gerarPdfSimples(input: {
         larguraPagina: pagina.largura,
         margem,
         alinhamento: input.logo?.alinhamento,
+        tamanho: input.logo?.tamanho,
       })
     : null;
   const logoH = caixa ? caixa.h + 8 : 0;

@@ -2,7 +2,12 @@ import { deflateSync, inflateSync } from "node:zlib";
 
 import { detectarTipoLogo, type TipoLogoEmpresa } from "@/lib/empresa/logo";
 import type { PapelImpressao } from "./tipos";
-import type { AlinhamentoRecibo } from "./recibo-layout";
+import {
+  detectarTipoLogoRecibo,
+  type AlinhamentoLogoRecibo,
+  type TamanhoLogoRecibo,
+  type TipoLogoRecibo,
+} from "./logo-recibo-personalizada";
 
 const LARGURA_MAX_LOGO = 1024;
 const ALTURA_MAX_LOGO = 1024;
@@ -136,6 +141,9 @@ export function decodificarPngParaRgb(png: Buffer) {
         height = data.readUInt32BE(4);
         bitDepth = data[8];
         colorType = data[9];
+        if (data[10] !== 0 || data[11] !== 0) {
+          return null;
+        }
         interlace = data[12];
       } else if (tipo === "PLTE") {
         palette = data;
@@ -243,8 +251,25 @@ function objetoImagemPdf(input: {
   return Buffer.concat([cabecalho, input.stream, rodape]);
 }
 
-export function prepararImagemPdf(bytes: Buffer, mime?: TipoLogoEmpresa | null) {
-  const tipo = mime ?? detectarTipoLogo(bytes);
+function tipoLogoParaPdf(
+  bytes: Buffer,
+  mime?: TipoLogoEmpresa | TipoLogoRecibo | null
+) {
+  const magico = detectarTipoLogoRecibo(bytes) ?? detectarTipoLogo(bytes);
+  if (magico === "image/png" || magico === "image/jpeg") {
+    return magico;
+  }
+  if (mime === "image/png" || mime === "image/jpeg") {
+    return mime;
+  }
+  return null;
+}
+
+export function prepararImagemPdf(
+  bytes: Buffer,
+  mime?: TipoLogoEmpresa | TipoLogoRecibo | null
+) {
+  const tipo = tipoLogoParaPdf(bytes, mime);
   if (!tipo) {
     return null;
   }
@@ -295,12 +320,36 @@ export function caixaLogoTermica(input: {
   alturaPx: number;
   larguraPagina: number;
   margem: number;
-  alinhamento?: AlinhamentoRecibo;
+  alinhamento?: AlinhamentoLogoRecibo;
+  tamanho?: TamanhoLogoRecibo;
 }) {
   const area = input.larguraPagina - input.margem * 2;
+  const tamanho = input.tamanho === "pequena" || input.tamanho === "grande"
+    ? input.tamanho
+    : "media";
+  const fatorW = tamanho === "pequena" ? 0.45 : tamanho === "grande" ? 0.9 : 0.7;
+  const maxH =
+    input.papel === "58mm"
+      ? tamanho === "pequena"
+        ? 24
+        : tamanho === "grande"
+          ? 48
+          : 36
+      : input.papel === "80mm"
+        ? tamanho === "pequena"
+          ? 32
+          : tamanho === "grande"
+            ? 64
+            : 48
+        : tamanho === "pequena"
+          ? 48
+          : tamanho === "grande"
+            ? 96
+            : 64;
   const maxW =
-    input.papel === "a4" ? Math.min(160, area) : Math.max(24, area * 0.7);
-  const maxH = input.papel === "58mm" ? 36 : input.papel === "80mm" ? 48 : 64;
+    input.papel === "a4"
+      ? Math.min(tamanho === "grande" ? 220 : tamanho === "pequena" ? 110 : 160, area)
+      : Math.max(24, area * fatorW);
   const escala = Math.min(
     maxW / Math.max(input.larguraPx, 1),
     maxH / Math.max(input.alturaPx, 1),
@@ -311,6 +360,8 @@ export function caixaLogoTermica(input: {
   const x =
     input.alinhamento === "esquerda"
       ? input.margem
-      : (input.larguraPagina - w) / 2;
+      : input.alinhamento === "direita"
+        ? input.larguraPagina - input.margem - w
+        : (input.larguraPagina - w) / 2;
   return { w, h, x };
 }

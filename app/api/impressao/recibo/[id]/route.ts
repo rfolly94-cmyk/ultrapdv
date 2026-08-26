@@ -69,8 +69,7 @@ export async function GET(request: Request, context: RouteContext) {
     empresaId: vinculo.empresa_id,
     linhas: montado.linhasPdf,
     papel,
-    mostrarLogo: montado.layout.cabecalho.logo,
-    alinhamentoLogo: montado.layout.cabecalho.alinhamento,
+    layout: montado.layout,
   });
 
   return aplicarCors(

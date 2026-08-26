@@ -1,4 +1,12 @@
 import { logoUrlUtilizavel } from "@/lib/empresa/logo-url";
+import {
+  alinhamentoLogoRecibo,
+  fonteLogoRecibo,
+  tamanhoLogoRecibo,
+  type AlinhamentoLogoRecibo,
+  type FonteLogoRecibo,
+  type TamanhoLogoRecibo,
+} from "./logo-recibo-personalizada";
 
 export const RECIBO_LAYOUT_VERSAO = 1;
 export const TEXTO_LIVRE_RECIBO_MAX = 800;
@@ -26,6 +34,10 @@ export type ReciboLayoutConfig = {
   papel: PapelRecibo;
   cabecalho: {
     logo: boolean;
+    logoFonte: FonteLogoRecibo;
+    logoTamanho: TamanhoLogoRecibo;
+    logoAlinhamento: AlinhamentoLogoRecibo;
+    logoPersonalizadaPath: string | null;
     nomeFantasia: boolean;
     razaoSocial: boolean;
     documento: boolean;
@@ -140,6 +152,8 @@ export type ReciboVendaCompleto = {
     email: string;
     whatsapp: string;
     logoUrl: string | null;
+    logoEmpresaUrl?: string | null;
+    logoPersonalizadaUrl?: string | null;
   };
   itens: ReciboItemDados[];
   pagamentos: ReciboPagamentoDados[];
@@ -152,7 +166,11 @@ export type ReciboVendaCompleto = {
 };
 
 export type BlocoRecibo =
-  | { tipo: "logo"; alinhamento: AlinhamentoRecibo }
+  | {
+      tipo: "logo";
+      alinhamento: AlinhamentoLogoRecibo;
+      tamanho: TamanhoLogoRecibo;
+    }
   | { tipo: "qr"; url: string }
   | { tipo: "sep" }
   | {
@@ -197,6 +215,36 @@ export function urlHttpValida(valor: unknown) {
   }
 }
 
+function pathLogoReciboSanitizado(valor: unknown) {
+  const arquivo = String(valor ?? "").trim();
+  if (!arquivo || arquivo.startsWith("http://") || arquivo.startsWith("https://")) {
+    return null;
+  }
+  if (arquivo.includes("..") || arquivo.includes("\\")) {
+    return null;
+  }
+  return /^[0-9a-f-]{36}\/logo-[a-zA-Z0-9-]+\.(png|jpg|jpeg|webp)$/i.test(arquivo)
+    ? arquivo
+    : null;
+}
+
+export function urlLogoReciboEfetiva(
+  layout: ReciboLayoutConfig,
+  empresa: ReciboVendaCompleto["empresa"]
+) {
+  if (!layout.cabecalho.logo) {
+    return null;
+  }
+  if (layout.cabecalho.logoFonte === "personalizada") {
+    const personalizada = String(empresa.logoPersonalizadaUrl ?? "").trim();
+    if (personalizada.startsWith("blob:")) {
+      return personalizada;
+    }
+    return logoUrlUtilizavel(personalizada);
+  }
+  return logoUrlUtilizavel(empresa.logoEmpresaUrl ?? empresa.logoUrl);
+}
+
 export function textoPuroRecibo(valor: unknown, max: number) {
   return String(valor ?? "")
     .replace(/<[^>]*>/g, "")
@@ -211,6 +259,10 @@ export function layoutReciboPadrao(): ReciboLayoutConfig {
     papel: "80mm",
     cabecalho: {
       logo: true,
+      logoFonte: "empresa",
+      logoTamanho: "media",
+      logoAlinhamento: "centro",
+      logoPersonalizadaPath: null,
       nomeFantasia: true,
       razaoSocial: false,
       documento: true,
@@ -401,6 +453,12 @@ export function sanitizarLayoutRecibo(
       papel: papelRecibo(raiz.papel),
       cabecalho: {
         logo: bool(cabecalho.logo, padrao.cabecalho.logo),
+        logoFonte: fonteLogoRecibo(cabecalho.logoFonte),
+        logoTamanho: tamanhoLogoRecibo(cabecalho.logoTamanho),
+        logoAlinhamento: alinhamentoLogoRecibo(cabecalho.logoAlinhamento),
+        logoPersonalizadaPath: pathLogoReciboSanitizado(
+          cabecalho.logoPersonalizadaPath
+        ),
         nomeFantasia: bool(cabecalho.nomeFantasia, padrao.cabecalho.nomeFantasia),
         razaoSocial: bool(cabecalho.razaoSocial, padrao.cabecalho.razaoSocial),
         documento: bool(cabecalho.documento, padrao.cabecalho.documento),
@@ -625,8 +683,12 @@ export function montarReciboVenda(
     );
   }
 
-  if (layout.cabecalho.logo && logoUrlUtilizavel(empresa.logoUrl)) {
-    blocos.push({ tipo: "logo", alinhamento: alinhamentoCab });
+  if (layout.cabecalho.logo && urlLogoReciboEfetiva(layout, empresa)) {
+    blocos.push({
+      tipo: "logo",
+      alinhamento: layout.cabecalho.logoAlinhamento,
+      tamanho: layout.cabecalho.logoTamanho,
+    });
   }
 
   if (layout.cabecalho.nomeFantasia && empresa.nomeFantasia) {
@@ -996,6 +1058,8 @@ export function reciboVendaExemplo(empresa?: ReciboVendaCompleto["empresa"]): Re
       email: "contato@loja.com",
       whatsapp: "(65) 99999-1111",
       logoUrl: null,
+      logoEmpresaUrl: null,
+      logoPersonalizadaUrl: null,
     },
     itens: [
       {

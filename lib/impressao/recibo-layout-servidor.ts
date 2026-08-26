@@ -9,6 +9,7 @@ import {
   sanitizarLayoutRecibo,
   type ReciboLayoutConfig,
 } from "./recibo-layout";
+import { pathLogoReciboPersonalizada, urlLogoReciboPersonalizada } from "./logo-recibo-personalizada";
 import { resolverLogoReciboEmpresa } from "./resolver-logo-recibo";
 
 export async function carregarLayoutReciboDaEmpresaAtiva(args: {
@@ -26,7 +27,19 @@ export async function carregarLayoutReciboDaEmpresaAtiva(args: {
   }
 
   const sanitizado = sanitizarLayoutRecibo(data.layout);
-  return sanitizado.ok ? sanitizado.valor : layoutReciboPadrao();
+  if (!sanitizado.ok) {
+    return layoutReciboPadrao();
+  }
+  return {
+    ...sanitizado.valor,
+    cabecalho: {
+      ...sanitizado.valor.cabecalho,
+      logoPersonalizadaPath: pathLogoReciboPersonalizada(
+        args.empresaId,
+        sanitizado.valor.cabecalho.logoPersonalizadaPath
+      ),
+    },
+  };
 }
 
 export async function salvarLayoutReciboDaEmpresaAtiva(input: {
@@ -68,12 +81,23 @@ export async function salvarLayoutReciboDaEmpresaAtiva(input: {
     return { ok: false, erro: "Empresa ativa não encontrada.", status: 403 };
   }
 
+  const layout = {
+    ...sanitizado.valor,
+    cabecalho: {
+      ...sanitizado.valor.cabecalho,
+      logoPersonalizadaPath: pathLogoReciboPersonalizada(
+        vinculo.empresa_id,
+        sanitizado.valor.cabecalho.logoPersonalizadaPath
+      ),
+    },
+  };
+
   const { error: upsertErro } = await supabase
     .from("recibos_layout_config")
     .upsert(
       {
         empresa_id: vinculo.empresa_id,
-        layout: sanitizado.valor,
+        layout,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "empresa_id" }
@@ -83,7 +107,7 @@ export async function salvarLayoutReciboDaEmpresaAtiva(input: {
     return { ok: false, erro: upsertErro.message, status: 500 };
   }
 
-  return { ok: true, layout: sanitizado.valor };
+  return { ok: true, layout };
 }
 
 export async function carregarIdentidadeReciboEmpresaAtiva(empresaId: string) {
@@ -114,6 +138,7 @@ export async function carregarIdentidadeReciboEmpresaAtiva(empresaId: string) {
 
   const rua = [fiscal?.logradouro, fiscal?.numero].filter(Boolean).join(", ");
   const cidade = [fiscal?.municipio, fiscal?.uf].filter(Boolean).join("/");
+  const layout = await carregarLayoutReciboDaEmpresaAtiva({ empresaId });
   const logo = await resolverLogoReciboEmpresa({
     supabase,
     empresaId,
@@ -131,5 +156,10 @@ export async function carregarIdentidadeReciboEmpresaAtiva(empresaId: string) {
     email: String(fiscal?.email ?? ""),
     whatsapp: String(catalogo?.whatsapp_numero ?? ""),
     logoUrl: logo.url,
+    logoEmpresaUrl: logo.url,
+    logoPersonalizadaUrl: urlLogoReciboPersonalizada(
+      empresaId,
+      layout.cabecalho.logoPersonalizadaPath
+    ),
   };
 }

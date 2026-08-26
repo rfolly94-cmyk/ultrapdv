@@ -28,12 +28,21 @@ test("empresa A não acessa configuração da empresa B", () => {
   assert.match(servidor, /\.eq\("empresa_id", args\.empresaId\)/);
   assert.match(servidor, /vinculo\.empresa_id !== sessao\.empresaId/);
   assert.doesNotMatch(servidor, /createAdminClient|SERVICE_ROLE/);
+  const storage = fonte(
+    "supabase/migrations/20260826160000_recibos_logos_storage.sql"
+  );
+  assert.match(storage, /recibos-logos/);
+  assert.match(storage, /tem_acesso_empresa/);
   assert.notEqual(empresaA, empresaB);
 });
 
 test("salvar/carregar e defaults", () => {
   const padrao = layoutReciboPadrao();
   assert.equal(padrao.venda.numero, true);
+  assert.equal(padrao.cabecalho.logoFonte, "empresa");
+  assert.equal(padrao.cabecalho.logoTamanho, "media");
+  assert.equal(padrao.cabecalho.logoAlinhamento, "centro");
+  assert.equal(padrao.cabecalho.logoPersonalizadaPath, null);
   assert.equal(padrao.venda.data, true);
   assert.equal(padrao.totais.totalFinal, true);
   assert.equal(padrao.carteira.valorFiado, true);
@@ -203,6 +212,8 @@ test("impressão de teste usa a impressora selecionada do recibo", () => {
   assert.match(workspace, /imprimirPdfNaConfiguracao/);
   assert.match(workspace, /gerarPdfTesteReciboVendaAction/);
   assert.match(workspace, /Imprimir teste/);
+  assert.match(workspace, /Mostrar logo/);
+  assert.match(workspace, /Tamanho da logo/);
 });
 
 test("PDV, Vendas e API compartilham o mesmo motor", () => {
@@ -237,5 +248,13 @@ test("PDV, Vendas e API compartilham o mesmo motor", () => {
   assert.match(
     fonte("lib/impressao/recibo-layout-servidor.ts"),
     /resolverLogoReciboEmpresa/
+  );
+  assert.match(
+    fonte("lib/impressao/gerar-pdf-recibo.ts"),
+    /logoResolvidaParaPdf/
+  );
+  assert.doesNotMatch(
+    fonte("lib/impressao/gerar-pdf-recibo.ts"),
+    /createAdminClient|SERVICE_ROLE/
   );
 });

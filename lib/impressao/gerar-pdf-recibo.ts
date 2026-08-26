@@ -1,7 +1,8 @@
 import { gerarPdfSimples } from "./pdf-simples";
-import type { LogoPdfRecibo } from "./logo-recibo";
-import { resolverLogoReciboEmpresa } from "./resolver-logo-recibo";
-import type { AlinhamentoRecibo } from "./recibo-layout";
+import { registrarFalhaLogoRecibo } from "./bytes-logo-recibo";
+import { logoResolvidaParaPdf } from "./incorporar-logo-pdf";
+import { resolverLogoRecibo } from "./resolver-logo-recibo";
+import type { ReciboLayoutConfig } from "./recibo-layout";
 import type { PapelImpressao } from "./tipos";
 import type { createClient } from "@/lib/supabase/server";
 
@@ -12,24 +13,23 @@ export async function gerarPdfReciboEmpresa(args: {
   empresaId: string;
   linhas: string[];
   papel: PapelImpressao;
-  mostrarLogo: boolean;
-  alinhamentoLogo?: AlinhamentoRecibo;
+  layout: ReciboLayoutConfig;
 }): Promise<Uint8Array> {
-  let logo: LogoPdfRecibo | null = null;
+  const resolvida = await resolverLogoRecibo({
+    supabase: args.supabase,
+    empresaId: args.empresaId,
+    layout: args.layout,
+    incorporar: true,
+  });
+  const logo = await logoResolvidaParaPdf(resolvida, {
+    alinhamento: args.layout.cabecalho.logoAlinhamento,
+    tamanho: args.layout.cabecalho.logoTamanho,
+  });
 
-  if (args.mostrarLogo) {
-    const resolvida = await resolverLogoReciboEmpresa({
-      supabase: args.supabase,
-      empresaId: args.empresaId,
-      incorporar: true,
-    });
-    if (resolvida.bytes && resolvida.mime) {
-      logo = {
-        bytes: resolvida.bytes,
-        mime: resolvida.mime,
-        alinhamento: args.alinhamentoLogo,
-      };
-    }
+  if (args.layout.cabecalho.logo && resolvida.path && !logo) {
+    registrarFalhaLogoRecibo(
+      "arquivo ausente, tipo invalido ou decode falhou"
+    );
   }
 
   return gerarPdfSimples({

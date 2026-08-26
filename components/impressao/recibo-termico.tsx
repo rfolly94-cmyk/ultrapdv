@@ -4,18 +4,44 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
 import { logoUrlUtilizavel } from "@/lib/empresa/logo-url";
-import type { AlinhamentoRecibo, BlocoRecibo, PapelRecibo } from "@/lib/impressao/recibo-layout";
+import type {
+  AlinhamentoLogoRecibo,
+  TamanhoLogoRecibo,
+} from "@/lib/impressao/logo-recibo-personalizada";
+import type { BlocoRecibo, PapelRecibo } from "@/lib/impressao/recibo-layout";
+
+function urlImagemRecibo(src?: string | null) {
+  const http = logoUrlUtilizavel(src);
+  if (http) {
+    return http;
+  }
+  const valor = String(src ?? "").trim();
+  return valor.startsWith("blob:") ? valor : null;
+}
+
+function classesLogo(papel: PapelRecibo, tamanho: TamanhoLogoRecibo) {
+  const compacto = papel === "58mm";
+  if (tamanho === "pequena") {
+    return compacto ? "max-h-8 max-w-[45%]" : "max-h-10 max-w-[45%]";
+  }
+  if (tamanho === "grande") {
+    return compacto ? "max-h-16 max-w-[90%]" : "max-h-20 max-w-[90%]";
+  }
+  return compacto ? "max-h-10 max-w-[70%]" : "max-h-14 max-w-[70%]";
+}
 
 function LogoReciboTermico({
   src,
   alinhamento,
+  tamanho,
   papel,
 }: {
   src?: string | null;
-  alinhamento: AlinhamentoRecibo;
+  alinhamento: AlinhamentoLogoRecibo;
+  tamanho: TamanhoLogoRecibo;
   papel: PapelRecibo;
 }) {
-  const url = logoUrlUtilizavel(src);
+  const url = urlImagemRecibo(src);
   const [falhou, setFalhou] = useState(false);
 
   useEffect(() => {
@@ -26,18 +52,21 @@ function LogoReciboTermico({
     return null;
   }
 
+  const justify =
+    alinhamento === "esquerda"
+      ? "justify-start"
+      : alinhamento === "direita"
+        ? "justify-end"
+        : "justify-center";
+
   return (
-    <div
-      className={`mb-2 flex ${alinhamento === "esquerda" ? "justify-start" : "justify-center"}`}
-    >
+    <div className={`mb-2 flex ${justify}`}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         key={url}
         src={url}
         alt=""
-        className={`w-auto object-contain ${
-          papel === "58mm" ? "max-h-10 max-w-[70%]" : "max-h-14 max-w-[70%]"
-        }`}
+        className={`w-auto object-contain ${classesLogo(papel, tamanho)}`}
         onError={() => setFalhou(true)}
       />
     </div>
@@ -103,6 +132,7 @@ export function ReciboTermico({
                 key={indice}
                 src={logoUrl}
                 alinhamento={bloco.alinhamento}
+                tamanho={bloco.tamanho}
                 papel={papel}
               />
             );

@@ -1,21 +1,25 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 
 import {
   gerarPdfTesteReciboVendaAction,
+  removerLogoPersonalizadaReciboAction,
   salvarLayoutReciboAction,
+  salvarLogoPersonalizadaReciboAction,
 } from "@/app/configuracoes/impressao/recibo-actions";
 import { ReciboTermico } from "@/components/impressao/recibo-termico";
 import { PageAlert } from "@/components/ui/page-alert";
 import { buscarConfiguracoesImpressaoAction } from "@/app/configuracoes/impressao/actions";
 import { obterDispositivoId } from "@/lib/impressao/dispositivo";
 import { imprimirPdfNaConfiguracao } from "@/lib/impressao/executar-cliente";
+import { prepararArquivoLogoRecibo } from "@/lib/impressao/logo-recibo-arquivo";
 import {
   TEXTO_LIVRE_RECIBO_MAX,
   layoutReciboPreset,
   montarReciboVenda,
   reciboVendaExemplo,
+  urlLogoReciboEfetiva,
   type ReciboLayoutConfig,
   type ReciboVendaCompleto,
   type PresetRecibo,
@@ -70,8 +74,24 @@ export function ReciboLayoutWorkspace({
   const [pending, start] = useTransition();
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [previewLocal, setPreviewLocal] = useState<string | null>(null);
+  const [logoPersonalizadaUrl, setLogoPersonalizadaUrl] = useState(
+    empresa.logoPersonalizadaUrl ?? null
+  );
+  const arquivoRef = useRef<HTMLInputElement>(null);
 
-  const dados = useMemo(() => reciboVendaExemplo(empresa), [empresa]);
+  const empresaPreview = useMemo(
+    () => ({
+      ...empresa,
+      logoEmpresaUrl: empresa.logoEmpresaUrl ?? empresa.logoUrl,
+      logoPersonalizadaUrl: previewLocal || logoPersonalizadaUrl,
+    }),
+    [empresa, logoPersonalizadaUrl, previewLocal]
+  );
+  const dados = useMemo(
+    () => reciboVendaExemplo(empresaPreview),
+    [empresaPreview]
+  );
   const montado = useMemo(
     () => montarReciboVenda(dados, layout, { papel: layout.papel }),
     [dados, layout]
@@ -88,9 +108,106 @@ export function ReciboLayoutWorkspace({
   }
 
   function aplicarPreset(nome: PresetRecibo) {
-    setLayout(layoutReciboPreset(nome));
+    const proximo = layoutReciboPreset(nome);
+    setLayout({
+      ...proximo,
+      cabecalho: {
+        ...proximo.cabecalho,
+        logoPersonalizadaPath: layout.cabecalho.logoPersonalizadaPath,
+        logoFonte: layout.cabecalho.logoFonte,
+        logoTamanho: layout.cabecalho.logoTamanho,
+        logoAlinhamento: layout.cabecalho.logoAlinhamento,
+      },
+    });
     setMensagem(`Preset ${nome} aplicado. Salve para persistir.`);
     setErro(null);
+  }
+
+  function escolherImagem() {
+    arquivoRef.current?.click();
+  }
+
+  async function aoEscolherArquivo(arquivo: File | undefined) {
+    if (!arquivo) {
+      return;
+    }
+    const local = URL.createObjectURL(arquivo);
+    setPreviewLocal((atual) => {
+      if (atual) {
+        URL.revokeObjectURL(atual);
+      }
+      return local;
+    });
+    patch("cabecalho", {
+      logo: true,
+      logoFonte: "personalizada",
+    });
+    start(async () => {
+      try {
+        const preparado = await prepararArquivoLogoRecibo(arquivo);
+        const form = new FormData();
+        form.set("logo", preparado);
+        const saida = await salvarLogoPersonalizadaReciboAction(form);
+        if (!saida.ok) {
+          setErro(saida.erro);
+          setMensagem(null);
+          return;
+        }
+        setLayout((atual) => ({
+          ...atual,
+          cabecalho: {
+            ...atual.cabecalho,
+            logo: true,
+            logoFonte: "personalizada",
+            logoPersonalizadaPath: saida.layout.cabecalho.logoPersonalizadaPath,
+          },
+        }));
+        setLogoPersonalizadaUrl(saida.logoUrl);
+        setPreviewLocal((atual) => {
+          if (atual) {
+            URL.revokeObjectURL(atual);
+          }
+          return null;
+        });
+        setErro(null);
+        setMensagem("Logo personalizada do recibo atualizada.");
+      } catch (error) {
+        setErro(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível enviar a logo do recibo."
+        );
+        setMensagem(null);
+      }
+    });
+  }
+
+  function removerPersonalizada() {
+    start(async () => {
+      const saida = await removerLogoPersonalizadaReciboAction();
+      if (!saida.ok) {
+        setErro(saida.erro);
+        setMensagem(null);
+        return;
+      }
+      setLayout((atual) => ({
+        ...atual,
+        cabecalho: {
+          ...atual.cabecalho,
+          logoFonte: "empresa",
+          logoPersonalizadaPath: null,
+        },
+      }));
+      setLogoPersonalizadaUrl(null);
+      setPreviewLocal((atual) => {
+        if (atual) {
+          URL.revokeObjectURL(atual);
+        }
+        return null;
+      });
+      setErro(null);
+      setMensagem("Logo personalizada removida. O recibo volta a usar a logo da empresa.");
+    });
   }
 
   function salvar() {
@@ -168,10 +285,120 @@ export function ReciboLayoutWorkspace({
 
         <Grupo titulo="Cabeçalho">
           <SwitchLinha
-            label="Logo da empresa"
+            label="Mostrar logo"
             checked={layout.cabecalho.logo}
             onChange={(logo) => patch("cabecalho", { logo })}
           />
+          {layout.cabecalho.logo ? (
+            <div className="space-y-3 py-3">
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-800">
+                <input
+                  type="radio"
+                  name="logo-fonte-recibo"
+                  className="accent-zinc-950"
+                  checked={layout.cabecalho.logoFonte === "empresa"}
+                  onChange={() => patch("cabecalho", { logoFonte: "empresa" })}
+                />
+                Usar logo da empresa
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-800">
+                <input
+                  type="radio"
+                  name="logo-fonte-recibo"
+                  className="accent-zinc-950"
+                  checked={layout.cabecalho.logoFonte === "personalizada"}
+                  onChange={() =>
+                    patch("cabecalho", { logoFonte: "personalizada" })
+                  }
+                />
+                Usar logo personalizada no recibo
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={arquivoRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp"
+                  className="hidden"
+                  onChange={(event) => {
+                    const arquivo = event.target.files?.[0];
+                    event.target.value = "";
+                    void aoEscolherArquivo(arquivo);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="updv-btn updv-btn-ghost"
+                  disabled={pending}
+                  onClick={escolherImagem}
+                >
+                  Escolher imagem
+                </button>
+                {layout.cabecalho.logoPersonalizadaPath ||
+                logoPersonalizadaUrl ||
+                previewLocal ? (
+                  <button
+                    type="button"
+                    className="updv-btn updv-btn-ghost"
+                    disabled={pending}
+                    onClick={removerPersonalizada}
+                  >
+                    Remover logo personalizada
+                  </button>
+                ) : null}
+              </div>
+              {(previewLocal || logoPersonalizadaUrl) &&
+              layout.cabecalho.logoFonte === "personalizada" ? (
+                <div className="flex justify-center rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewLocal || logoPersonalizadaUrl || ""}
+                    alt="Logo personalizada do recibo"
+                    className="max-h-16 w-auto object-contain"
+                  />
+                </div>
+              ) : null}
+              <label className="flex items-center justify-between gap-3 text-[13px]">
+                Tamanho da logo
+                <select
+                  className="updv-input w-40"
+                  value={layout.cabecalho.logoTamanho}
+                  onChange={(event) =>
+                    patch("cabecalho", {
+                      logoTamanho:
+                        event.target.value === "pequena" ||
+                        event.target.value === "grande"
+                          ? event.target.value
+                          : "media",
+                    })
+                  }
+                >
+                  <option value="pequena">Pequena</option>
+                  <option value="media">Média</option>
+                  <option value="grande">Grande</option>
+                </select>
+              </label>
+              <label className="flex items-center justify-between gap-3 text-[13px]">
+                Alinhamento
+                <select
+                  className="updv-input w-40"
+                  value={layout.cabecalho.logoAlinhamento}
+                  onChange={(event) =>
+                    patch("cabecalho", {
+                      logoAlinhamento:
+                        event.target.value === "esquerda" ||
+                        event.target.value === "direita"
+                          ? event.target.value
+                          : "centro",
+                    })
+                  }
+                >
+                  <option value="esquerda">Esquerda</option>
+                  <option value="centro">Centro</option>
+                  <option value="direita">Direita</option>
+                </select>
+              </label>
+            </div>
+          ) : null}
           <SwitchLinha
             label="Nome fantasia"
             checked={layout.cabecalho.nomeFantasia}
@@ -559,7 +786,7 @@ export function ReciboLayoutWorkspace({
         <ReciboTermico
           blocos={montado.blocos}
           papel={layout.papel}
-          logoUrl={empresa.logoUrl}
+          logoUrl={urlLogoReciboEfetiva(layout, empresaPreview)}
         />
         <p className="text-[12px] text-zinc-500">
           O preview usa dados de exemplo com o cadastro real da empresa. A
