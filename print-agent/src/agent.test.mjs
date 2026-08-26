@@ -456,6 +456,10 @@ test("versão única vem de version.json", () => {
   assert.equal(info.name, NOME_CONECTOR);
   assert.equal(info.version, pkg.version);
   assert.match(fonte("../installer/ultrapdv-connector.nsi"), /generated\\version\.nsh/);
+  assert.match(fonte("../installer/ultrapdv-connector.nsi"), /STAGING_DIR/);
+  assert.match(fonte("../installer/ultrapdv-connector.nsi"), /__FILEDIR__/);
+  assert.match(fonte("../installer/build.ps1"), /Assert-MesmoArquivo/);
+  assert.match(fonte("../installer/build.ps1"), /Push-Location \$installerDir/);
 });
 
 test("origens de produção incluem ultrapdv.app sem wildcard", async () => {

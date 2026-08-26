@@ -49,6 +49,11 @@ import {
   filtrarPagamentosFinanceiros,
 } from "@/lib/vendas/pagamentos-financeiros";
 import { resolverDestinatarioFiscalDaOrigem } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
+import {
+  lerSnapshotTributarioItem,
+  resolverTributacaoItemVenda,
+  vendaTemTributacaoItensCongelada,
+} from "@/lib/fiscal/snapshot-tributario-venda";
 
 export const dynamic =
   "force-dynamic";
@@ -289,7 +294,8 @@ export default async function VendaNfePage({
           pis_cst,
           cofins_cst,
           cst_ibscbs,
-          classificacao_ibscbs
+          classificacao_ibscbs,
+          snapshot_fiscal
         `)
         .eq(
           "empresa_id",
@@ -989,12 +995,24 @@ export default async function VendaNfePage({
             cfop_interno,
             cfop_interestadual,
             icms_cst_csosn,
+            icms_aliquota,
             pis_cst,
+            pis_aliquota,
             cofins_cst,
+            cofins_aliquota,
             ipi_aplicavel,
             ipi_cst,
             ipi_aliquota,
-            ipi_enquadramento
+            ipi_enquadramento,
+            cst_ibscbs,
+            classificacao_ibscbs,
+            aliquota_ibs_uf,
+            aliquota_ibs_municipio,
+            aliquota_cbs,
+            percentual_reducao_ibs_uf,
+            percentual_reducao_ibs_municipio,
+            percentual_reducao_cbs,
+            ibscbs_manual
           `)
           .eq(
             "empresa_id",
@@ -1106,10 +1124,16 @@ export default async function VendaNfePage({
       ? "interestadual"
       : "interna";
 
+  const vendaTributacaoCongelada =
+    vendaTemTributacaoItensCongelada(
+      venda.snapshot_fiscal
+    );
+
   const itensResolvidos =
     itens.map(
       (
-        item
+        item,
+        indice
       ) => {
         const produto =
           produtosMap.get(
@@ -1137,69 +1161,89 @@ export default async function VendaNfePage({
               )
             : undefined;
 
+        const destino = ehTipoDestinoCfop(operacao)
+          ? operacao
+          : "interna";
+
+        const tributacao =
+          resolverTributacaoItemVenda({
+            item,
+            produto,
+            fiscalProduto: produtoFiscal,
+            grupo,
+            vendaTributacaoCongelada,
+            tipoDestino: destino,
+            indiceItem: indice + 1,
+          });
+
+        let cfopResolvido =
+          tributacao.ok
+            ? tributacao.valor.cfop
+            : "";
+        let cfopMensagem =
+          tributacao.ok
+            ? null
+            : tributacao.mensagem;
+
+        if (
+          tributacao.ok &&
+          tributacao.valor.persistirFallback
+        ) {
+          const resolvido = resolverCfopEfetivo({
+            tipoOperacaoInterno: "venda",
+            tipoDestino: destino,
+            grupoFiscal: {
+              nome: grupo?.nome,
+              cfopInterno: grupo?.cfop_interno,
+              cfopInterestadual: grupo?.cfop_interestadual,
+            },
+            naturezaId: naturezaVenda?.id,
+            grupoFiscalId: grupoId,
+            regras: regrasCfop,
+            empresaIdAtiva: empresaId,
+            naturezaPadrao: Boolean(naturezaVenda?.padrao),
+            naturezaDescricao: naturezaVenda?.descricao,
+          });
+
+          cfopResolvido = resolvido.ok ? resolvido.cfop : "";
+          cfopMensagem = resolvido.ok ? null : resolvido.mensagem;
+        }
+
         return {
           ...item,
           grupo_fiscal_resolvido:
             grupoId,
           ncm_resolvido:
-            texto(
-              item.ncm ??
-              produtoFiscal
-                ?.ncm
-            ),
+            tributacao.ok
+              ? tributacao.valor.ncm
+              : texto(
+                  item.ncm ??
+                  produtoFiscal
+                    ?.ncm
+                ),
           origem_resolvida:
-            texto(
-              item
-                .origem_produto ??
-              produtoFiscal
-                ?.origem_produto
-            ),
-          ...(() => {
-            const destino = ehTipoDestinoCfop(operacao)
-              ? operacao
-              : "interna";
-            const resolvido = resolverCfopEfetivo({
-              tipoOperacaoInterno: "venda",
-              tipoDestino: destino,
-              grupoFiscal: {
-                nome: grupo?.nome,
-                cfopInterno: grupo?.cfop_interno,
-                cfopInterestadual: grupo?.cfop_interestadual,
-              },
-              naturezaId: naturezaVenda?.id,
-              grupoFiscalId: grupoId,
-              regras: regrasCfop,
-              empresaIdAtiva: empresaId,
-              naturezaPadrao: Boolean(naturezaVenda?.padrao),
-              naturezaDescricao: naturezaVenda?.descricao,
-            });
-
-            return {
-              cfop_resolvido: resolvido.ok ? resolvido.cfop : "",
-              cfop_mensagem: resolvido.ok ? null : resolvido.mensagem,
-            };
-          })(),
+            tributacao.ok
+              ? tributacao.valor.origemProduto
+              : texto(
+                  item
+                    .origem_produto ??
+                  produtoFiscal
+                    ?.origem_produto
+                ),
+          cfop_resolvido: cfopResolvido,
+          cfop_mensagem: cfopMensagem,
           icms_resolvido:
-            texto(
-              item
-                .icms_cst_csosn ??
-              grupo
-                ?.icms_cst_csosn
-            ),
+            tributacao.ok
+              ? tributacao.valor.icms
+              : "",
           pis_resolvido:
-            texto(
-              item
-                .pis_cst ??
-              grupo
-                ?.pis_cst
-            ),
+            tributacao.ok
+              ? tributacao.valor.pis
+              : "",
           cofins_resolvido:
-            texto(
-              item
-                .cofins_cst ??
-              grupo
-                ?.cofins_cst
-            ),
+            tributacao.ok
+              ? tributacao.valor.cofins
+              : "",
         };
       }
     );
@@ -1349,15 +1393,30 @@ export default async function VendaNfePage({
     fiscal?.perfil_ipi
   );
 
+  const gruposIpi = vendaTributacaoCongelada
+    ? itens.map((item) => {
+        const snap = lerSnapshotTributarioItem(item.snapshot_fiscal);
+        return {
+          nome: null,
+          ...camposIpiDoGrupo({
+            ipi_aplicavel: snap?.ipi_aplicavel,
+            ipi_cst: snap?.ipi_cst,
+            ipi_aliquota: snap?.ipi_aliquota,
+            ipi_enquadramento: snap?.ipi_enquadramento,
+          }),
+        };
+      })
+    : (gruposResult.data ?? []).map(
+        (grupo) => ({
+          nome: null,
+          ...camposIpiDoGrupo(grupo),
+        })
+      );
+
   const pendenciasIpi = pendenciasIpiDocumento({
     modelo: "55",
     perfilIpi,
-    grupos: (gruposResult.data ?? []).map(
-      (grupo) => ({
-        nome: null,
-        ...camposIpiDoGrupo(grupo),
-      })
-    ),
+    grupos: gruposIpi,
   });
 
   checks.push({

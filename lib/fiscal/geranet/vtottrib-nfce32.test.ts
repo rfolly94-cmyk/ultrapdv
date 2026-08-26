@@ -416,7 +416,7 @@ test("16. isolamento multiempresa: CRT/item não carregam empresa_id do cliente"
   assert.equal(b.item.pisCst, "49");
 });
 
-test("17. origem cadastral: NCM do produto, CFOP/CSOSN/PIS/COFINS do grupo; sem fallback 07/20%", () => {
+test("17. origem cadastral: NCM do produto, CFOP/CSOSN/PIS/COFINS do grupo; emissão usa snapshot; sem fallback 07/20%", () => {
   const emitir = fonte("app/api/fiscal/geranet/nfce-emitir-venda/route.ts");
   const item = fonte("lib/fiscal/geranet/montar-item.ts");
   const formProduto = fonte("app/produtos/produto-fiscal-form.tsx");
@@ -429,16 +429,17 @@ test("17. origem cadastral: NCM do produto, CFOP/CSOSN/PIS/COFINS do grupo; sem 
   assert.match(formGrupo, /name="pis_cst"/);
   assert.match(formGrupo, /name="cofins_cst"/);
 
-  assert.match(emitir, /itemVenda\.ncm \?\?/);
-  assert.match(emitir, /fiscalAtual\?\.ncm/);
-  assert.match(emitir, /itemVenda\.cfop \?\?/);
-  assert.match(emitir, /grupo\.cfop_interno/);
-  assert.match(emitir, /itemVenda\.icms_cst_csosn \?\?/);
-  assert.match(emitir, /grupo\.icms_cst_csosn/);
-  assert.match(emitir, /itemVenda\.pis_cst \?\?/);
-  assert.match(emitir, /grupo\.pis_cst/);
-  assert.match(emitir, /itemVenda\.cofins_cst \?\?/);
-  assert.match(emitir, /grupo\.cofins_cst/);
+  assert.match(emitir, /resolverTributacaoItemVenda/);
+  assert.match(emitir, /tributacao\.valor\.ncm/);
+  assert.match(emitir, /tributacao\.valor\.cfop/);
+  assert.match(emitir, /tributacao\.valor\.icms/);
+  assert.match(emitir, /tributacao\.valor\.pis/);
+  assert.match(emitir, /tributacao\.valor\.cofins/);
+  assert.doesNotMatch(emitir, /itemVenda\.ncm \?\?/);
+  assert.doesNotMatch(emitir, /itemVenda\.cfop \?\?/);
+  assert.doesNotMatch(emitir, /itemVenda\.icms_cst_csosn \?\?/);
+  assert.doesNotMatch(emitir, /itemVenda\.pis_cst \?\?/);
+  assert.doesNotMatch(emitir, /itemVenda\.cofins_cst \?\?/);
 
   assert.doesNotMatch(emitir, /\?\? ["']07["']/);
   assert.doesNotMatch(item, /\b20\b.*vTotTrib|vTotTrib.*\b20\b/);

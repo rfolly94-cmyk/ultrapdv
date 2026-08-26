@@ -17,6 +17,10 @@ import {
   filtrarPagamentosFinanceiros,
   filtrarPagamentosHistorico,
 } from "@/lib/vendas/pagamentos-financeiros";
+import {
+  resolverTributacaoItemVenda,
+  vendaTemTributacaoItensCongelada,
+} from "@/lib/fiscal/snapshot-tributario-venda";
 
 export const dynamic =
   "force-dynamic";
@@ -193,6 +197,7 @@ export default async function VendaNfcePage({
         frete,
         valor_total,
         troco,
+        snapshot_fiscal,
         finalizada_at,
         created_at
       `)
@@ -230,7 +235,8 @@ export default async function VendaNfcePage({
         pis_cst,
         cofins_cst,
         cst_ibscbs,
-        classificacao_ibscbs
+        classificacao_ibscbs,
+        snapshot_fiscal
       `)
       .eq(
         "empresa_id",
@@ -621,11 +627,29 @@ export default async function VendaNfcePage({
           )
           .select(`
             id,
+            nome,
             ativo,
             cfop_interno,
+            cfop_interestadual,
             icms_cst_csosn,
+            icms_aliquota,
             pis_cst,
-            cofins_cst
+            pis_aliquota,
+            cofins_cst,
+            cofins_aliquota,
+            cst_ibscbs,
+            classificacao_ibscbs,
+            aliquota_ibs_uf,
+            aliquota_ibs_municipio,
+            aliquota_cbs,
+            percentual_reducao_ibs_uf,
+            percentual_reducao_ibs_municipio,
+            percentual_reducao_cbs,
+            ipi_aplicavel,
+            ipi_cst,
+            ipi_aliquota,
+            ipi_enquadramento,
+            ibscbs_manual
           `)
           .eq(
             "empresa_id",
@@ -663,9 +687,14 @@ export default async function VendaNfcePage({
       )
     );
 
+  const vendaTributacaoCongelada =
+    vendaTemTributacaoItensCongelada(
+      venda.snapshot_fiscal
+    );
+
   const itensResolvidos =
     itens.map(
-      (item) => {
+      (item, indice) => {
         const produto =
           produtosMap.get(
             item.produto_id
@@ -689,54 +718,69 @@ export default async function VendaNfcePage({
               )
             : undefined;
 
+        const tributacao =
+          resolverTributacaoItemVenda({
+            item,
+            produto,
+            fiscalProduto: produtoFiscal,
+            grupo,
+            vendaTributacaoCongelada,
+            tipoDestino: "interna",
+            indiceItem: indice + 1,
+          });
+
+        const snapshotCompleto =
+          tributacao.ok &&
+          !tributacao.valor.persistirFallback;
+
         return {
           ...item,
           grupo_fiscal_resolvido:
-            grupoId,
+            grupoId ??
+            (tributacao.ok
+              ? tributacao.valor.snapshot.grupo_fiscal_id
+              : null),
           grupo_fiscal_ativo:
-            Boolean(
-              grupo?.ativo
-            ),
+            snapshotCompleto
+              ? true
+              : Boolean(
+                  grupo?.ativo
+                ),
+          snapshot_tributario_completo:
+            snapshotCompleto,
           ncm_resolvido:
-            texto(
-              item.ncm ??
-              produtoFiscal
-                ?.ncm
-            ),
+            tributacao.ok
+              ? tributacao.valor.ncm
+              : texto(
+                  item.ncm ??
+                  produtoFiscal
+                    ?.ncm
+                ),
           origem_resolvida:
-            texto(
-              item
-                .origem_produto ??
-              produtoFiscal
-                ?.origem_produto
-            ),
+            tributacao.ok
+              ? tributacao.valor.origemProduto
+              : texto(
+                  item
+                    .origem_produto ??
+                  produtoFiscal
+                    ?.origem_produto
+                ),
           cfop_resolvido:
-            texto(
-              item.cfop ??
-              grupo
-                ?.cfop_interno
-            ),
+            tributacao.ok
+              ? tributacao.valor.cfop
+              : "",
           icms_resolvido:
-            texto(
-              item
-                .icms_cst_csosn ??
-              grupo
-                ?.icms_cst_csosn
-            ),
+            tributacao.ok
+              ? tributacao.valor.icms
+              : "",
           pis_resolvido:
-            texto(
-              item
-                .pis_cst ??
-              grupo
-                ?.pis_cst
-            ),
+            tributacao.ok
+              ? tributacao.valor.pis
+              : "",
           cofins_resolvido:
-            texto(
-              item
-                .cofins_cst ??
-              grupo
-                ?.cofins_cst
-            ),
+            tributacao.ok
+              ? tributacao.valor.cofins
+              : "",
         };
       }
     );
@@ -877,10 +921,13 @@ export default async function VendaNfcePage({
     }
 
     if (
-      !item
-        .grupo_fiscal_resolvido ||
-      !item
-        .grupo_fiscal_ativo
+      !item.snapshot_tributario_completo &&
+      (
+        !item
+          .grupo_fiscal_resolvido ||
+        !item
+          .grupo_fiscal_ativo
+      )
     ) {
       erros.push(
         "grupo fiscal"

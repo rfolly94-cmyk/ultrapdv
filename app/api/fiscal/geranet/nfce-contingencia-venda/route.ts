@@ -25,8 +25,10 @@ import {
   type OperacaoFiscal,
 } from "@/lib/fiscal/geranet/montar-item";
 import {
-  camposIpiDoGrupo,
-} from "@/lib/fiscal/ipi";
+  resolverTributacaoItemVenda,
+  snapshotTributarioItemCompleto,
+  vendaTemTributacaoItensCongelada,
+} from "@/lib/fiscal/snapshot-tributario-venda";
 
 import {
   montarPayloadNfceGeranet,
@@ -468,7 +470,8 @@ export async function POST(
             pis_cst,
             cofins_cst,
             cst_ibscbs,
-            classificacao_ibscbs
+            classificacao_ibscbs,
+            snapshot_fiscal
           `)
           .eq(
             "empresa_id",
@@ -1408,6 +1411,7 @@ export async function POST(
     const snapshots:
       Array<{
         id: string;
+        persistirFallback: boolean;
         dados:
           Record<
             string,
@@ -1437,6 +1441,11 @@ export async function POST(
       );
     }
 
+    const vendaTributacaoCongelada =
+      vendaTemTributacaoItensCongelada(
+        venda.snapshot_fiscal
+      );
+
     for (
       const [
         indice,
@@ -1449,9 +1458,17 @@ export async function POST(
           itemVenda.produto_id
         );
 
+      const snapshotCompleto =
+        snapshotTributarioItemCompleto(
+          itemVenda.snapshot_fiscal
+        );
+
       if (
-        !produto ||
-        !produto.ativo
+        !snapshotCompleto &&
+        (
+          !produto ||
+          !produto.ativo
+        )
       ) {
         return erro(
           `Produto do item ${indice + 1} não encontrado ou inativo.`
@@ -1467,7 +1484,7 @@ export async function POST(
         itemVenda
           .grupo_fiscal_id ??
         produto
-          .grupo_fiscal_id;
+          ?.grupo_fiscal_id;
 
       const grupo =
         grupoId
@@ -1476,105 +1493,31 @@ export async function POST(
             )
           : undefined;
 
-      if (
-        !grupo ||
-        !grupo.ativo
-      ) {
-        return erro(
-          `Grupo Fiscal do item ${indice + 1} não encontrado ou inativo.`
-        );
+      const tributacao =
+        resolverTributacaoItemVenda({
+          item: itemVenda,
+          produto,
+          fiscalProduto,
+          grupo,
+          vendaTributacaoCongelada,
+          tipoDestino: operacao,
+          indiceItem: indice + 1,
+        });
+
+      if (!tributacao.ok) {
+        return erro(tributacao.mensagem);
       }
 
-      const ncm =
-        texto(
-          itemVenda.ncm ??
-          fiscalProduto?.ncm
-        );
-
-      const cest =
-        texto(
-          itemVenda.cest ??
-          fiscalProduto?.cest
-        ) ||
-        null;
-
-      const origemProduto =
-        texto(
-          itemVenda
-            .origem_produto ??
-          fiscalProduto
-            ?.origem_produto
-        );
-
-      const cfop =
-        texto(
-          itemVenda.cfop ??
-          grupo
-            .cfop_interno
-        );
-
-      const icms =
-        texto(
-          itemVenda
-            .icms_cst_csosn ??
-          grupo
-            .icms_cst_csosn
-        );
-
-      const pis =
-        texto(
-          itemVenda.pis_cst ??
-          grupo.pis_cst
-        );
-
-      const cofins =
-        texto(
-          itemVenda
-            .cofins_cst ??
-          grupo
-            .cofins_cst
-        );
-
-      if (
-        somenteDigitos(
-          ncm
-        ).length !==
-          8 ||
-        !/^\d{4}$/.test(
-          cfop
-        ) ||
-        !/^\d$/.test(
-          origemProduto
-        ) ||
-        !icms ||
-        !/^\d{2}$/.test(
-          pis
-        ) ||
-        !/^\d{2}$/.test(
-          cofins
-        )
-      ) {
-        return erro(
-          `Configuração fiscal incompleta no item ${indice + 1}: ${itemVenda.produto_nome}.`
-        );
-      }
-
-      const cstIbscbs =
-        texto(
-          itemVenda
-            .cst_ibscbs ??
-          grupo.cst_ibscbs
-        ) ||
-        null;
-
+      const ncm = tributacao.valor.ncm;
+      const cest = tributacao.valor.cest;
+      const origemProduto = tributacao.valor.origemProduto;
+      const cfop = tributacao.valor.cfop;
+      const icms = tributacao.valor.icms;
+      const pis = tributacao.valor.pis;
+      const cofins = tributacao.valor.cofins;
+      const cstIbscbs = tributacao.valor.cstIbscbs;
       const classificacaoIbscbs =
-        texto(
-          itemVenda
-            .classificacao_ibscbs ??
-          grupo
-            .classificacao_ibscbs
-        ) ||
-        null;
+        tributacao.valor.classificacaoIbscbs;
 
       const {
         item,
@@ -1585,8 +1528,9 @@ export async function POST(
               itemVenda
                 .produto_codigo,
             codigoBarras:
+              tributacao.valor.codigoBarras ??
               produto
-                .codigo_barras,
+                ?.codigo_barras,
             nome:
               itemVenda
                 .produto_nome,
@@ -1594,8 +1538,9 @@ export async function POST(
               itemVenda
                 .unidade_medida,
             tipoItem:
+              tributacao.valor.tipoItem ??
               produto
-                .tipo_item,
+                ?.tipo_item,
             precoVenda:
               itemVenda
                 .valor_unitario,
@@ -1607,48 +1552,7 @@ export async function POST(
             origemProduto,
           },
 
-          grupo: {
-            cfopInterno:
-              cfop,
-            cfopInterestadual:
-              cfop,
-            icmsCstCsosn:
-              icms,
-            pisCst:
-              pis,
-            pisAliquota:
-              grupo
-                .pis_aliquota,
-            cofinsCst:
-              cofins,
-            cofinsAliquota:
-              grupo
-                .cofins_aliquota,
-            cstIbscbs,
-            classificacaoIbscbs,
-            aliquotaIbsUf:
-              grupo
-                .aliquota_ibs_uf,
-            aliquotaIbsMunicipio:
-              grupo
-                .aliquota_ibs_municipio,
-            aliquotaCbs:
-              grupo
-                .aliquota_cbs,
-            percentualReducaoIbsUf:
-              grupo
-                .percentual_reducao_ibs_uf,
-            percentualReducaoIbsMunicipio:
-              grupo
-                .percentual_reducao_ibs_municipio,
-            percentualReducaoCbs:
-              grupo
-                .percentual_reducao_cbs,
-            ibscbsManual:
-              grupo
-                .ibscbs_manual,
-            ...camposIpiDoGrupo(grupo),
-          },
+          grupo: tributacao.valor.grupoGeranet,
 
           modelo: "65",
           perfilIpi: null,
@@ -1719,24 +1623,11 @@ export async function POST(
       snapshots.push({
         id:
           itemVenda.id,
+        persistirFallback:
+          tributacao.valor.persistirFallback,
         dados: {
-          grupo_fiscal_id:
-            grupo.id,
-          ncm,
-          cest,
-          origem_produto:
-            origemProduto,
-          cfop,
-          icms_cst_csosn:
-            icms,
-          pis_cst:
-            pis,
-          cofins_cst:
-            cofins,
-          cst_ibscbs:
-            cstIbscbs,
-          classificacao_ibscbs:
-            classificacaoIbscbs,
+          snapshot_fiscal:
+            tributacao.valor.snapshot,
         },
       });
     }
@@ -1833,7 +1724,12 @@ export async function POST(
 
     const resultadosSnapshot =
       await Promise.all(
-        snapshots.map(
+        snapshots
+          .filter(
+            (snapshot) =>
+              snapshot.persistirFallback
+          )
+          .map(
           (snapshot) =>
             admin
               .from(

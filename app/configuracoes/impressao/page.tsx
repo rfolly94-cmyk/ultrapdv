@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { ConfiguracoesModuleTabs } from "@/components/configuracoes/configuracoes-module-tabs";
+import { ImpressaoSubnav } from "@/components/impressao/impressao-subnav";
 import { ImpressaoWorkspace } from "@/components/impressao/impressao-workspace";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { PageShell } from "@/components/layout/page-shell";
@@ -34,6 +35,7 @@ export default async function ConfiguracoesImpressaoPage() {
           { label: "Impressão" },
         ]}
         tabs={<ConfiguracoesModuleTabs />}
+        toolbar={<ImpressaoSubnav />}
       >
         <div className="px-4 py-6">
           <RecursoNaoContratado
@@ -57,6 +59,7 @@ export default async function ConfiguracoesImpressaoPage() {
         { label: "Impressão" },
       ]}
       tabs={<ConfiguracoesModuleTabs />}
+      toolbar={<ImpressaoSubnav />}
     >
       <div className="updv-config">
         <ImpressaoWorkspace />

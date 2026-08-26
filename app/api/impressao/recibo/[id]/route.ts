@@ -2,11 +2,10 @@ import { NextResponse } from "next/server";
 
 import { aplicarCors, respostaOptions } from "@/lib/api/cors-mobile";
 import { buscarVinculoEmpresaAtiva } from "@/lib/empresa/empresa-ativa";
-import {
-  carregarReciboVendaDaEmpresaAtiva,
-  linhasReciboComercial,
-} from "@/lib/impressao/carregar-recibo";
-import { gerarPdfSimples } from "@/lib/impressao/pdf-simples";
+import { carregarReciboVendaDaEmpresaAtiva } from "@/lib/impressao/carregar-recibo";
+import { carregarLayoutReciboDaEmpresaAtiva } from "@/lib/impressao/recibo-layout-servidor";
+import { montarReciboVenda } from "@/lib/impressao/recibo-layout";
+import { gerarPdfReciboEmpresa } from "@/lib/impressao/gerar-pdf-recibo";
 import { ehPapelImpressao } from "@/lib/impressao/regras";
 import { respostaPdf } from "@/lib/impressao/resposta-pdf";
 import { obterClaimsSessao } from "@/lib/supabase/claims";
@@ -59,9 +58,19 @@ export async function GET(request: Request, context: RouteContext) {
 
   const papelParam = new URL(request.url).searchParams.get("papel");
   const papel = ehPapelImpressao(papelParam) ? papelParam : "80mm";
-  const pdf = gerarPdfSimples({
+  const layout = await carregarLayoutReciboDaEmpresaAtiva({
+    empresaId: vinculo.empresa_id,
+  });
+  const montado = montarReciboVenda(recibo, layout, {
+    papel: papel === "58mm" ? "58mm" : "80mm",
+  });
+  const pdf = await gerarPdfReciboEmpresa({
+    supabase,
+    empresaId: vinculo.empresa_id,
+    linhas: montado.linhasPdf,
     papel,
-    linhas: linhasReciboComercial(recibo),
+    mostrarLogo: montado.layout.cabecalho.logo,
+    alinhamentoLogo: montado.layout.cabecalho.alinhamento,
   });
 
   return aplicarCors(

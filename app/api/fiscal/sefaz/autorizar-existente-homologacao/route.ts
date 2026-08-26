@@ -291,7 +291,8 @@ export async function POST(
           status,
           chave_acesso,
           protocolo,
-          xml_hex
+          xml_hex,
+          resposta_resumo
         `)
         .eq(
           "id",
@@ -350,6 +351,45 @@ export async function POST(
     ) {
       throw new Error(
         "A emissão já possui protocolo. Nenhuma retransmissão será realizada."
+      );
+    }
+
+    const statusEmissao =
+      texto(
+        emissao.status
+      );
+    const classificacaoResumo =
+      texto(
+        emissao.resposta_resumo &&
+          typeof emissao.resposta_resumo ===
+            "object"
+          ? (
+              emissao.resposta_resumo as {
+                classificacao?:
+                  unknown;
+              }
+            ).classificacao
+          : ""
+      );
+
+    if (
+      statusEmissao ===
+        "aguardando_reconciliacao" ||
+      statusEmissao ===
+        "enviando" ||
+      statusEmissao ===
+        "transmitindo_contingencia" ||
+      statusEmissao ===
+        "aguardando_transmissao_contingencia" ||
+      (
+        statusEmissao ===
+          "erro_comunicacao" &&
+        classificacaoResumo !==
+          "erro_envio"
+      )
+    ) {
+      throw new Error(
+        "Situação remota não conclusiva. Reconcilie esta NFC-e; não retransmita o XML diretamente à SEFAZ."
       );
     }
 

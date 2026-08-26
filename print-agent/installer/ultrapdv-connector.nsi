@@ -8,6 +8,7 @@ ManifestDPIAware True
 !include "x64.nsh"
 !include "LogicLib.nsh"
 !include "generated\version.nsh"
+!cd "${__FILEDIR__}"
 
 Name "${PRODUCT_NAME}"
 OutFile "${SETUP_OUTFILE}"
@@ -75,34 +76,35 @@ FunctionEnd
 Section "UltraPDV Connector" SecPrincipal
   SectionIn RO
   SetRegView 64
+  SetOverwrite on
   Call StopConnector
 
   SetOutPath "$INSTDIR\runtime"
-  File "staging\runtime\node.exe"
-  File /nonfatal "staging\runtime\LICENSE"
+  File "${STAGING_DIR}\runtime\node.exe"
+  File /nonfatal "${STAGING_DIR}\runtime\LICENSE"
 
   SetOutPath "$INSTDIR\app"
-  File "staging\app\*.mjs"
-  File "staging\app\*.html"
-  File "staging\app\version.json"
+  File "${STAGING_DIR}\app\*.mjs"
+  File "${STAGING_DIR}\app\*.html"
+  File "${STAGING_DIR}\app\version.json"
 
   SetOutPath "$INSTDIR\print-engine"
-  File "staging\print-engine\SumatraPDF.exe"
-  File "staging\print-engine\libmupdf.dll"
+  File "${STAGING_DIR}\print-engine\SumatraPDF.exe"
+  File "${STAGING_DIR}\print-engine\libmupdf.dll"
 
   SetOutPath "$INSTDIR\licenses"
-  File /r "staging\licenses\*.*"
+  File /r "${STAGING_DIR}\licenses\*.*"
 
   SetOutPath "$INSTDIR\launcher"
-  File "staging\launcher\start.vbs"
-  File "staging\launcher\tray.ps1"
+  File "${STAGING_DIR}\launcher\start.vbs"
+  File "${STAGING_DIR}\launcher\tray.ps1"
 
   SetOutPath "$INSTDIR\config"
-  File "staging\config\origins.json"
+  File "${STAGING_DIR}\config\origins.json"
 
   SetOutPath "$INSTDIR"
-  File "staging\version.json"
-  File "staging\THIRD-PARTY-NOTICES.txt"
+  File "${STAGING_DIR}\version.json"
+  File "${STAGING_DIR}\THIRD-PARTY-NOTICES.txt"
 
   CreateDirectory "$INSTDIR\data"
   nsExec::ExecToLog 'icacls "$INSTDIR\data" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'

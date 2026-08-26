@@ -64,7 +64,9 @@ function revalidarLogoEmpresa() {
   revalidatePath("/", "layout");
   revalidatePath("/configuracoes/empresa");
   revalidatePath("/configuracoes/fiscal/empresa");
+  revalidatePath("/configuracoes/impressao/recibo");
   revalidatePath("/pdv");
+  revalidatePath("/vendas");
 }
 
 export async function salvarLogomarcaEmpresa(

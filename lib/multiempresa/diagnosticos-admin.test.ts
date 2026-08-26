@@ -68,6 +68,21 @@ test("diagnóstico: administrador usa a empresa da sessão, não um empresa_id d
   assert.match(autorizar, /\.eq\(\s*"empresa_id",\s+empresaId/);
 });
 
+test("diagnóstico SEFAZ: XML ambíguo/enviando não é retransmitido automaticamente", () => {
+  const autorizar = fonte(
+    "app/api/fiscal/sefaz/autorizar-existente-homologacao/route.ts"
+  );
+  assert.match(autorizar, /aguardando_reconciliacao/);
+  assert.match(autorizar, /enviando/);
+  assert.match(
+    autorizar,
+    /não retransmita o XML diretamente à SEFAZ/i
+  );
+  assert.match(autorizar, /classificacaoResumo !==\s*"erro_envio"/);
+  assert.match(autorizar, /homologacao\.sefaz\.mt\.gov\.br/);
+  assert.doesNotMatch(autorizar, /nfe\.geranet\.net/);
+});
+
 test("diagnóstico: emissão normal do PDV/NF-e não usa o gate admin-only", () => {
   for (const arquivo of ROTAS_EMISSAO_OPERACIONAL) {
     const conteudo = fonte(arquivo);
