@@ -12,6 +12,7 @@ import {
 } from "@/app/fiscal/entradas/actions";
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { CampoValor } from "@/components/ui/campo-valor";
 import {
   documentoEntradaPodeConfirmar,
   documentoEntradaPodeEditar,
@@ -609,10 +610,11 @@ export function EntradaDetalhe({
                               </div>
                               <label className="mt-1 flex items-center gap-2">
                                 <span>1 {item.unidade} =</span>
-                                <input
+                                <CampoValor
                                   className="updv-input w-20 text-right"
                                   value={fatores[item.id] ?? ""}
                                   disabled={pending}
+                                  inputMode="decimal"
                                   onChange={(event) =>
                                     setFatores((atual) => ({
                                       ...atual,
@@ -692,11 +694,12 @@ export function EntradaDetalhe({
                     <td className="num">{item.quantidadeXml}</td>
                     <td className="num">
                       {editavel ? (
-                        <input
+                        <CampoValor
                           className={`updv-input w-24 text-right ${
                             divergenteQtd ? "border-amber-400" : ""
                           }`}
                           value={quantidades[item.id] ?? ""}
+                          inputMode="decimal"
                           onChange={(event) =>
                             setQuantidades((atual) => ({
                               ...atual,

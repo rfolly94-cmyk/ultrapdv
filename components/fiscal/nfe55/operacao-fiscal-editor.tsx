@@ -22,6 +22,7 @@ import { EmissaoFiscalHistorico } from "@/components/fiscal/emissao-fiscal-histo
 import { Nfe55Editor } from "@/components/fiscal/nfe55/nfe55-editor";
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { CampoValor } from "@/components/ui/campo-valor";
 import {
   TransporteVendaForm,
   type DadosTransporteVenda,
@@ -567,17 +568,19 @@ export function OperacaoFiscalEditor({
                         </option>
                       ))}
                     </select>
-                    <input
+                    <CampoValor
                       className="updv-input w-24"
                       value={qtdNovo}
                       onChange={(event) => setQtdNovo(event.target.value)}
                       placeholder="Qtd"
+                      inputMode="decimal"
                     />
-                    <input
+                    <CampoValor
                       className="updv-input w-28"
                       value={valorNovo}
                       onChange={(event) => setValorNovo(event.target.value)}
                       placeholder="Valor"
+                      inputMode="decimal"
                     />
                     <button
                       type="button"

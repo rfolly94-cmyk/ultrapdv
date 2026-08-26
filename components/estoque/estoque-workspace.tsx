@@ -16,6 +16,7 @@ import { ListToolbar } from "@/components/ui/list-toolbar";
 import { PageHeader } from "@/components/ui/page-header";
 import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { EstoqueModuleTabs } from "@/components/estoque/estoque-module-tabs";
 import { useTemPermissao } from "@/lib/permissoes/contexto-ui";
 import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
@@ -692,7 +693,7 @@ export function EstoqueWorkspace({
                       ? "Quantidade a entrar"
                       : "Quantidade a sair"}
                 </label>
-                <input
+                <CampoValor
                   autoFocus
                   value={quantidade}
                   onChange={(event) =>
@@ -791,7 +792,7 @@ export function EstoqueWorkspace({
             <label className="text-sm font-medium text-zinc-700">
               Estoque mínimo
             </label>
-            <input
+            <CampoValor
               autoFocus
               value={minimo}
               onChange={(event) => setMinimo(event.target.value)}
@@ -804,7 +805,7 @@ export function EstoqueWorkspace({
             <label className="text-sm font-medium text-zinc-700">
               Estoque máximo
             </label>
-            <input
+            <CampoValor
               value={maximo}
               onChange={(event) => setMaximo(event.target.value)}
               inputMode="decimal"

@@ -121,6 +121,10 @@ body {
   white-space: nowrap;
 }
 
+.updv-table tbody tr:first-child:not(:has(.updv-table-empty)) {
+  @apply bg-blue-100;
+}
+
 .updv-table tbody tr:hover {
   background: #f1f5f9;
 }
@@ -596,11 +600,108 @@ body {
   opacity: 0.14;
 }
 
-.pdv-shell .pdv-busca-resultados {
+.pdv-busca-resultados {
   position: relative;
   z-index: 2;
-  background: var(--pdv-surface);
+  min-width: 0;
+  width: 100%;
+  background: var(--pdv-surface, #ffffff);
   box-shadow: 0 10px 24px rgba(24, 24, 27, 0.08);
+}
+
+.pdv-busca-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.pdv-busca-tabela thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pdv-border, #e4e4e7);
+  color: var(--pdv-text-muted, #71717a);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pdv-busca-tabela tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f4f4f5;
+  color: var(--pdv-text, #18181b);
+  font-size: 13px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.pdv-busca-tabela tbody tr:hover {
+  background: #f1f5f9;
+}
+
+.pdv-busca-tabela tbody tr.pdv-busca-selecionada,
+.pdv-busca-tabela tbody tr.pdv-busca-selecionada:hover {
+  background: #eff6ff;
+}
+
+.pdv-busca-tabela tbody tr[data-clickable="true"] {
+  cursor: pointer;
+}
+
+.pdv-busca-tabela th.num,
+.pdv-busca-tabela td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdv-busca-tabela th:nth-child(1),
+.pdv-busca-tabela td:nth-child(1) {
+  width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdv-busca-tabela th:nth-child(2),
+.pdv-busca-tabela td:nth-child(2) {
+  width: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pdv-busca-tabela th:nth-child(3),
+.pdv-busca-tabela td:nth-child(3) {
+  width: 7.5rem;
+}
+
+.pdv-busca-tabela th:nth-child(4),
+.pdv-busca-tabela td:nth-child(4) {
+  width: 5.5rem;
+}
+
+@media (max-width: 640px) {
+  .pdv-busca-tabela thead th,
+  .pdv-busca-tabela tbody td {
+    padding: 8px;
+    font-size: 12px;
+  }
+
+  .pdv-busca-tabela th:nth-child(1),
+  .pdv-busca-tabela td:nth-child(1) {
+    width: 22%;
+  }
+
+  .pdv-busca-tabela th:nth-child(3),
+  .pdv-busca-tabela td:nth-child(3),
+  .pdv-busca-tabela th:nth-child(4),
+  .pdv-busca-tabela td:nth-child(4) {
+    width: 20%;
+  }
 }
 
 .pdv-btn-primary {

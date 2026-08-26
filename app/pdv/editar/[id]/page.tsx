@@ -15,6 +15,7 @@ import {
   filtrarFormasPagamentoCheckoutPdv,
 } from "@/lib/pdv/formas-pagamento-checkout";
 import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import { filtrarRegistrosDaEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 
 function centavos(valor: unknown) {
   const numero = Number(valor ?? 0);
@@ -104,6 +105,7 @@ export default async function EditarVendaNoPdvPage({
     fiscalResult,
     carteiraResult,
     pixResult,
+    estoqueResult,
   ] = await Promise.all([
     supabase
       .from("produtos")
@@ -219,6 +221,11 @@ export default async function EditarVendaNoPdvPage({
       .select("id, modo, ativo, provedor")
       .eq("empresa_id", vinculo.empresa_id)
       .maybeSingle(),
+
+    supabase
+      .from("estoque_atual")
+      .select("empresa_id, produto_id, quantidade")
+      .eq("empresa_id", vinculo.empresa_id),
   ]);
 
   const erro =
@@ -229,7 +236,8 @@ export default async function EditarVendaNoPdvPage({
     itensResult.error ??
     pagamentosResult.error ??
     fiscalResult.error ??
-    carteiraResult.error;
+    carteiraResult.error ??
+    estoqueResult.error;
 
   if (erro) {
     throw new Error(erro.message);
@@ -335,6 +343,13 @@ export default async function EditarVendaNoPdvPage({
     ),
   };
 
+  const estoquePorProduto = new Map(
+    filtrarRegistrosDaEmpresaAtiva(
+      estoqueResult.data ?? [],
+      vinculo.empresa_id
+    ).map((item) => [item.produto_id, Number(item.quantidade)])
+  );
+
   const planoPix = await planoPermiteRecursoEmpresa(
     String(vinculo.empresa_id),
     "pix_integrado"
@@ -345,7 +360,10 @@ export default async function EditarVendaNoPdvPage({
       empresaNome={
         empresa?.nome_fantasia ?? "Empresa"
       }
-      produtos={produtosResult.data ?? []}
+      produtos={(produtosResult.data ?? []).map((produto) => ({
+        ...produto,
+        estoqueDisponivel: estoquePorProduto.get(produto.id) ?? 0,
+      }))}
       clientes={clientesResult.data ?? []}
       formasPagamento={formasCheckout}
       vendaEdicao={vendaEdicao}

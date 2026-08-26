@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AppModal } from "@/components/ui/app-modal";
+import { CampoValor } from "@/components/ui/campo-valor";
 import type {
   FormaRecebimentoListagem,
   ItemAbertoListagem,
@@ -223,7 +224,7 @@ export function ModalDebitoCliente({
                 <span className="text-xs font-medium text-zinc-600">
                   Valor a receber
                 </span>
-                <input
+                <CampoValor
                   value={valorTexto}
                   onChange={(event) => {
                     setValorTexto(event.target.value);

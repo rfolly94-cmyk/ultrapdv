@@ -13,7 +13,7 @@ import {
   sanitizarConfiguracaoImpressao,
   sanitizarCopiasImpressao,
 } from "./regras";
-import { portasDescobertaConector } from "./descobrir";
+import { ehSaudeConector, portasDescobertaConector } from "./descobrir";
 import { DISPOSITIVO_STORAGE_KEY, PRINT_AGENT_PORT } from "./tipos";
 import { gerarPdfSimples } from "./pdf-simples";
 import {
@@ -226,6 +226,19 @@ test("frontend encontra qualquer Conector entre 18181 e 18190", () => {
   assert.equal(portas.length, 10);
   assert.equal(portas.includes(18185), true);
   assert.equal(portas.includes(19000), false);
+  assert.equal(
+    ehSaudeConector({
+      ok: true,
+      app: "UltraPDV-Conector",
+      servico: "ultrapdv-connector",
+      porta: 18181,
+      versao: "1.3.2",
+    }),
+    true
+  );
+  assert.equal(ehSaudeConector({ ok: true, servico: "ultrapdv-connector" }), true);
+  assert.equal(ehSaudeConector({ ok: false, erro: "Não encontrado." }), false);
+  assert.equal(ehSaudeConector({ ok: true, app: "outro" }), false);
 });
 
 test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
@@ -239,7 +252,7 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   const cliente = fonte("lib/impressao/agente.ts");
   const versao = JSON.parse(fonte("print-agent/version.json"));
   assert.equal(versao.name, "UltraPDV Connector");
-  assert.equal(versao.version, "1.3.1");
+  assert.equal(versao.version, "1.3.2");
   assert.match(agente, /127\.0\.0\.1/);
   assert.match(agente, /PORTA_PADRAO/);
   assert.match(portas, /PORTA_PADRAO = 18181/);
@@ -263,7 +276,15 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   assert.doesNotMatch(tela, /http:\/\/127\.0\.0\.1:18181/);
   assert.match(descobrir, /export async function descobrirUltraPdvConector/);
   assert.match(descobrir, /PRINT_AGENT_APP/);
+  assert.match(descobrir, /PRINT_AGENT_SERVICO/);
+  assert.match(descobrir, /CAMINHOS_DESCOBERTA_CONECTOR/);
+  assert.match(descobrir, /\/status/);
+  assert.match(descobrir, /\/health/);
   assert.match(descobrir, /PRINT_AGENT_PORTA_MAX_AUTO/);
+  assert.match(agente, /pathname === "\/status"/);
+  assert.match(agente, /Access-Control-Allow-Private-Network/);
+  assert.match(tipos, /UltraPDV-Conector/);
+  assert.match(tipos, /ultrapdv-connector/);
   assert.match(tipos, /UltraPDV-Conector/);
   assert.match(tipos, /PRINT_AGENT_PORTA_MAX_AUTO = 18190/);
   assert.doesNotMatch(descobrir, /19000/);

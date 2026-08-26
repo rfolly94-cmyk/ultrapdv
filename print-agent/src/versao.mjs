@@ -3,6 +3,7 @@ import path from "node:path";
 
 export const NOME_CONECTOR = "UltraPDV Connector";
 export const APP_CONECTOR = "UltraPDV-Conector";
+export const SERVICO_CONECTOR = "ultrapdv-connector";
 
 export function carregarVersao(raiz, ler = fs.readFileSync) {
   const candidatos = [

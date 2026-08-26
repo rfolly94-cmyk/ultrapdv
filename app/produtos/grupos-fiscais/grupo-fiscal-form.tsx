@@ -17,6 +17,7 @@ import {
 import {
   FiscalCodeSelect,
 } from "./fiscal-code-select";
+import { CampoValor } from "@/components/ui/campo-valor";
 
 import {
   IbsCbsSelect,
@@ -140,7 +141,7 @@ function CampoPercentual({
       </label>
 
       <div className="relative mt-2">
-        <input
+        <CampoValor
           name={name}
           inputMode="decimal"
           defaultValue={

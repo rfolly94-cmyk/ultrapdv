@@ -26,6 +26,7 @@ import {
 import { finalizarVendaPdv } from "../../app/pdv/actions";
 import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
 import { PdvConsumidorNota } from "@/components/pdv/pdv-consumidor-nota";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { CaixaAvisoReabertoFaixa } from "@/components/caixa/caixa-aviso-reaberto";
 import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
 import {
@@ -118,13 +119,17 @@ import {
   MENSAGEM_PRODUTO_CODIGO_NAO_ENCONTRADO,
   decidirAcaoEnterBuscaPdv,
   detectorScannerVazio,
+  indiceAposSetaBuscaPdv,
+  indiceInicialBuscaPdv,
   pareceLeituraScanner,
   quantidadeAposAdicionarPdv,
   registrarTeclaBusca,
 } from "@/lib/pdv/busca-produto";
 import { urlPublicaCatalogo } from "@/lib/catalogo/storage";
 import { salvarPreferenciasPdvAction } from "@/app/pdv/preferencias-actions";
+import { PdvBuscaResultados } from "@/components/pdv/pdv-busca-resultados";
 import { PdvPreferenciasModal } from "@/components/pdv/pdv-preferencias-modal";
+import { avaliarQuantidadeEstoquePdv } from "@/lib/pdv/venda-sem-estoque";
 
 type Produto = {
   id: string;
@@ -140,6 +145,7 @@ type Produto = {
   catalogo_imagem_path?:
     | string
     | null;
+  estoqueDisponivel?: number;
 };
 
 type Cliente = {
@@ -199,6 +205,7 @@ type Props = {
   usuarioNome?: string | null;
   logoUrl?: string | null;
   preferenciasIniciais?: PreferenciasPdv;
+  permitirVendaSemEstoqueInicial?: boolean;
   produtos: Produto[];
   clientes: Cliente[];
   formasPagamento: FormaPagamento[];
@@ -393,6 +400,7 @@ export function PdvShell({
   usuarioNome = null,
   logoUrl = null,
   preferenciasIniciais = PREFERENCIAS_PDV_PADRAO,
+  permitirVendaSemEstoqueInicial = false,
   produtos,
   clientes,
   formasPagamento,
@@ -413,6 +421,11 @@ export function PdvShell({
     busca,
     setBusca,
   ] = useState("");
+
+  const [
+    indiceSelecionadoBusca,
+    setIndiceSelecionadoBusca,
+  ] = useState<number | null>(null);
 
   const [
     quantidadeDigitada,
@@ -525,6 +538,16 @@ export function PdvShell({
   ] = useState(false);
 
   const [
+    permitirVendaSemEstoqueSalvo,
+    setPermitirVendaSemEstoqueSalvo,
+  ] = useState(permitirVendaSemEstoqueInicial);
+
+  const [
+    permitirVendaSemEstoque,
+    setPermitirVendaSemEstoque,
+  ] = useState(permitirVendaSemEstoqueInicial);
+
+  const [
     toastPdv,
     setToastPdv,
   ] = useState<string | null>(null);
@@ -605,6 +628,7 @@ export function PdvShell({
     );
 
   const detectorScannerRef = useRef(detectorScannerVazio());
+  const chaveResultadosBuscaRef = useRef("");
 
   const idempotencyRef =
     useRef<string | null>(
@@ -745,17 +769,32 @@ export function PdvShell({
         observacao: pedidoInicial.observacao,
       })
     );
-    setCarrinho(
-      pedidoInicial.itens.map((item) => ({
+
+    const itensPedido: ItemCarrinho[] = [];
+    for (const item of pedidoInicial.itens) {
+      const produto = produtos.find(
+        (itemProduto) => itemProduto.id === item.produtoId
+      );
+      const checagem = avaliarQuantidadeEstoquePdv({
+        permitirVendaSemEstoque: permitirVendaSemEstoqueInicial,
+        disponivel: Number(produto?.estoqueDisponivel) || 0,
+        quantidade: item.quantidade,
+      });
+      if (!checagem.ok) {
+        setToastPdv(checagem.erro);
+        continue;
+      }
+      itensPedido.push({
         produtoId: item.produtoId,
         codigo: item.codigo,
         nome: item.nome,
         unidadeMedida: item.unidadeMedida,
         quantidade: item.quantidade,
         valorUnitarioCentavos: Math.round(item.precoAtual * 100),
-      }))
-    );
-  }, [pedidoInicial]);
+      });
+    }
+    setCarrinho(itensPedido);
+  }, [pedidoInicial, permitirVendaSemEstoqueInicial, produtos]);
 
   const clienteSelecionado =
     useMemo(
@@ -820,6 +859,21 @@ export function PdvShell({
       busca,
       produtos,
     ]);
+
+  const produtosBuscaVisiveis = useMemo(
+    () => produtosFiltrados.slice(0, 20),
+    [produtosFiltrados]
+  );
+  const primeiroIdBusca = produtosBuscaVisiveis[0]?.id ?? null;
+  const totalBuscaVisivel = produtosBuscaVisiveis.length;
+  const chaveResultadosBusca = `${busca.trim()}|${primeiroIdBusca}|${totalBuscaVisivel}`;
+
+  if (chaveResultadosBuscaRef.current !== chaveResultadosBusca) {
+    chaveResultadosBuscaRef.current = chaveResultadosBusca;
+    setIndiceSelecionadoBusca(
+      !busca.trim() ? null : indiceInicialBuscaPdv(totalBuscaVisivel)
+    );
+  }
 
   const clientesFiltrados =
     useMemo(() => {
@@ -1012,28 +1066,42 @@ export function PdvShell({
   function adicionarProduto(
     produto: Produto
   ) {
-    invalidarCheckout();
-
     const valor =
       paraCentavos(
         produto.preco_venda
       );
 
+    const qtd = Math.max(
+      1,
+      Number(quantidadeDigitada.replace(",", ".")) || 1
+    );
+    const existente = carrinho.find(
+      (item) => item.produtoId === produto.id
+    );
+    const quantidadeNova = existente
+      ? quantidadeAposAdicionarPdv(existente.quantidade, qtd)
+      : qtd;
+    const checagem = avaliarQuantidadeEstoquePdv({
+      permitirVendaSemEstoque,
+      disponivel: Number(produto.estoqueDisponivel) || 0,
+      quantidade: quantidadeNova,
+    });
+    if (!checagem.ok) {
+      setToastPdv(checagem.erro);
+      return;
+    }
+
+    invalidarCheckout();
     setCarrinho(
       (atual) => {
-        const existente =
+        const jaExiste =
           atual.find(
             (item) =>
               item.produtoId ===
               produto.id
           );
 
-        const qtd = Math.max(
-          1,
-          Number(quantidadeDigitada.replace(",", ".")) || 1
-        );
-
-        if (existente) {
+        if (jaExiste) {
           return atual.map(
             (item) =>
               item.produtoId ===
@@ -1070,6 +1138,7 @@ export function PdvShell({
 
     setBusca("");
     setQuantidadeDigitada("1");
+    setIndiceSelecionadoBusca(null);
     detectorScannerRef.current = detectorScannerVazio();
 
     requestAnimationFrame(
@@ -1082,6 +1151,20 @@ export function PdvShell({
     produtoId: string,
     delta: number
   ) {
+    if (delta > 0) {
+      const item = carrinho.find((linha) => linha.produtoId === produtoId);
+      const produto = produtos.find((linha) => linha.id === produtoId);
+      const checagem = avaliarQuantidadeEstoquePdv({
+        permitirVendaSemEstoque,
+        disponivel: Number(produto?.estoqueDisponivel) || 0,
+        quantidade: (item?.quantidade ?? 0) + delta,
+      });
+      if (!checagem.ok) {
+        setToastPdv(checagem.erro);
+        return;
+      }
+    }
+
     invalidarCheckout();
 
     setCarrinho(
@@ -1159,6 +1242,22 @@ export function PdvShell({
       event.timeStamp
     );
 
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      detectorScannerRef.current = detectorScannerVazio();
+      if (!busca.trim() || produtosBuscaVisiveis.length === 0) {
+        return;
+      }
+      setIndiceSelecionadoBusca((atual) =>
+        indiceAposSetaBuscaPdv({
+          tecla: event.key === "ArrowUp" ? "ArrowUp" : "ArrowDown",
+          indiceAtual: atual,
+          total: produtosBuscaVisiveis.length,
+        })
+      );
+      return;
+    }
+
     if (event.key !== "Enter") {
       return;
     }
@@ -1171,11 +1270,17 @@ export function PdvShell({
     );
     detectorScannerRef.current = detectorScannerVazio();
 
+    const produtoSelecionado =
+      indiceSelecionadoBusca == null
+        ? null
+        : produtosBuscaVisiveis[indiceSelecionadoBusca] ?? null;
+
     const acao = decidirAcaoEnterBuscaPdv({
       termo: busca,
       produtos,
       produtosFiltrados,
       leituraScanner,
+      produtoSelecionado,
     });
 
     if (acao.tipo === "adicionar") {
@@ -1219,9 +1324,15 @@ export function PdvShell({
     router.push(DESTINO_FECHAR_PDV);
   }
 
-  async function salvarPreferencias(proxima: PreferenciasPdv) {
+  async function salvarPreferencias(
+    proxima: PreferenciasPdv,
+    permitirSemEstoque: boolean
+  ) {
     setSalvandoPreferencias(true);
-    const resultado = await salvarPreferenciasPdvAction(proxima);
+    const resultado = await salvarPreferenciasPdvAction({
+      ...proxima,
+      permitirVendaSemEstoque: permitirSemEstoque,
+    });
     setSalvandoPreferencias(false);
 
     if (!resultado.ok) {
@@ -1231,6 +1342,8 @@ export function PdvShell({
 
     setPreferencias(resultado.preferencias);
     setPreferenciasSalvas(resultado.preferencias);
+    setPermitirVendaSemEstoque(resultado.permitirVendaSemEstoque);
+    setPermitirVendaSemEstoqueSalvo(resultado.permitirVendaSemEstoque);
     setModalPreferencias(false);
     setToastPdv("Preferências do PDV salvas.");
   }
@@ -1531,6 +1644,19 @@ export function PdvShell({
         "Adicione ao menos um produto."
       );
       return;
+    }
+
+    for (const item of carrinho) {
+      const produto = produtos.find((linha) => linha.id === item.produtoId);
+      const checagem = avaliarQuantidadeEstoquePdv({
+        permitirVendaSemEstoque,
+        disponivel: Number(produto?.estoqueDisponivel) || 0,
+        quantidade: item.quantidade,
+      });
+      if (!checagem.ok) {
+        setErroPagamento(checagem.erro);
+        return;
+      }
     }
 
     if (
@@ -1897,6 +2023,7 @@ export function PdvShell({
 
         if (decisao.overlay === "preferencias") {
           setPreferencias(preferenciasSalvas);
+          setPermitirVendaSemEstoque(permitirVendaSemEstoqueSalvo);
           setModalPreferencias(false);
           return;
         }
@@ -2230,11 +2357,12 @@ export function PdvShell({
             </div>
             <div className="flex h-10 items-center rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700">
               Quant:
-              <input
+              <CampoValor
                 value={quantidadeDigitada}
                 onChange={(event) =>
                   setQuantidadeDigitada(event.target.value)
                 }
+                inputMode="decimal"
                 className="ml-1 w-10 border-0 bg-transparent p-0 text-center text-sm font-semibold outline-none"
               />
             </div>
@@ -2242,60 +2370,15 @@ export function PdvShell({
 
           {busca.trim() ? (
             <div className="pdv-busca-resultados mt-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-200">
-              {produtosFiltrados.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-zinc-500">
-                  Nenhum produto encontrado.
-                </p>
-              ) : (
-                produtosFiltrados.slice(0, 20).map((produto) => {
-                  const foto = deveMostrarFotoProduto({
-                    mostrarFotosProdutos: preferencias.mostrarFotosProdutos,
-                    imagemPath: produto.catalogo_imagem_path,
-                    empresaId,
-                  })
-                    ? urlPublicaCatalogo(produto.catalogo_imagem_path)
-                    : null;
-
-                  return (
-                  <button
-                    key={produto.id}
-                    type="button"
-                    onClick={() => adicionarProduto(produto)}
-                    className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm hover:bg-blue-50"
-                  >
-                    {preferencias.mostrarFotosProdutos ? (
-                      foto ? (
-                        <span className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-100">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={foto}
-                            alt=""
-                            width={40}
-                            height={40}
-                            loading="lazy"
-                            decoding="async"
-                            className="h-10 w-10 object-contain"
-                          />
-                        </span>
-                      ) : (
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-zinc-400">
-                          <Package className="h-4 w-4" />
-                        </span>
-                      )
-                    ) : null}
-                    <span className="min-w-0 flex-1 truncate font-medium">
-                      {produto.nome}
-                      <span className="ml-2 text-xs text-zinc-400">
-                        {produto.codigo}
-                      </span>
-                    </span>
-                    <span className="shrink-0 font-semibold">
-                      {dinheiroCentavos(paraCentavos(produto.preco_venda))}
-                    </span>
-                  </button>
-                  );
-                })
-              )}
+              <PdvBuscaResultados
+                produtos={produtosBuscaVisiveis}
+                produtoSelecionadoId={
+                  indiceSelecionadoBusca == null
+                    ? null
+                    : produtosBuscaVisiveis[indiceSelecionadoBusca]?.id ?? null
+                }
+                onEscolher={adicionarProduto}
+              />
             </div>
           ) : null}
           </div>
@@ -2649,7 +2732,7 @@ export function PdvShell({
             Desconto em R$
           </label>
 
-          <input
+          <CampoValor
             autoFocus
             value={
               descontoTexto
@@ -2791,7 +2874,7 @@ export function PdvShell({
                     <span className="flex-1 text-sm font-medium text-zinc-900">
                       {rotuloFormaCheckout(forma)}
                     </span>
-                    <input
+                    <CampoValor
                       value={atual?.valorTexto ?? ""}
                       onChange={(event) =>
                         atualizarPagamento(forma.id, event.target.value)
@@ -2973,7 +3056,7 @@ export function PdvShell({
       )}
 
       {toastPdv ? (
-        <div className="fixed bottom-6 left-1/2 z-[90] -translate-x-1/2 rounded-full bg-zinc-950 px-4 py-2 text-sm font-medium text-white shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-[90] max-w-sm -translate-x-1/2 whitespace-pre-line rounded-2xl bg-zinc-950 px-4 py-2 text-center text-sm font-medium text-white shadow-lg">
           {toastPdv}
         </div>
       ) : null}
@@ -2981,16 +3064,19 @@ export function PdvShell({
       {modalPreferencias ? (
         <PdvPreferenciasModal
           inicial={preferencias}
+          permitirVendaSemEstoque={permitirVendaSemEstoque}
           salvando={salvandoPreferencias}
           onPreview={setPreferencias}
+          onPermitirVendaSemEstoque={setPermitirVendaSemEstoque}
           onCancelar={() => {
             setPreferencias(
               preferenciasAposCancelarPreview(preferenciasSalvas, preferencias)
             );
+            setPermitirVendaSemEstoque(permitirVendaSemEstoqueSalvo);
             setModalPreferencias(false);
           }}
-          onSalvar={(proxima) => {
-            void salvarPreferencias(proxima);
+          onSalvar={(proxima, permitirSemEstoque) => {
+            void salvarPreferencias(proxima, permitirSemEstoque);
           }}
         />
       ) : null}

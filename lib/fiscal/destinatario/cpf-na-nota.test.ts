@@ -209,6 +209,16 @@ test("emissão NFC-e usa documento do snapshot e isola empresa", () => {
   assert.match(shell, /cpfNaNota/);
   assert.match(consumidor, /Usar CPF\/CNPJ do cliente na nota/);
   assert.match(consumidor, /CPF na nota/);
+  assert.match(consumidor, /AppModal/);
+  assert.match(consumidor, /title="CPF na nota"/);
+  assert.match(consumidor, /Cancelar/);
+  assert.match(consumidor, /Confirmar/);
+  assert.match(consumidor, /mascararCpfDigitando/);
+  assert.match(consumidor, /cpfValido/);
+  assert.match(consumidor, /MENSAGEM_CPF_INVALIDO/);
+  assert.match(consumidor, /placeholder="000.000.000-00"/);
+  assert.match(consumidor, /onCpfNaNota\(""\)/);
+  assert.doesNotMatch(consumidor, /from\("clientes"\)/);
   assert.doesNotMatch(nfe, /camposClienteNfceGeranet/);
   assert.match(nfe, /cliente\.cpf_cnpj/);
   assert.doesNotMatch(mobile, /cpfNaNota|usarDocumentoClienteNaNota/);

@@ -29,6 +29,7 @@ import {
   type ConfiguracaoImpressao,
   type ImpressoraWindows,
   type PapelImpressao,
+  type StatusAgenteImpressao,
   type TipoDocumentoImpressao,
 } from "@/lib/impressao/tipos";
 
@@ -59,6 +60,9 @@ export function ImpressaoWorkspace() {
   );
   const [impressoras, setImpressoras] = useState<ImpressoraWindows[]>([]);
   const [agenteOk, setAgenteOk] = useState<boolean | null>(null);
+  const [motivoDescoberta, setMotivoDescoberta] = useState<
+    StatusAgenteImpressao["motivoDescoberta"]
+  >(undefined);
   const [motorOk, setMotorOk] = useState(false);
   const [versaoConector, setVersaoConector] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -89,6 +93,7 @@ export function ImpressaoWorkspace() {
       }
       setDispositivoId(id);
       setAgenteOk(saude.ok);
+      setMotivoDescoberta(saude.ok ? undefined : saude.motivoDescoberta);
       setMotorOk(Boolean(saude.motorImpressao?.encontrado));
       setVersaoConector(saude.versao ?? null);
       setImpressoras(lista);
@@ -208,6 +213,7 @@ export function ImpressaoWorkspace() {
                 ]);
                 setDispositivoId(id);
                 setAgenteOk(saude.ok);
+                setMotivoDescoberta(saude.ok ? undefined : saude.motivoDescoberta);
                 setMotorOk(Boolean(saude.motorImpressao?.encontrado));
                 setVersaoConector(saude.versao ?? null);
                 setImpressoras(lista);
@@ -236,11 +242,16 @@ export function ImpressaoWorkspace() {
               Impressão UltraPDV
             </p>
             <p className="mt-2 text-sm font-semibold text-amber-950">
-              UltraPDV Conector não encontrado
+              {motivoDescoberta === "bloqueado"
+                ? "UltraPDV Connector bloqueado pelo navegador"
+                : motivoDescoberta === "timeout"
+                  ? "UltraPDV Connector não respondeu a tempo"
+                  : "UltraPDV Conector não encontrado"}
             </p>
             <p className="mt-1 text-[13px] leading-5 text-amber-900">
-              Para utilizar impressão automática neste computador, baixe e
-              instale o Impressão UltraPDV.
+              {motivoDescoberta === "bloqueado"
+                ? "O Connector está em execução, mas esta página não foi autorizada a acessá-lo. Atualize o UltraPDV Connector para 1.3.2."
+                : "Para utilizar impressão automática neste computador, baixe e instale o Impressão UltraPDV."}
             </p>
             <a
               href={ULTRAPDV_CONNECTOR_DOWNLOAD_URL}

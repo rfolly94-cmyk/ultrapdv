@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { validarPixNaFinalizacaoComercial } from "@/lib/pagamentos/pix/modo-ativo-servidor";
 import { avaliarTetoPagamentosNoServidor } from "@/lib/pdv/validar-teto-servidor";
+import { validarEstoqueNaFinalizacaoPdv } from "@/lib/pdv/venda-sem-estoque-servidor";
 import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacional";
@@ -446,6 +447,20 @@ export async function executarFinalizacaoVendaPdv(
       controleAtivo,
       fluxoExigeCaixa,
     });
+
+    if (fluxoExigeCaixa) {
+      const estoque = await validarEstoqueNaFinalizacaoPdv({
+        supabase,
+        empresaId: String(vinculo.empresa_id),
+        itens: input.itens,
+      });
+      if (!estoque.ok) {
+        return {
+          ok: false,
+          erro: estoque.erro,
+        };
+      }
+    }
 
     if (usarLivroCaixa) {
       const caixaAberto = await buscarCaixaAbertoEmpresa(

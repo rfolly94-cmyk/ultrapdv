@@ -51,11 +51,11 @@ export async function consultarSaudeAgente(): Promise<StatusAgenteImpressao> {
   try {
     const descoberto = await descobrirUltraPdvConector();
     if (!descoberto.ok) {
-      return { ok: false };
+      return { ok: false, motivoDescoberta: descoberto.motivo };
     }
     return descoberto.saude;
   } catch {
-    return { ok: false };
+    return { ok: false, motivoDescoberta: "ausente" };
   }
 }
 

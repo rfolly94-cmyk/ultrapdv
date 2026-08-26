@@ -53,6 +53,26 @@ async function comServidor(deps, fn) {
   }
 }
 
+function optionsReq(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const alvo = new URL(url);
+    const req = http.request(
+      {
+        hostname: alvo.hostname,
+        port: alvo.port,
+        path: alvo.pathname,
+        method: "OPTIONS",
+        headers,
+      },
+      (res) => {
+        resolve({ status: res.statusCode, headers: res.headers });
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 function getJson(url, headers = {}) {
   return new Promise((resolve, reject) => {
     http
@@ -137,6 +157,27 @@ test("candidatos priorizam print-engine do Connector e mantêm bin de desenvolvi
       item.endsWith("bin\\SumatraPDF.exe") || item.endsWith("bin/SumatraPDF.exe")
   );
   assert.ok(idxEngine >= 0 && idxBin >= 0 && idxEngine < idxBin);
+});
+
+test("/status é descoberta rápida sem localizar motor", async () => {
+  await comServidor(
+    {
+      localizarMotorPdf: async () => {
+        throw new Error("motor não deve ser consultado na descoberta");
+      },
+    },
+    async (base) => {
+      const { status, body } = await getJson(`${base}/status`);
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.app, "UltraPDV-Conector");
+      assert.equal(body.servico, "ultrapdv-connector");
+      assert.equal(body.porta, body.port);
+      assert.equal(body.dispositivoId, undefined);
+      assert.equal(body.motorImpressao, undefined);
+      assert.equal(body.lastPrinter, undefined);
+    }
+  );
 });
 
 test("/health sem motor PDF", async () => {
@@ -446,6 +487,22 @@ test("CORS aceita https://ultrapdv.app e recusa origem estranha", async () => {
       assert.equal(ok.status, 200);
       assert.equal(ok.body.ok, true);
       assert.equal(ok.headers["access-control-allow-origin"], "https://ultrapdv.app");
+      assert.equal(ok.headers["access-control-allow-private-network"], "true");
+
+      const preflight = await optionsReq(`${base}/status`, {
+        Origin: "https://ultrapdv.app",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Private-Network": "true",
+      });
+      assert.equal(preflight.status, 204);
+      assert.equal(
+        preflight.headers["access-control-allow-origin"],
+        "https://ultrapdv.app"
+      );
+      assert.equal(
+        preflight.headers["access-control-allow-private-network"],
+        "true"
+      );
 
       const www = await getJson(`${base}/health`, {
         Origin: "https://www.ultrapdv.app",
@@ -778,9 +835,9 @@ test("log de impressão registra motor, exit code e apaga o temporário", async 
   assert.equal(removidos.length, 1);
 });
 
-test("versão 1.3.1 e faixa de portas 18181–18190 permanecem", () => {
+test("versão 1.3.2 e faixa de portas 18181–18190 permanecem", () => {
   const versao = JSON.parse(fonte("../version.json"));
-  assert.equal(versao.version, "1.3.1");
+  assert.equal(versao.version, "1.3.2");
   assert.match(fonte("portas.mjs"), /PORTA_PADRAO = 18181/);
   assert.match(fonte("portas.mjs"), /PORTA_AUTO_MAX = 18190/);
 });

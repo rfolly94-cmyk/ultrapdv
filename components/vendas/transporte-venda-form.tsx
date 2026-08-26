@@ -14,6 +14,7 @@ import {
   Lock,
   Truck,
 } from "lucide-react";
+import { CampoValor } from "@/components/ui/campo-valor";
 import {
   MENSAGEM_FRETE_9_COM_DADOS,
   transporteConflitaComFrete9,
@@ -1552,13 +1553,15 @@ function Campo({
     | "numeric"
     | "decimal";
 }) {
+  const InputCampo =
+    inputMode === "decimal" || inputMode === "numeric" ? CampoValor : "input";
   return (
     <label className="block">
       <span className="text-sm font-medium text-zinc-700">
         {label}
       </span>
 
-      <input
+      <InputCampo
         type="text"
         value={value}
         disabled={disabled}

@@ -43,7 +43,7 @@ import {
 import { gerarPdfTesteConector } from "./pdf-teste.mjs";
 import { pastaDados, resolverRaizAgente } from "./raiz.mjs";
 import { iniciarTray } from "./tray.mjs";
-import { APP_CONECTOR, carregarVersao, NOME_CONECTOR } from "./versao.mjs";
+import { APP_CONECTOR, carregarVersao, NOME_CONECTOR, SERVICO_CONECTOR } from "./versao.mjs";
 
 const HOST = HOST_LOCAL;
 const MAX_BODY = 8 * 1024 * 1024;
@@ -54,17 +54,39 @@ const PAGINA_STATUS = readFileSync(
   "utf8"
 );
 
-function json(res, status, corpo, origem, origens) {
-  const headers = {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-  };
+function aplicarCors(headers, origem, origens) {
   if (origem && origens.includes(origem)) {
     headers["Access-Control-Allow-Origin"] = origem;
     headers["Vary"] = "Origin";
+    headers["Access-Control-Allow-Private-Network"] = "true";
   }
+  return headers;
+}
+
+function json(res, status, corpo, origem, origens) {
+  const headers = aplicarCors(
+    {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+    origem,
+    origens
+  );
   res.writeHead(status, headers);
   res.end(JSON.stringify(corpo));
+}
+
+function corpoIdentidadeConector({ porta, versao, nome }) {
+  return {
+    ok: true,
+    app: APP_CONECTOR,
+    servico: SERVICO_CONECTOR,
+    nome,
+    versao,
+    version: versao,
+    port: porta,
+    porta,
+  };
 }
 
 function portaDoHost(req, fallback) {
@@ -246,12 +268,16 @@ export function criarServidor(deps = {}) {
     }
 
     if (req.method === "OPTIONS") {
-      res.writeHead(204, {
-        "Access-Control-Allow-Origin": origemCheck.origem || origens[0],
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Max-Age": "600",
-      });
+      const headers = aplicarCors(
+        {
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Max-Age": "600",
+        },
+        origemCheck.origem,
+        origens
+      );
+      res.writeHead(204, headers);
       res.end();
       return;
     }
@@ -268,7 +294,19 @@ export function criarServidor(deps = {}) {
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/health") {
+      if (
+        req.method === "GET" &&
+        (url.pathname === "/status" || url.pathname === "/health")
+      ) {
+        const identidade = corpoIdentidadeConector({
+          porta: portaReq,
+          versao,
+          nome,
+        });
+        if (url.pathname === "/status") {
+          json(res, 200, identidade, origemCheck.origem, origens);
+          return;
+        }
         const motor = await localizar();
         const dispositivoId = await obterId();
         const cfg = await obterConfig();
@@ -276,12 +314,7 @@ export function criarServidor(deps = {}) {
           res,
           200,
           {
-            ok: true,
-            app: APP_CONECTOR,
-            nome,
-            port: portaReq,
-            versao,
-            version: versao,
+            ...identidade,
             dispositivoId,
             lastPrinter: cfg.lastPrinter || null,
             lastPaper: cfg.lastPaper || "80mm",

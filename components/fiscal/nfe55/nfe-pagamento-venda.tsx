@@ -11,6 +11,7 @@ import {
   type PixLocalCheckoutState,
 } from "@/components/pdv/pix-local-checkout";
 import { nfeInput } from "@/components/fiscal/nfe55/nfe-form-primitives";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { nomeProvedorPix } from "@/lib/pagamentos/pix/provedores-geranet";
 import { ehFormaPix } from "@/lib/pagamentos/pix/local-regras";
 import {
@@ -165,7 +166,7 @@ export function NfePagamentoVenda({
               <span className="flex-1 text-[13px] text-zinc-800">
                 {rotuloFormaCheckout(forma)}
               </span>
-              <input
+              <CampoValor
                 className={`${nfeInput} w-28 text-right`}
                 inputMode="decimal"
                 placeholder="0,00"

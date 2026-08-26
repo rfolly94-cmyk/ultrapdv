@@ -109,11 +109,42 @@ export function pareceLeituraScanner(
   );
 }
 
+export function indiceAposSetaBuscaPdv(input: {
+  tecla: "ArrowDown" | "ArrowUp";
+  indiceAtual: number | null;
+  total: number;
+}) {
+  const total = Number(input.total);
+  if (!Number.isFinite(total) || total <= 0) {
+    return null;
+  }
+
+  const ultimo = total - 1;
+  if (input.tecla === "ArrowDown") {
+    if (input.indiceAtual == null) {
+      return 0;
+    }
+    return Math.min(Math.max(input.indiceAtual + 1, 0), ultimo);
+  }
+
+  if (input.indiceAtual == null) {
+    return 0;
+  }
+
+  return Math.min(Math.max(input.indiceAtual - 1, 0), ultimo);
+}
+
+export function indiceInicialBuscaPdv(total: number) {
+  const quantidade = Number(total);
+  return Number.isFinite(quantidade) && quantidade > 0 ? 0 : null;
+}
+
 export function decidirAcaoEnterBuscaPdv<T extends ProdutoCodigoPdv>(input: {
   termo: string;
   produtos: T[];
   produtosFiltrados: T[];
   leituraScanner: boolean;
+  produtoSelecionado?: T | null;
 }): AcaoEnterBuscaPdv {
   const termo = String(input.termo ?? "").trim();
   if (!termo) {
@@ -125,12 +156,20 @@ export function decidirAcaoEnterBuscaPdv<T extends ProdutoCodigoPdv>(input: {
     return { tipo: "adicionar", produto: exato };
   }
 
-  if (input.leituraScanner || pareceCodigoProduto(termo)) {
+  if (input.leituraScanner) {
     return { tipo: "nao-encontrado" };
+  }
+
+  if (input.produtoSelecionado) {
+    return { tipo: "adicionar", produto: input.produtoSelecionado };
   }
 
   if (input.produtosFiltrados.length === 1) {
     return { tipo: "adicionar", produto: input.produtosFiltrados[0] };
+  }
+
+  if (pareceCodigoProduto(termo)) {
+    return { tipo: "nao-encontrado" };
   }
 
   return { tipo: "ignorar" };

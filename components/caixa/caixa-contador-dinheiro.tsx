@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { CampoValor } from "@/components/ui/campo-valor";
 import { formatarMoeda } from "@/lib/relatorios/formatacao";
 import {
   CEDULAS_REAIS,
@@ -31,7 +32,7 @@ function CampoQuantidade({
         {formatarDenominacao(valor)}
       </span>
       <span className="flex items-center gap-2">
-        <input
+        <CampoValor
           type="number"
           min={0}
           step={1}

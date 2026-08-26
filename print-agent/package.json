@@ -1,6 +1,6 @@
 {
   "name": "ultrapdv-connector",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "private": true,
   "description": "UltraPDV Connector — agente local Windows (127.0.0.1) para impressão via SumatraPDF",
   "type": "module",

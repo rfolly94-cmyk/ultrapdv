@@ -19,6 +19,7 @@ import {
   cadastrarProduto,
 } from "./actions";
 import { ProdutoCatalogoCampos } from "./produto-catalogo-campos";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import {
   ORIGENS_MERCADORIA,
@@ -286,7 +287,7 @@ export function ProdutoFormCampos({
               Estoque inicial
             </label>
 
-            <input
+            <CampoValor
               name="estoque_inicial"
               type="number"
               min="0"
@@ -771,10 +772,11 @@ function Campo({
         {label}
       </label>
 
-      <input
+      <CampoValor
         name={name}
         defaultValue={defaultValue ?? ""}
         required={required}
+        inputMode="decimal"
         className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 outline-none transition focus:border-zinc-900"
       />
     </div>

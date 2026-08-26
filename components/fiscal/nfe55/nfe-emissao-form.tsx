@@ -37,6 +37,7 @@ import {
   nfeSelect,
   nfeSomenteLeitura,
 } from "@/components/fiscal/nfe55/nfe-form-primitives";
+import { CampoValor } from "@/components/ui/campo-valor";
 import {
   NfePagamentoVenda,
   pagamentosNfeParaRascunho,
@@ -2254,7 +2255,7 @@ export function NfeEmissaoForm({
             <input className={nfeInput} readOnly value={moeda.format(totalProdutos)} />
           </NfeCampo>
           <NfeCampo label="Valor do Frete (R$)">
-            <input
+            <CampoValor
               className={nfeInput}
               readOnly={!podeEditar}
               inputMode="decimal"
@@ -2265,7 +2266,7 @@ export function NfeEmissaoForm({
             />
           </NfeCampo>
           <NfeCampo label="Valor do Seguro (R$)">
-            <input
+            <CampoValor
               className={nfeInput}
               readOnly={!podeEditar}
               inputMode="decimal"
@@ -2276,7 +2277,7 @@ export function NfeEmissaoForm({
             />
           </NfeCampo>
           <NfeCampo label="Outras Despesas (R$)">
-            <input
+            <CampoValor
               className={nfeInput}
               readOnly={!podeEditar}
               inputMode="decimal"
@@ -2287,7 +2288,7 @@ export function NfeEmissaoForm({
             />
           </NfeCampo>
           <NfeCampo label="Desconto (R$)">
-            <input
+            <CampoValor
               className={nfeInput}
               readOnly={!podeEditar}
               inputMode="decimal"
@@ -2912,17 +2913,19 @@ function ItemLinha({
             pelo motor na verificação. Sem regra, a emissão é bloqueada.
             {podeEditar ? (
               <span className="ml-3 inline-flex gap-2">
-                <input
+                <CampoValor
                   key={`qtd-${item.id}-${item.quantidade}`}
                   className={`${nfeInput} w-20`}
                   defaultValue={String(item.quantidade).replace(".", ",")}
                   id={`qtd-${item.id}`}
+                  inputMode="decimal"
                 />
-                <input
+                <CampoValor
                   key={`vu-${item.id}-${item.valorUnitario}`}
                   className={`${nfeInput} w-28`}
                   defaultValue={String(item.valorUnitario).replace(".", ",")}
                   id={`vu-${item.id}`}
+                  inputMode="decimal"
                 />
                 <button
                   type="button"

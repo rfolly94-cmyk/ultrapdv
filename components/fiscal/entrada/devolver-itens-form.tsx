@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { criarDevolucaoFornecedor } from "@/app/fiscal/entradas/devolucao-actions";
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
+import { CampoValor } from "@/components/ui/campo-valor";
 
 export function DevolverItensForm({
   documentoId,
@@ -132,10 +133,11 @@ export function DevolverItensForm({
                   <td className="num">{item.jaDevolvido}</td>
                   <td className="num">{item.disponivel}</td>
                   <td className="num">
-                    <input
+                    <CampoValor
                       className="updv-input w-24 text-right"
                       value={quantidades[item.id] ?? "0"}
                       disabled={item.disponivel <= 0 || pending}
+                      inputMode="decimal"
                       onChange={(event) =>
                         setQuantidades((atual) => ({
                           ...atual,

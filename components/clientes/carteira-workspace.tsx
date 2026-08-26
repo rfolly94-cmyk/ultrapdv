@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { receberCarteira } from "../../app/clientes/[id]/carteira/actions";
+import { CampoValor } from "@/components/ui/campo-valor";
 
 type Cliente = {
   id: string;
@@ -967,7 +968,7 @@ export function CarteiraWorkspace({
                 Valor recebido
               </label>
 
-              <input
+              <CampoValor
                 autoFocus
                 value={
                   valorParcial

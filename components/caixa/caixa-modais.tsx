@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppModal } from "@/components/ui/app-modal";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { PageAlert } from "@/components/ui/page-alert";
 import {
   abrirCaixa,
@@ -83,7 +84,7 @@ export function ModalAbrirCaixa({
           <span className="text-xs font-medium text-zinc-600">
             Saldo inicial em dinheiro
           </span>
-          <input
+          <CampoValor
             value={saldo}
             onChange={(event) => {
               setSaldo(event.target.value);
@@ -206,7 +207,7 @@ export function ModalMovimentoCaixa({
         ) : null}
         <label className="block text-[13px]">
           <span className="text-xs font-medium text-zinc-600">Valor</span>
-          <input
+          <CampoValor
             value={valor}
             onChange={(event) => {
               setValor(event.target.value);

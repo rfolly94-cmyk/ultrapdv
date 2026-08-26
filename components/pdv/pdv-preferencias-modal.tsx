@@ -9,16 +9,23 @@ import {
 
 export function PdvPreferenciasModal({
   inicial,
+  permitirVendaSemEstoque,
   salvando,
   onCancelar,
   onPreview,
+  onPermitirVendaSemEstoque,
   onSalvar,
 }: {
   inicial: PreferenciasPdv;
+  permitirVendaSemEstoque: boolean;
   salvando: boolean;
   onCancelar: () => void;
   onPreview: (preferencias: PreferenciasPdv) => void;
-  onSalvar: (preferencias: PreferenciasPdv) => void;
+  onPermitirVendaSemEstoque: (valor: boolean) => void;
+  onSalvar: (
+    preferencias: PreferenciasPdv,
+    permitirVendaSemEstoque: boolean
+  ) => void;
 }) {
   function atualizar(parcial: Partial<PreferenciasPdv>) {
     onPreview({ ...inicial, ...parcial });
@@ -103,6 +110,29 @@ export function PdvPreferenciasModal({
           Mostrar fotos dos produtos
         </label>
 
+        <p className="mt-5 text-xs font-semibold uppercase tracking-wide">
+          Estoque
+        </p>
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={permitirVendaSemEstoque}
+            onChange={(event) =>
+              onPermitirVendaSemEstoque(event.target.checked)
+            }
+          />
+          <span>
+            <span className="font-medium">Permitir venda sem estoque</span>
+            <span className="pdv-muted mt-0.5 block text-xs">
+              Permite concluir vendas mesmo quando o estoque disponível for insuficiente.
+            </span>
+          </span>
+        </label>
+        <p className="pdv-muted mt-2 text-xs">
+          Vale para toda a empresa, não só para este usuário.
+        </p>
+
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
@@ -114,7 +144,7 @@ export function PdvPreferenciasModal({
           <button
             type="button"
             disabled={salvando}
-            onClick={() => onSalvar(inicial)}
+            onClick={() => onSalvar(inicial, permitirVendaSemEstoque)}
             className="pdv-btn-primary rounded-md px-4 py-2 text-sm font-semibold disabled:opacity-60"
           >
             {salvando ? "Salvando..." : "Salvar"}

@@ -18,7 +18,11 @@ import {
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { filtrarFormasPagamentoCheckoutPdv } from "@/lib/pdv/formas-pagamento-checkout";
-import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
+import { permitirVendaSemEstoqueDoRegistro } from "@/lib/pdv/venda-sem-estoque";
+import {
+  filtrarRegistrosDaEmpresaAtiva,
+  registroPertenceAEmpresaAtiva,
+} from "@/lib/empresa/assert-registro-empresa-ativa";
 import { resolverAssinaturaEmpresa } from "@/lib/assinatura/resolver-assinatura-empresa";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
@@ -121,6 +125,8 @@ export default async function PdvPage({
     caixaAbertoRegistro,
     sessaoPermissoes,
     controleAtivo,
+    estoqueResult,
+    pdvConfigResult,
   ] = await Promise.all([
     supabase
       .from("produtos")
@@ -204,6 +210,15 @@ export default async function PdvPage({
     buscarCaixaAbertoEmpresa(supabase, String(vinculo.empresa_id)),
     obterPermissoesSessao(),
     controleCaixaAtivo(supabase, String(vinculo.empresa_id)),
+    supabase
+      .from("estoque_atual")
+      .select("empresa_id, produto_id, quantidade")
+      .eq("empresa_id", vinculo.empresa_id),
+    supabase
+      .from("pdv_configuracoes")
+      .select("empresa_id, permitir_venda_sem_estoque")
+      .eq("empresa_id", vinculo.empresa_id)
+      .maybeSingle(),
   ]);
 
   if (
@@ -229,6 +244,30 @@ export default async function PdvPage({
       formasResult.error.message
     );
   }
+
+  if (estoqueResult.error) {
+    throw new Error(estoqueResult.error.message);
+  }
+
+  if (pdvConfigResult.error) {
+    throw new Error(pdvConfigResult.error.message);
+  }
+
+  const estoquePorProduto = new Map(
+    filtrarRegistrosDaEmpresaAtiva(
+      estoqueResult.data ?? [],
+      vinculo.empresa_id
+    ).map((item) => [item.produto_id, Number(item.quantidade)])
+  );
+  const pdvConfig = registroPertenceAEmpresaAtiva(
+    pdvConfigResult.data,
+    vinculo.empresa_id
+  )
+    ? pdvConfigResult.data
+    : null;
+  const permitirVendaSemEstoque = permitirVendaSemEstoqueDoRegistro(
+    pdvConfig?.permitir_venda_sem_estoque
+  );
 
   const fiscal = registroPertenceAEmpresaAtiva(
     fiscalResult.data,
@@ -283,9 +322,12 @@ export default async function PdvPage({
       usuarioNome={usuarioNome}
       logoUrl={logoUrl}
       preferenciasIniciais={preferencias}
+      permitirVendaSemEstoqueInicial={permitirVendaSemEstoque}
       produtos={
-        produtosResult.data ??
-        []
+        (produtosResult.data ?? []).map((produto) => ({
+          ...produto,
+          estoqueDisponivel: estoquePorProduto.get(produto.id) ?? 0,
+        }))
       }
       clientes={
         clientesResult.data ??

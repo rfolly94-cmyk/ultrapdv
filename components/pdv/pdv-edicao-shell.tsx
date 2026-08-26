@@ -23,6 +23,7 @@ import {
 
 import { finalizarVendaPdv } from "../../app/pdv/actions";
 import { editarVendaPdv } from "../../app/pdv/editar-actions";
+import { CampoValor } from "@/components/ui/campo-valor";
 import {
   MENSAGEM_PAGAMENTOS_ULTRAPASSAM,
   avaliarPagamentosPdv,
@@ -55,6 +56,9 @@ import {
   type PixLocalCheckoutState,
 } from "./pix-local-checkout";
 
+import { PdvBuscaResultados } from "@/components/pdv/pdv-busca-resultados";
+import { indiceAposSetaBuscaPdv, indiceInicialBuscaPdv } from "@/lib/pdv/busca-produto";
+
 type Produto = {
   id: string;
   codigo: string;
@@ -66,6 +70,7 @@ type Produto = {
   preco_venda:
     | number
     | string;
+  estoqueDisponivel?: number;
 };
 
 type Cliente = {
@@ -348,6 +353,11 @@ export function PdvEdicaoShell({
   ] = useState("");
 
   const [
+    indiceSelecionadoBusca,
+    setIndiceSelecionadoBusca,
+  ] = useState<number | null>(null);
+
+  const [
     quantidadeDigitada,
     setQuantidadeDigitada,
   ] = useState("1");
@@ -485,6 +495,7 @@ export function PdvEdicaoShell({
     useRef<string | null>(
       null
     );
+  const chaveResultadosBuscaRef = useRef("");
 
   useEffect(() => {
     buscaRef.current?.focus();
@@ -553,6 +564,21 @@ export function PdvEdicaoShell({
       busca,
       produtos,
     ]);
+
+  const produtosBuscaVisiveis = useMemo(
+    () => produtosFiltrados.slice(0, 20),
+    [produtosFiltrados]
+  );
+  const primeiroIdBusca = produtosBuscaVisiveis[0]?.id ?? null;
+  const totalBuscaVisivel = produtosBuscaVisiveis.length;
+  const chaveResultadosBusca = `${busca.trim()}|${primeiroIdBusca}|${totalBuscaVisivel}`;
+
+  if (chaveResultadosBuscaRef.current !== chaveResultadosBusca) {
+    chaveResultadosBuscaRef.current = chaveResultadosBusca;
+    setIndiceSelecionadoBusca(
+      !busca.trim() ? null : indiceInicialBuscaPdv(totalBuscaVisivel)
+    );
+  }
 
   const clientesFiltrados =
     useMemo(() => {
@@ -812,6 +838,7 @@ export function PdvEdicaoShell({
 
     setBusca("");
     setQuantidadeDigitada("1");
+    setIndiceSelecionadoBusca(null);
 
     requestAnimationFrame(
       () =>
@@ -892,6 +919,21 @@ export function PdvEdicaoShell({
   function aoPressionarBusca(
     event: React.KeyboardEvent<HTMLInputElement>
   ) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!busca.trim() || produtosBuscaVisiveis.length === 0) {
+        return;
+      }
+      setIndiceSelecionadoBusca((atual) =>
+        indiceAposSetaBuscaPdv({
+          tecla: event.key === "ArrowUp" ? "ArrowUp" : "ArrowDown",
+          indiceAtual: atual,
+          total: produtosBuscaVisiveis.length,
+        })
+      );
+      return;
+    }
+
     if (
       event.key !== "Enter"
     ) {
@@ -904,6 +946,16 @@ export function PdvEdicaoShell({
       busca.trim();
 
     if (!termo) {
+      return;
+    }
+
+    const produtoSelecionado =
+      indiceSelecionadoBusca == null
+        ? null
+        : produtosBuscaVisiveis[indiceSelecionadoBusca] ?? null;
+
+    if (produtoSelecionado) {
+      adicionarProduto(produtoSelecionado);
       return;
     }
 
@@ -1528,40 +1580,26 @@ export function PdvEdicaoShell({
             </div>
             <div className="flex h-10 items-center rounded-full border border-zinc-200 px-4 text-sm font-medium text-zinc-700">
               Quant:
-              <input
+              <CampoValor
                 value={quantidadeDigitada}
                 onChange={(event) => setQuantidadeDigitada(event.target.value)}
+                inputMode="decimal"
                 className="ml-1 w-10 border-0 bg-transparent p-0 text-center text-sm font-semibold outline-none"
               />
             </div>
           </div>
 
           {busca.trim() && (
-            <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-zinc-200">
-              {produtosFiltrados.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-zinc-500">
-                  Nenhum produto encontrado.
-                </p>
-              ) : (
-                produtosFiltrados.slice(0, 20).map((produto) => (
-                  <button
-                    key={produto.id}
-                    type="button"
-                    onClick={() => adicionarProduto(produto)}
-                    className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-blue-50"
-                  >
-                    <span className="truncate font-medium">
-                      {produto.nome}
-                      <span className="ml-2 text-xs text-zinc-400">
-                        {produto.codigo}
-                      </span>
-                    </span>
-                    <span className="shrink-0 font-semibold">
-                      {dinheiroCentavos(paraCentavos(produto.preco_venda))}
-                    </span>
-                  </button>
-                ))
-              )}
+            <div className="pdv-busca-resultados mt-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-200">
+              <PdvBuscaResultados
+                produtos={produtosBuscaVisiveis}
+                produtoSelecionadoId={
+                  indiceSelecionadoBusca == null
+                    ? null
+                    : produtosBuscaVisiveis[indiceSelecionadoBusca]?.id ?? null
+                }
+                onEscolher={adicionarProduto}
+              />
             </div>
           )}
 
@@ -1864,7 +1902,7 @@ export function PdvEdicaoShell({
             Desconto em R$
           </label>
 
-          <input
+          <CampoValor
             autoFocus
             value={
               descontoTexto
@@ -2002,7 +2040,7 @@ export function PdvEdicaoShell({
                     <span className="flex-1 text-sm font-medium text-zinc-900">
                       {rotuloFormaCheckout(forma)}
                     </span>
-                    <input
+                    <CampoValor
                       value={atual?.valorTexto ?? ""}
                       onChange={(event) =>
                         atualizarPagamento(forma.id, event.target.value)

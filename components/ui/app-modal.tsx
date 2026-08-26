@@ -17,6 +17,7 @@ export function AppModal({
   children,
   footer,
   size = "sm",
+  overlayClassName = "z-40",
 }: {
   open: boolean;
   title: string;
@@ -24,13 +25,16 @@ export function AppModal({
   children: ReactNode;
   footer?: ReactNode;
   size?: keyof typeof larguras;
+  overlayClassName?: string;
 }) {
   if (!open) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+    <div
+      className={`fixed inset-0 flex items-center justify-center bg-black/40 p-4 ${overlayClassName}`}
+    >
       <div
         className={`flex max-h-[90vh] w-full flex-col overflow-hidden rounded-md border border-zinc-200 bg-white shadow-xl ${larguras[size]}`}
       >

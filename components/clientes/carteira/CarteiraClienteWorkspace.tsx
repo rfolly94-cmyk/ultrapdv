@@ -29,6 +29,7 @@ import {
   type EmissaoFiscalCarteira,
 } from "@/lib/carteira/fiscal-consulta";
 import { ActionMenu } from "@/components/ui/action-menu";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { CancelarVendaComercial } from "@/components/vendas/cancelar-venda-comercial";
 import { CancelarItensCarteira } from "@/components/clientes/carteira/CancelarItensCarteira";
 import { conferirItensMesmaVenda } from "@/lib/carteira/cancelar-itens";
@@ -839,7 +840,7 @@ export function CarteiraClienteWorkspace({
                     <span className="text-xs font-medium text-zinc-600">
                       Valor parcial
                     </span>
-                    <input
+                    <CampoValor
                       value={valorParcial}
                       onChange={(event) => setValorParcial(event.target.value)}
                       placeholder="0,00"

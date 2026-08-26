@@ -654,8 +654,16 @@ test("engrenagem mostra amostras e aplica preview imediato", () => {
   assert.match(modal, /Paleta do PDV/);
   assert.match(modal, /amostrasDaPaleta/);
   assert.match(modal, /onPreview/);
+  assert.match(modal, /Permitir venda sem estoque/);
   assert.match(modal, /Cancelar/);
   assert.match(modal, /Salvar/);
+
+  const shell = fonte("components/pdv/pdv-shell.tsx");
+  assert.match(
+    shell,
+    /import \{ PdvPreferenciasModal \} from "@\/components\/pdv\/pdv-preferencias-modal"/
+  );
+  assert.match(shell, /<PdvPreferenciasModal/);
 });
 
 test("migration extras amplia paletas sem criar tabela nova", () => {

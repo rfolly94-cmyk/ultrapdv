@@ -25,7 +25,7 @@ cd print-agent
 npm start
 ```
 
-O painel local e o `/health` usam a porta efetiva (pode não ser 18181). O UltraPDV web varre 18181–18190 e só aceita `app === "UltraPDV-Conector"`.
+O painel local usa `/health`. A descoberta do UltraPDV web tenta `/status` e, se a rota não existir, `/health`. Só aceita `app === "UltraPDV-Conector"` ou `servico === "ultrapdv-connector"`. A faixa de portas é 18181–18190.
 
 Para imprimir em desenvolvimento, o motor precisa de `print-agent\bin\SumatraPDF.exe` **e** `print-agent\bin\libmupdf.dll` (o exe 3.6 sem a DLL abre o instalador). O build copia esse par para `print-engine\` no Setup. O cliente final **não** precisa ter o Sumatra instalado.
 

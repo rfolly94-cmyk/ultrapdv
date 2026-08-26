@@ -22,6 +22,10 @@ export function mensagemErroFinalizacaoPublica(erro: unknown) {
     return MENSAGEM_TROCO_SEM_FORMA;
   }
 
+  if (/Estoque insuficiente/i.test(limpo)) {
+    return limpo;
+  }
+
   if (
     /rpc_|postgres|permission denied|jwt|stack|function public\./i.test(limpo)
   ) {

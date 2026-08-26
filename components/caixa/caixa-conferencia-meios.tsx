@@ -1,3 +1,4 @@
+import { CampoValor } from "@/components/ui/campo-valor";
 import { formatarMoeda } from "@/lib/relatorios/formatacao";
 import {
   rotuloStatusDiferencaCaixa,
@@ -92,7 +93,7 @@ export function CaixaConferenciaMeios({
                   {somenteLeitura ? (
                     informadoNumero == null ? "—" : formatarMoeda(informadoNumero)
                   ) : (
-                    <input
+                    <CampoValor
                       value={informadoTexto}
                       onChange={(event) => onChange?.(chave, event.target.value)}
                       placeholder="0,00"

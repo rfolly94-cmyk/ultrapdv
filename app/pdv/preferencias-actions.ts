@@ -9,8 +9,15 @@ import {
 } from "@/lib/pdv/acesso-operacao";
 import { gravarPreferenciasPdvSessao } from "@/lib/pdv/preferencias-servidor";
 import type { PreferenciasPdv } from "@/lib/pdv/preferencias";
+import { gravarPermitirVendaSemEstoqueSessao } from "@/lib/pdv/venda-sem-estoque-servidor";
 
-export async function salvarPreferenciasPdvAction(input: PreferenciasPdv) {
+export type SalvarPreferenciasPdvInput = PreferenciasPdv & {
+  permitirVendaSemEstoque: boolean;
+};
+
+export async function salvarPreferenciasPdvAction(
+  input: SalvarPreferenciasPdvInput
+) {
   const identidade = await obterIdentidadeEmpresaSessao();
   if (!identidade?.empresaId) {
     return { ok: false as const, erro: "Não autenticado." };
@@ -31,10 +38,22 @@ export async function salvarPreferenciasPdvAction(input: PreferenciasPdv) {
   }
 
   const resultado = await gravarPreferenciasPdvSessao(input);
-
-  if (resultado.ok) {
-    revalidatePath("/pdv");
+  if (!resultado.ok) {
+    return resultado;
   }
 
-  return resultado;
+  const estoque = await gravarPermitirVendaSemEstoqueSessao(
+    input.permitirVendaSemEstoque === true
+  );
+  if (!estoque.ok) {
+    return estoque;
+  }
+
+  revalidatePath("/pdv");
+
+  return {
+    ok: true as const,
+    preferencias: resultado.preferencias,
+    permitirVendaSemEstoque: estoque.permitirVendaSemEstoque,
+  };
 }

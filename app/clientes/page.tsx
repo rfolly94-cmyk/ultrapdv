@@ -8,6 +8,7 @@ import { EnderecoViaCepCampos } from "@/components/cadastro/endereco-via-cep-cam
 import { createClient } from "@/lib/supabase/server";
 import { PageAlert } from "@/components/ui/page-alert";
 import { PageHeader } from "@/components/ui/page-header";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { carregarListagemClientes } from "@/lib/clientes/carregar-listagem";
 import { parseFiltroListagemClientes } from "@/lib/clientes/listagem";
@@ -540,6 +541,7 @@ function Campo({
   max,
   maxLength,
 }: CampoProps) {
+  const InputCampo = inputMode === "decimal" ? CampoValor : "input";
   return (
     <div>
       <Label>
@@ -547,7 +549,7 @@ function Campo({
         {required ? " *" : ""}
       </Label>
 
-      <input
+      <InputCampo
         name={name}
         type={type}
         required={required}

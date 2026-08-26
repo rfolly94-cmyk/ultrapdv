@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 
+import { CampoValor } from "@/components/ui/campo-valor";
 import {
   adicionarItensDevolucaoFornecedor,
   listarEntradasElegiveisDevolucao,
@@ -139,7 +140,7 @@ export function AdicionarItensEntradaDevolucao({
                             item {item.numeroItem} · saldo {item.saldo}
                           </span>
                         </span>
-                        <input
+                        <CampoValor
                           className="updv-input w-24"
                           inputMode="decimal"
                           placeholder="Qtd"

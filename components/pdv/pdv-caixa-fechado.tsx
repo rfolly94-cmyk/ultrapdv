@@ -10,6 +10,7 @@ import {
   MENSAGEM_CAIXA_FECHADO_PDV,
   MENSAGEM_CAIXA_FECHADO_SEM_PERMISSAO,
 } from "@/lib/caixa/mensagens";
+import { CampoValor } from "@/components/ui/campo-valor";
 import { PageAlert } from "@/components/ui/page-alert";
 
 export function PdvCaixaFechado({
@@ -94,7 +95,7 @@ export function PdvCaixaFechado({
             <span className="text-xs font-medium text-zinc-600">
               Saldo inicial em dinheiro
             </span>
-            <input
+            <CampoValor
               value={saldo}
               onChange={(event) => {
                 setSaldo(event.target.value);
