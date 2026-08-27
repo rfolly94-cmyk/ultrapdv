@@ -92,7 +92,7 @@ test("9. código manual duplicado na mesma empresa é bloqueado", () => {
 test("10. editar produto não gera código novo", () => {
   const editar = actions.slice(actions.indexOf("export async function editarProduto"));
   assert.doesNotMatch(
-    editar.slice(0, editar.indexOf("export async function atualizarPublicacaoCatalogo")),
+    editar.slice(0, editar.indexOf("export async function listarLotesProduto")),
     /gerar_proximo_codigo_produto|codigoAutomatico/
   );
   assert.match(form, /produto\?\.id/);

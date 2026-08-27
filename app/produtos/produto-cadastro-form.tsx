@@ -5,6 +5,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { X } from "lucide-react";
 
 import {
   UNIDADE_MEDIDA_PADRAO,
@@ -19,6 +20,7 @@ import {
   cadastrarProduto,
 } from "./actions";
 import { ProdutoCatalogoCampos } from "./produto-catalogo-campos";
+import { ProdutoValidadeAba } from "./produto-validade-aba";
 import { CampoValor } from "@/components/ui/campo-valor";
 import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import {
@@ -56,6 +58,7 @@ export type ProdutoFormularioValores = {
   catalogo_destaque?: boolean;
   catalogo_mostrar_preco?: boolean;
   catalogo_imagem_path?: string | null;
+  controlar_validade?: boolean;
 };
 
 type ProdutoCadastroFormProps = {
@@ -63,6 +66,8 @@ type ProdutoCadastroFormProps = {
   marcas: ItemRelacionado[];
   gruposFiscais: GrupoFiscalResumo[];
   podeInformarEstoqueInicial?: boolean;
+  produto?: ProdutoFormularioValores;
+  clonando?: boolean;
 };
 
 type ProdutoFormCamposProps = {
@@ -94,12 +99,21 @@ export function ProdutoCadastroForm({
   marcas,
   gruposFiscais,
   podeInformarEstoqueInicial = false,
+  produto,
+  clonando = false,
 }: ProdutoCadastroFormProps) {
   return (
     <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-6">
       <h2 className="text-xl font-semibold">
-        Novo produto
+        {clonando ? "Clonar produto" : "Novo produto"}
       </h2>
+      {clonando && (
+        <p className="mt-2 text-sm text-zinc-600">
+          Os dados do produto original foram copiados. Revise e clique em
+          Cadastrar produto para gravar. Código, EAN e estoque não são
+          copiados.
+        </p>
+      )}
 
       <form
         action={cadastrarProduto}
@@ -109,6 +123,7 @@ export function ProdutoCadastroForm({
           categorias={categorias}
           marcas={marcas}
           gruposFiscais={gruposFiscais}
+          produto={produto}
           mostrarEstoqueInicial
           podeInformarEstoqueInicial={
             podeInformarEstoqueInicial
@@ -139,6 +154,7 @@ export function ProdutoFormCampos({
   const unidadeInicial =
     produto?.unidade_medida || UNIDADE_MEDIDA_PADRAO;
   const [unidade, setUnidade] = useState(unidadeInicial);
+  const [aba, setAba] = useState<"cadastro" | "validade">("cadastro");
   const catalogoNoPlano = useRecursoLiberado("catalogo");
 
   const unidades = useMemo(() => {
@@ -188,6 +204,38 @@ export function ProdutoFormCampos({
 
   return (
     <>
+      <nav
+        aria-label="Cadastro do produto"
+        className="md:col-span-3 flex h-10 items-center gap-1 border-b border-zinc-200"
+      >
+        {(
+          [
+            { id: "cadastro", label: "Cadastro" },
+            { id: "validade", label: "Validade" },
+          ] as const
+        ).map((item) => {
+          const ativa = aba === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setAba(item.id)}
+              className={[
+                "relative shrink-0 px-2.5 py-1.5 text-[13px] font-medium",
+                ativa
+                  ? "text-[var(--primary)]"
+                  : "text-zinc-500 hover:text-zinc-800",
+              ].join(" ")}
+            >
+              {item.label}
+              {ativa && (
+                <span className="absolute inset-x-2 bottom-0 h-0.5 bg-[var(--primary)]" />
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
       {produto?.id && (
         <input
           type="hidden"
@@ -195,6 +243,8 @@ export function ProdutoFormCampos({
           value={produto.id}
         />
       )}
+
+      <div className={aba === "cadastro" ? "contents" : "hidden"}>
 
       {produto?.id ? (
         <Campo
@@ -322,7 +372,7 @@ export function ProdutoFormCampos({
 
       <details
         className="md:col-span-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4"
-        open={Boolean(produto?.id)}
+        open={Boolean(produto)}
       >
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
           <div>
@@ -399,6 +449,14 @@ export function ProdutoFormCampos({
           </div>
         </div>
       </details>
+      </div>
+
+      <div className={aba === "validade" ? "md:col-span-3" : "hidden"}>
+        <ProdutoValidadeAba
+          produtoId={produto?.id}
+          controlarValidade={Boolean(produto?.controlar_validade)}
+        />
+      </div>
     </>
   );
 }
@@ -540,10 +598,11 @@ function CampoRelacionado({
           <button
             type="button"
             onClick={limpar}
-            title={`Remover ${tipo}`}
-            className="shrink-0 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+            title={`Limpar ${tipo}`}
+            aria-label={`Limpar ${tipo}`}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-zinc-700 hover:bg-zinc-50"
           >
-            Limpar
+            <X className="h-4 w-4" />
           </button>
         )}
 

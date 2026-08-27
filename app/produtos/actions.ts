@@ -52,6 +52,15 @@ import {
   formMarcouCodigoAutomatico,
   mensagemCodigoDuplicado,
 } from "@/lib/produtos/codigo-automatico";
+import {
+  MENSAGEM_CONTROLE_VALIDADE_INATIVO,
+  MENSAGEM_LOTE_DUPLICADO,
+  normalizarDadosLoteProduto,
+  ordenarLotesFefo,
+  validarDadosLoteProduto,
+  validarQuantidadeContraEstoque,
+  type LoteEstoque,
+} from "@/lib/produtos/lotes";
 
 type ResultadoProduto =
   | {
@@ -290,6 +299,7 @@ function lerDadosComerciaisProduto(
     precoVendaInformado: precoVenda,
     estoqueInicialInformado: estoqueInicial,
     ativo: formData.get("ativo") === "1",
+    controlarValidade: formData.get("controlar_validade") === "1",
   };
 }
 
@@ -477,6 +487,7 @@ function payloadComercialProduto(
     preco_custo: dados.precoCusto,
     preco_venda: dados.precoVenda,
     ativo: dados.ativo,
+    controlar_validade: dados.controlarValidade,
   };
 }
 
@@ -790,15 +801,18 @@ export async function cadastrarProduto(
       voltarErro(`${MENSAGEM_FISCAL_NAO_GRAVADO} ${fiscal.erro}`);
     }
 
-    if (!dados.ativo) {
-      const { error: erroInativo } = await supabase
+    if (!dados.ativo || dados.controlarValidade) {
+      const { error: erroFlags } = await supabase
         .from("produtos")
-        .update({ ativo: false })
+        .update({
+          ativo: dados.ativo,
+          controlar_validade: dados.controlarValidade,
+        })
         .eq("empresa_id", empresaId)
         .eq("id", produtoId);
 
-      if (erroInativo) {
-        voltarErro(erroInativo.message);
+      if (erroFlags) {
+        voltarErro(erroFlags.message);
       }
     }
   }
@@ -931,6 +945,7 @@ export async function editarProduto(
       preco_custo: dados.precoCusto,
       preco_venda: dados.precoVenda,
       ativo: dados.ativo,
+      controlar_validade: dados.controlarValidade,
       ...(catalogo ? payloadCatalogoProduto(catalogo, imagemPath) : {}),
     })
     .eq("empresa_id", empresaId)
@@ -969,6 +984,362 @@ export async function editarProduto(
     ok: true,
     mensagem: "Alteração realizada com sucesso",
   };
+}
+
+const LOTE_SELECT =
+  "id, empresa_id, produto_id, codigo_lote, data_fabricacao, data_validade, quantidade, observacao, created_at, updated_at";
+
+function mapearLote(registro: Record<string, unknown>): LoteEstoque {
+  return {
+    id: String(registro.id),
+    empresa_id: String(registro.empresa_id),
+    produto_id: String(registro.produto_id),
+    codigo_lote: String(registro.codigo_lote),
+    data_fabricacao: registro.data_fabricacao
+      ? String(registro.data_fabricacao).slice(0, 10)
+      : null,
+    data_validade: String(registro.data_validade).slice(0, 10),
+    quantidade: Number(registro.quantidade ?? 0),
+    observacao: registro.observacao ? String(registro.observacao) : null,
+    created_at: String(registro.created_at),
+    updated_at: String(registro.updated_at),
+  };
+}
+
+async function carregarProdutoValidade(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  empresaId: string,
+  produtoId: string
+) {
+  const { data, error } = await supabase
+    .from("produtos")
+    .select("id, controlar_validade")
+    .eq("empresa_id", empresaId)
+    .eq("id", produtoId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data;
+}
+
+async function carregarEstoqueAtualProduto(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  empresaId: string,
+  produtoId: string
+) {
+  const { data, error } = await supabase
+    .from("estoque_atual")
+    .select("quantidade")
+    .eq("empresa_id", empresaId)
+    .eq("produto_id", produtoId)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false as const, erro: error.message };
+  }
+
+  return {
+    ok: true as const,
+    quantidade: Number(data?.quantidade ?? 0),
+  };
+}
+
+async function carregarLotesProduto(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  empresaId: string,
+  produtoId: string
+) {
+  const { data, error } = await supabase
+    .from("estoque_lotes")
+    .select(LOTE_SELECT)
+    .eq("empresa_id", empresaId)
+    .eq("produto_id", produtoId);
+
+  if (error) {
+    return { ok: false as const, erro: error.message };
+  }
+
+  const lotes = ordenarLotesFefo(
+    (data ?? []).map((registro) => mapearLote(registro as Record<string, unknown>))
+  );
+
+  return { ok: true as const, lotes };
+}
+
+export async function listarLotesProduto(produtoId: string): Promise<
+  | {
+      ok: true;
+      lotes: LoteEstoque[];
+      estoqueAtual: number;
+    }
+  | { ok: false; erro: string }
+> {
+  const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "acessar", "listarLotesProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
+
+  const id = String(produtoId ?? "").trim();
+  if (!id) {
+    return { ok: false, erro: "Produto inválido." };
+  }
+
+  const produto = await carregarProdutoValidade(supabase, empresaId, id);
+  if (!produto) {
+    return { ok: false, erro: "Produto não encontrado nesta empresa." };
+  }
+
+  const [lotes, estoque] = await Promise.all([
+    carregarLotesProduto(supabase, empresaId, id),
+    carregarEstoqueAtualProduto(supabase, empresaId, id),
+  ]);
+  if (!lotes.ok) {
+    return lotes;
+  }
+  if (!estoque.ok) {
+    return estoque;
+  }
+
+  return {
+    ok: true,
+    lotes: lotes.lotes,
+    estoqueAtual: estoque.quantidade,
+  };
+}
+
+export async function salvarControleValidadeProduto(
+  produtoId: string,
+  controlar: boolean
+): Promise<ResultadoProduto> {
+  const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "salvarControleValidadeProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
+
+  const id = String(produtoId ?? "").trim();
+  if (!id) {
+    return { ok: false, erro: "Produto inválido." };
+  }
+
+  const produto = await carregarProdutoValidade(supabase, empresaId, id);
+  if (!produto) {
+    return { ok: false, erro: "Produto não encontrado nesta empresa." };
+  }
+
+  const { error } = await supabase
+    .from("produtos")
+    .update({ controlar_validade: controlar === true })
+    .eq("empresa_id", empresaId)
+    .eq("id", id);
+
+  if (error) {
+    return { ok: false, erro: error.message };
+  }
+
+  revalidatePath("/produtos");
+  return {
+    ok: true,
+    mensagem: controlar
+      ? "Controle de validade ativado."
+      : "Controle de validade desativado.",
+  };
+}
+
+export async function salvarLoteProduto(input: {
+  produtoId: string;
+  loteId?: string | null;
+  codigoLote: string;
+  dataFabricacao?: string | null;
+  dataValidade: string;
+  quantidade: number | string;
+  observacao?: string | null;
+}): Promise<ResultadoProduto> {
+  const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "salvarLoteProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
+
+  const produtoId = String(input.produtoId ?? "").trim();
+  if (!produtoId) {
+    return { ok: false, erro: "Produto inválido." };
+  }
+
+  const produto = await carregarProdutoValidade(
+    supabase,
+    empresaId,
+    produtoId
+  );
+  if (!produto) {
+    return { ok: false, erro: "Produto não encontrado nesta empresa." };
+  }
+
+  if (!produto.controlar_validade) {
+    return { ok: false, erro: MENSAGEM_CONTROLE_VALIDADE_INATIVO };
+  }
+
+  const quantidade =
+    parseNumeroFormulario(String(input.quantidade ?? "")) ??
+    Number.NaN;
+
+  const dados = normalizarDadosLoteProduto({
+    codigoLote: input.codigoLote,
+    dataFabricacao: input.dataFabricacao,
+    dataValidade: input.dataValidade,
+    quantidade,
+    observacao: input.observacao,
+  });
+  const erroDados = validarDadosLoteProduto(dados);
+  if (erroDados) {
+    return { ok: false, erro: erroDados };
+  }
+
+  const loteId = String(input.loteId ?? "").trim();
+  const [lotes, estoque] = await Promise.all([
+    carregarLotesProduto(supabase, empresaId, produtoId),
+    carregarEstoqueAtualProduto(supabase, empresaId, produtoId),
+  ]);
+  if (!lotes.ok) {
+    return lotes;
+  }
+  if (!estoque.ok) {
+    return estoque;
+  }
+
+  if (loteId) {
+    const existente = lotes.lotes.find((lote) => lote.id === loteId);
+    if (!existente) {
+      return { ok: false, erro: "Lote não encontrado nesta empresa." };
+    }
+  }
+
+  const erroEstoque = validarQuantidadeContraEstoque({
+    estoqueAtual: estoque.quantidade,
+    lotes: lotes.lotes,
+    quantidadeNova: dados.quantidade,
+    loteId: loteId || null,
+  });
+  if (erroEstoque) {
+    return { ok: false, erro: erroEstoque };
+  }
+
+  const payload = {
+    empresa_id: empresaId,
+    produto_id: produtoId,
+    codigo_lote: dados.codigoLote,
+    data_fabricacao: dados.dataFabricacao,
+    data_validade: dados.dataValidade,
+    quantidade: dados.quantidade,
+    observacao: dados.observacao,
+  };
+
+  if (loteId) {
+    const { data, error } = await supabase
+      .from("estoque_lotes")
+      .update({
+        codigo_lote: payload.codigo_lote,
+        data_fabricacao: payload.data_fabricacao,
+        data_validade: payload.data_validade,
+        quantidade: payload.quantidade,
+        observacao: payload.observacao,
+      })
+      .eq("empresa_id", empresaId)
+      .eq("produto_id", produtoId)
+      .eq("id", loteId)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === "23505") {
+        return { ok: false, erro: MENSAGEM_LOTE_DUPLICADO };
+      }
+      return { ok: false, erro: error.message };
+    }
+
+    if (!data) {
+      return { ok: false, erro: "Lote não encontrado nesta empresa." };
+    }
+  } else {
+    const { error } = await supabase.from("estoque_lotes").insert(payload);
+
+    if (error) {
+      if (error.code === "23505") {
+        return { ok: false, erro: MENSAGEM_LOTE_DUPLICADO };
+      }
+      return { ok: false, erro: error.message };
+    }
+  }
+
+  revalidatePath("/produtos");
+  revalidatePath("/estoque");
+  return {
+    ok: true,
+    mensagem: loteId ? "Lote atualizado." : "Lote cadastrado.",
+  };
+}
+
+export async function excluirLoteProduto(
+  produtoId: string,
+  loteId: string
+): Promise<ResultadoProduto> {
+  const { supabase, empresaId } = await getContexto();
+
+  try {
+    await exigirProduto(empresaId, "editar", "excluirLoteProduto");
+  } catch (error) {
+    return resultadoNegacaoProduto(error);
+  }
+
+  const idProduto = String(produtoId ?? "").trim();
+  const idLote = String(loteId ?? "").trim();
+  if (!idProduto || !idLote) {
+    return { ok: false, erro: "Lote inválido." };
+  }
+
+  const produto = await carregarProdutoValidade(
+    supabase,
+    empresaId,
+    idProduto
+  );
+  if (!produto) {
+    return { ok: false, erro: "Produto não encontrado nesta empresa." };
+  }
+
+  if (!produto.controlar_validade) {
+    return { ok: false, erro: MENSAGEM_CONTROLE_VALIDADE_INATIVO };
+  }
+
+  const { data, error } = await supabase
+    .from("estoque_lotes")
+    .delete()
+    .eq("empresa_id", empresaId)
+    .eq("produto_id", idProduto)
+    .eq("id", idLote)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, erro: error.message };
+  }
+
+  if (!data) {
+    return { ok: false, erro: "Lote não encontrado nesta empresa." };
+  }
+
+  revalidatePath("/produtos");
+  revalidatePath("/estoque");
+  return { ok: true, mensagem: "Lote excluído." };
 }
 
 export async function atualizarPublicacaoCatalogo(

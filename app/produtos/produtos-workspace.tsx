@@ -52,6 +52,7 @@ type Props = {
   categorias: ItemRelacionado[];
   marcas: ItemRelacionado[];
   gruposFiscais: GrupoFiscalResumo[];
+  podeCriar?: boolean;
 };
 
 function normalizar(valor: string) {
@@ -81,6 +82,7 @@ export function ProdutosWorkspace({
   categorias,
   marcas,
   gruposFiscais,
+  podeCriar = false,
 }: Props) {
   const router = useRouter();
   const [busca, setBusca] = useState("");
@@ -314,6 +316,11 @@ export function ProdutosWorkspace({
                       setProdutoEdicao(produto);
                     }}
                     items={[
+                      {
+                        label: "Clonar produto",
+                        hidden: !podeCriar,
+                        href: `/produtos?novo=1&clonar=${produto.id}`,
+                      },
                       {
                         label: "Fiscal",
                         href: `/produtos?fiscal=${produto.id}`,

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { avaliarStatusFiscalProduto } from "@/lib/fiscal/status-fiscal-produto";
 import { escolherFiscalDaEmpresa } from "@/lib/produtos/dados-fiscais-produto";
+import { montarDadosCloneProduto } from "@/lib/produtos/clonar";
 import { ProdutoCadastroForm } from "./produto-cadastro-form";
 import { ProdutoFiscalForm } from "./produto-fiscal-form";
 import { ProdutosWorkspace } from "./produtos-workspace";
@@ -19,6 +20,7 @@ type PageProps = {
     sucesso?: string;
     fiscal?: string;
     novo?: string;
+    clonar?: string;
   }>;
 };
 
@@ -140,6 +142,7 @@ export default async function ProdutosPage({
         catalogo_destaque,
         catalogo_mostrar_preco,
         catalogo_imagem_path,
+        controlar_validade,
 
         produtos_fiscal (
           empresa_id,
@@ -210,6 +213,67 @@ export default async function ProdutosPage({
     vinculo.empresa_id
   );
 
+  const produtosListagem = (produtos ?? []).map((produto) => {
+    const fiscalProduto = escolherFiscalDaEmpresa(
+      produto.produtos_fiscal,
+      vinculo.empresa_id
+    );
+
+    const grupo = produto.grupo_fiscal_id
+      ? gruposPorId.get(produto.grupo_fiscal_id) ?? null
+      : null;
+
+    const status = avaliarStatusFiscalProduto({
+      ncm: fiscalProduto?.ncm,
+      grupo,
+    });
+
+    return {
+      id: produto.id,
+      codigo: produto.codigo,
+      codigo_barras: produto.codigo_barras,
+      nome: produto.nome,
+      descricao: produto.descricao,
+      categoria_id: produto.categoria_id,
+      marca_id: produto.marca_id,
+      grupo_fiscal_id: produto.grupo_fiscal_id,
+      unidade_medida: produto.unidade_medida,
+      preco_custo: produto.preco_custo,
+      preco_venda: produto.preco_venda,
+      ativo: produto.ativo,
+      catalogo_publicado: Boolean(produto.catalogo_publicado),
+      catalogo_descricao: produto.catalogo_descricao,
+      catalogo_destaque: Boolean(produto.catalogo_destaque),
+      catalogo_mostrar_preco:
+        produto.catalogo_mostrar_preco !== false,
+      catalogo_imagem_path: produto.catalogo_imagem_path,
+      controlar_validade: Boolean(produto.controlar_validade),
+      quantidade:
+        estoquePorProduto.get(produto.id) ?? 0,
+      categoria_nome:
+        categoriasPorId.get(produto.categoria_id ?? "")
+          ?.nome ?? null,
+      marca_nome:
+        marcasPorId.get(produto.marca_id ?? "")
+          ?.nome ?? null,
+      grupo_nome: grupo?.nome ?? null,
+      grupo_ativo: grupo?.ativo ?? false,
+      ncm: fiscalProduto?.ncm ?? null,
+      cest: fiscalProduto?.cest ?? null,
+      origem_produto: fiscalProduto?.origem_produto ?? null,
+      fiscal_ok: status.ok,
+      fiscal_rotulo: status.rotulo,
+      fiscal_motivo: status.motivo,
+    };
+  });
+
+  const origemClone = params.clonar
+    ? produtosListagem.find((produto) => produto.id === params.clonar)
+    : undefined;
+  const valoresClone = origemClone
+    ? montarDadosCloneProduto(origemClone)
+    : undefined;
+
   return (
     <main className="updv-page">
       <PageHeader
@@ -248,6 +312,8 @@ export default async function ProdutosPage({
             marcas={marcasAtivas}
             gruposFiscais={gruposAtivos}
             podeInformarEstoqueInicial={podeInformarEstoqueInicial}
+            produto={valoresClone}
+            clonando={Boolean(valoresClone)}
           />
           <a href="/produtos" className="updv-btn updv-btn-ghost mt-3">
             Cancelar
@@ -261,58 +327,8 @@ export default async function ProdutosPage({
           categorias={categorias ?? []}
           marcas={marcas ?? []}
           gruposFiscais={grupos}
-          produtos={(produtos ?? []).map((produto) => {
-            const fiscalProduto = escolherFiscalDaEmpresa(
-              produto.produtos_fiscal,
-              vinculo.empresa_id
-            );
-
-            const grupo = produto.grupo_fiscal_id
-              ? gruposPorId.get(produto.grupo_fiscal_id) ?? null
-              : null;
-
-            const status = avaliarStatusFiscalProduto({
-              ncm: fiscalProduto?.ncm,
-              grupo,
-            });
-
-            return {
-              id: produto.id,
-              codigo: produto.codigo,
-              codigo_barras: produto.codigo_barras,
-              nome: produto.nome,
-              descricao: produto.descricao,
-              categoria_id: produto.categoria_id,
-              marca_id: produto.marca_id,
-              grupo_fiscal_id: produto.grupo_fiscal_id,
-              unidade_medida: produto.unidade_medida,
-              preco_custo: produto.preco_custo,
-              preco_venda: produto.preco_venda,
-              ativo: produto.ativo,
-              catalogo_publicado: Boolean(produto.catalogo_publicado),
-              catalogo_descricao: produto.catalogo_descricao,
-              catalogo_destaque: Boolean(produto.catalogo_destaque),
-              catalogo_mostrar_preco:
-                produto.catalogo_mostrar_preco !== false,
-              catalogo_imagem_path: produto.catalogo_imagem_path,
-              quantidade:
-                estoquePorProduto.get(produto.id) ?? 0,
-              categoria_nome:
-                categoriasPorId.get(produto.categoria_id ?? "")
-                  ?.nome ?? null,
-              marca_nome:
-                marcasPorId.get(produto.marca_id ?? "")
-                  ?.nome ?? null,
-              grupo_nome: grupo?.nome ?? null,
-              grupo_ativo: grupo?.ativo ?? false,
-              ncm: fiscalProduto?.ncm ?? null,
-              cest: fiscalProduto?.cest ?? null,
-              origem_produto: fiscalProduto?.origem_produto ?? null,
-              fiscal_ok: status.ok,
-              fiscal_rotulo: status.rotulo,
-              fiscal_motivo: status.motivo,
-            };
-          })}
+          podeCriar={podeCriar}
+          produtos={produtosListagem}
         />
 
         {produtoFiscal && (
