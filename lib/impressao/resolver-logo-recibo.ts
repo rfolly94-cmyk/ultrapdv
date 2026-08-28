@@ -102,7 +102,7 @@ export async function resolverLogoReciboEmpresa(args: {
     path,
     url,
   });
-  if (!arquivo.bytes && args.incorporar !== false) {
+  if (!arquivo.bytes) {
     registrarFalhaLogoRecibo("arquivo oficial nao encontrado");
   }
   return {
@@ -146,7 +146,7 @@ export async function resolverLogoRecibo(args: {
       path,
       url,
     });
-    if (!arquivo.bytes && args.incorporar !== false) {
+    if (!arquivo.bytes) {
       registrarFalhaLogoRecibo("arquivo personalizado nao encontrado");
     }
     return {

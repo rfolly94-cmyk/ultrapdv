@@ -9,7 +9,7 @@ import {
   invalidarOrigemConector,
   portasDescobertaConector,
   resetarDescobertaConectorParaTestes,
-} from "./descobrir.ts";
+} from "./descobrir";
 
 function criarStorage() {
   const map = new Map<string, string>();

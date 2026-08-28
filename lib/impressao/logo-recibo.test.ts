@@ -91,7 +91,8 @@ before(() => {
     );
     const bytes = fetchFixtures.get(url);
     if (bytes) {
-      return new Response(bytes, {
+      const corpo = Uint8Array.from(bytes);
+      return new Response(corpo, {
         status: 200,
         headers: { "content-type": "image/png" },
       });

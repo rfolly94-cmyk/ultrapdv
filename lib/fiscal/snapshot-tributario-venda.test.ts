@@ -64,7 +64,6 @@ function itemBase(snapshot: unknown = null) {
 function xmlDoResolver(
   resolvido: ReturnType<typeof resolverTributacaoItemVenda>
 ) {
-  assert.equal(resolvido.ok, true);
   if (!resolvido.ok) {
     throw new Error(resolvido.mensagem);
   }
