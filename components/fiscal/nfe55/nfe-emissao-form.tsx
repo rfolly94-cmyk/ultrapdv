@@ -60,7 +60,7 @@ import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
 import {
   MENSAGEM_CAIXA_FECHADO_NFE_VENDA,
 } from "@/lib/caixa/mensagens";
-import { nfeVendaNovaExigeCaixa } from "@/lib/caixa/nfe-venda";
+import { nfeVendaNovaExigeCaixa, recusarInicioVendaNfeSemCaixa } from "@/lib/caixa/nfe-venda";
 import {
   enderecoEntregaVazio,
   type EnderecoEntregaNfe,
@@ -72,6 +72,15 @@ import {
   type AutorizadoXmlNfe,
 } from "@/lib/fiscal/nfe55/autorizados-xml";
 import { paraCentavos } from "@/lib/fiscal/distribuir-desconto-itens";
+import { ehFormaPix } from "@/lib/pagamentos/pix/local-regras";
+import {
+  avaliarPagamentosDigitadosNfe,
+  centavosDeTextoPagamento,
+  pagamentosNfeFechamTotal,
+  sincronizarPagamentoUnicoComTotal,
+  textoPagamentoDeCentavos,
+  mensagemPagamentoNfeIncompleto,
+} from "@/lib/fiscal/nfe55/sincronizar-pagamentos";
 import {
   normalizarIndicadorIeDestinatario,
   resolverDestinatarioFiscalDaOrigem,
@@ -121,6 +130,15 @@ import {
 } from "@/lib/fiscal/nfe55/cabecalho-fiscal";
 import type { PoliticaCancelamentoPublica } from "@/lib/fiscal/politica-cancelamento";
 import { useBuscaCep } from "@/lib/endereco/use-busca-cep";
+import {
+  formatarPrecoItemNfe,
+  formatarQuantidadeItemNfe,
+  parseNumeroComercialNfe,
+  totalItemNfe,
+  validarQuantidadeItemNfe,
+  validarValorUnitarioItemNfe,
+} from "@/lib/fiscal/nfe55/item-comercial";
+import { unidadePermiteDecimal } from "@/lib/produtos/unidades-medida";
 
 function reaisParaInput(valor: number) {
   return valor.toLocaleString("pt-BR", {
@@ -440,6 +458,9 @@ export function NfeEmissaoForm({
     };
   });
   const [itemAberto, setItemAberto] = useState<string | null>(null);
+  const [ajusteItens, setAjusteItens] = useState<
+    Record<string, { quantidade: number; valorUnitario: number }>
+  >({});
   const [buscaProduto, setBuscaProduto] = useState("");
   const [produtos, setProdutos] = useState<
     Array<{
@@ -558,6 +579,16 @@ export function NfeEmissaoForm({
     });
   const caixaAbertoEfetivo = caixaAberto || caixaLiberadoLocal;
   const vendaNovaSemCaixa = exigeCaixaVendaNova && !caixaAbertoEfetivo;
+  function recusaCaixaParaTipo(tipo: string) {
+    return recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: tipo,
+      vinculaVenda:
+        tiposOperacao.find((item) => item.codigo === tipo)?.vinculaVenda === true,
+      vendaId: operacao.vendaId,
+      controleAtivo: controleCaixaAtivo !== false,
+      caixaAberto: caixaAbertoEfetivo,
+    });
+  }
   const emitivel = tipoOperacaoEmitivelNestaTela(tipoAtual);
   const destTipo = destinatarioTipoPeloTipoOperacao(tipoAtual);
   const nfeAutorizada = emissao?.status === "autorizada";
@@ -645,7 +676,23 @@ export function NfeEmissaoForm({
     });
   }, [buscaNatureza, naturezas, operacao.vendaId]);
   const destino = destinos.find((item) => item.id === vinculoId) ?? null;
-  const totalProdutos = itens.reduce((soma, item) => soma + item.valorTotal, 0);
+  const itensExibidos = useMemo(
+    () =>
+      itens.map((item) => {
+        const ajuste = ajusteItens[item.id];
+        if (!ajuste) {
+          return item;
+        }
+        return {
+          ...item,
+          quantidade: ajuste.quantidade,
+          valorUnitario: ajuste.valorUnitario,
+          valorTotal: totalItemNfe(ajuste.quantidade, ajuste.valorUnitario),
+        };
+      }),
+    [ajusteItens, itens]
+  );
+  const totalProdutos = itensExibidos.reduce((soma, item) => soma + item.valorTotal, 0);
   const totaisNota = normalizarTotaisNota({
     frete: textoParaReais(totaisTexto.frete),
     seguro: textoParaReais(totaisTexto.seguro),
@@ -653,6 +700,75 @@ export function NfeEmissaoForm({
     desconto: textoParaReais(totaisTexto.desconto),
   });
   const totalNfe = totalLiquidoNota(totalProdutos, totaisNota);
+  const totalVendaCentavos = paraCentavos(totalNfe);
+  const permiteTrocoPorFormaId = useMemo(
+    () =>
+      Object.fromEntries(
+        formasPagamento.map((forma) => [forma.id, forma.permite_troco === true])
+      ) as Record<string, boolean>,
+    [formasPagamento]
+  );
+  const pagamentoAvaliacao = useMemo(
+    () =>
+      avaliarPagamentosDigitadosNfe({
+        totalVendaCentavos,
+        pagamentos,
+        permiteTrocoPorFormaId,
+      }),
+    [pagamentos, permiteTrocoPorFormaId, totalVendaCentavos]
+  );
+  const totalPagamentoAnteriorRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!podeEditar || operacao.vendaId) {
+      totalPagamentoAnteriorRef.current = totalVendaCentavos;
+      return;
+    }
+    const totalMudou =
+      totalPagamentoAnteriorRef.current !== null &&
+      totalPagamentoAnteriorRef.current !== totalVendaCentavos;
+    const primeiraAvaliacao = totalPagamentoAnteriorRef.current === null;
+    totalPagamentoAnteriorRef.current = totalVendaCentavos;
+    if (!primeiraAvaliacao && !totalMudou) {
+      return;
+    }
+    const vigentes = pagamentos
+      .map((pagamento) => ({
+        formaPagamentoId: pagamento.formaPagamentoId,
+        valorCentavos: centavosDeTextoPagamento(pagamento.valorTexto),
+      }))
+      .filter((pagamento) => pagamento.valorCentavos > 0);
+    const sincronizado = sincronizarPagamentoUnicoComTotal({
+      totalVendaCentavos,
+      pagamentos: vigentes,
+      permiteTrocoPorFormaId,
+    });
+    if (!sincronizado.sincronizou) {
+      return;
+    }
+    const proximo = sincronizado.pagamentos.map((pagamento) => ({
+      formaPagamentoId: pagamento.formaPagamentoId,
+      valorTexto: textoPagamentoDeCentavos(pagamento.valorCentavos),
+    }));
+    const pixAlterado = proximo.some(
+      (pagamento) =>
+        ehFormaPix(
+          formasPagamento.find((forma) => forma.id === pagamento.formaPagamentoId) ?? null
+        )
+    );
+    if (pixAlterado) {
+      setPixLocal(null);
+      setPixGeranet(null);
+    }
+    setPagamentos(proximo);
+  }, [
+    formasPagamento,
+    operacao.vendaId,
+    pagamentos,
+    podeEditar,
+    permiteTrocoPorFormaId,
+    totalVendaCentavos,
+  ]);
   const agora = useMemo(() => {
     const data = new Date();
     const iso = new Date(data.getTime() - data.getTimezoneOffset() * 60000)
@@ -671,6 +787,14 @@ export function NfeEmissaoForm({
     setSucesso(null);
     setPendencias([]);
     startTransition(async () => {
+      const cabecalho = await persistirCabecalhoSeSujo();
+      if (!cabecalho.ok) {
+        setErro(cabecalho.erro);
+        emitindo.current = false;
+        saindo.current = false;
+        recebendo.current = false;
+        return;
+      }
       const resultado = await acao();
       if (!resultado.ok) {
         setErro(resultado.erro);
@@ -701,6 +825,11 @@ export function NfeEmissaoForm({
       return null;
     }
     if (!emitivel) {
+      return null;
+    }
+    const recusaCaixa = recusaCaixaParaTipo(tipoAtual);
+    if (recusaCaixa) {
+      setErro(recusaCaixa);
       return null;
     }
     const criado = await criarOperacaoFiscal({ naturezaId });
@@ -740,6 +869,9 @@ export function NfeEmissaoForm({
     setValidadaLocalmente(false);
     setCabecalhoSujo(false);
     if (!tipoOperacaoEmitivelNestaTela(tipoNovo)) {
+      return;
+    }
+    if (recusaCaixaParaTipo(tipoNovo)) {
       return;
     }
     if (operacao.id) {
@@ -787,6 +919,18 @@ export function NfeEmissaoForm({
       informacaoComplementarUsuario: infoUsuario,
       informacaoAdicionalFisco: infoFisco,
     });
+  }
+
+  async function persistirCabecalhoSeSujo(idOperacao?: string | null) {
+    const id = idOperacao || operacao.id;
+    if (!cabecalhoSujo || !id || !podeEditarCabecalho) {
+      return { ok: true as const, mensagem: "Cabeçalho sem alteração." };
+    }
+    const resultado = await persistirCabecalhoFiscal(id);
+    if (resultado.ok) {
+      setCabecalhoSujo(false);
+    }
+    return resultado;
   }
 
   async function persistirRascunho(opcoes?: { preservarStatusEmissao?: boolean }) {
@@ -896,6 +1040,15 @@ export function NfeEmissaoForm({
     if (itens.length === 0) {
       return { ok: false as const, erro: "Adicione ao menos um item antes de validar." };
     }
+    if (financeiro && !pagamentosNfeFechamTotal(pagamentoAvaliacao)) {
+      return {
+        ok: false as const,
+        erro:
+          pagamentoAvaliacao.restanteCentavos > 0
+            ? mensagemPagamentoNfeIncompleto(pagamentoAvaliacao.restanteCentavos)
+            : pagamentoAvaliacao.mensagem ?? "Pagamentos não conferem com o total da venda.",
+      };
+    }
     if (destTipo === "cliente" && !destinatarioId) {
       return { ok: false as const, erro: "Selecione o destinatário." };
     }
@@ -927,6 +1080,12 @@ export function NfeEmissaoForm({
     }
     if (vendaNovaSemCaixa) {
       setErro(MENSAGEM_CAIXA_FECHADO_NFE_VENDA);
+      return;
+    }
+    if (pagamentoImpedeEmissao) {
+      setErro(
+        mensagemPagamentoDesalinhado ?? "Pagamentos não conferem com o total da venda."
+      );
       return;
     }
     if (!podeEmitir) {
@@ -1053,13 +1212,15 @@ export function NfeEmissaoForm({
     setNaturezaId(operacao.naturezaId ?? "");
     setDestinatarioId(operacao.destinatarioId ?? "");
     setVinculoId(operacao.vinculoId ?? "");
-    setInfoUsuario(operacao.informacaoComplementarUsuario ?? "");
-    setInfoFisco(operacao.informacaoAdicionalFisco ?? "");
     setFinNfe(operacao.finNfe || "1");
     setPresenca(indicadorPresenca);
     setDataSaida(operacao.dataSaida ?? "");
     setHoraSaida(operacao.horaSaida ?? "");
-    setCabecalhoSujo(false);
+    if (!cabecalhoSujo) {
+      setInfoUsuario(operacao.informacaoComplementarUsuario ?? "");
+      setInfoFisco(operacao.informacaoAdicionalFisco ?? "");
+      setCabecalhoSujo(false);
+    }
   }, [
     operacao.id,
     operacao.naturezaId,
@@ -1186,12 +1347,22 @@ export function NfeEmissaoForm({
   const avisoNatureza = natureza ? avisoNaturezaNestaTela(tipoAtual) : null;
   const temDestinatario =
     destTipo === "estabelecimento" ? Boolean(vinculoId) : Boolean(destinatarioId);
-  const podeSalvarRascunho = emitivel && Boolean(naturezaId);
+  const podeSalvarRascunho = emitivel && Boolean(naturezaId) && !vendaNovaSemCaixa;
   const podeValidar = podeSalvarRascunho && temDestinatario && itens.length > 0;
   const financeiro = naturezaExigeFinanceiro({
     codigo: tipoAtual,
     vincula_venda: tipoCatalogo?.vinculaVenda,
   });
+  const pagamentoImpedeEmissao =
+    financeiro &&
+    !operacao.vendaId &&
+    Boolean(podeEditar) &&
+    !pagamentosNfeFechamTotal(pagamentoAvaliacao);
+  const mensagemPagamentoDesalinhado = pagamentoImpedeEmissao
+    ? pagamentoAvaliacao.restanteCentavos > 0
+      ? mensagemPagamentoNfeIncompleto(pagamentoAvaliacao.restanteCentavos)
+      : pagamentoAvaliacao.mensagem
+    : null;
 
   return (
     <div
@@ -1226,7 +1397,22 @@ export function NfeEmissaoForm({
           mensagem={MENSAGEM_CAIXA_FECHADO_NFE_VENDA}
           rotuloSair="Voltar"
           onSair={() => router.push("/fiscal")}
-          onAberto={() => setCaixaLiberadoLocal(true)}
+          onAberto={() => {
+            setCaixaLiberadoLocal(true);
+            if (!naturezaId) {
+              return;
+            }
+            if (operacao.id) {
+              executar(() =>
+                salvarNaturezaOperacaoFiscal({
+                  operacaoId: operacao.id as string,
+                  naturezaId,
+                })
+              );
+              return;
+            }
+            executar(() => criarOperacaoFiscal({ naturezaId }));
+          }}
         />
       ) : null}
 
@@ -1259,7 +1445,7 @@ export function NfeEmissaoForm({
         <button
           type="button"
           className="updv-btn updv-btn-ghost"
-          disabled={pending || !podeValidar}
+          disabled={pending || !podeValidar || pagamentoImpedeEmissao}
           onClick={acionarValidar}
         >
           Validar NF-e
@@ -1267,12 +1453,18 @@ export function NfeEmissaoForm({
         <button
           type="button"
           className={
-            vendaNovaSemCaixa || !podeEmitir
+            vendaNovaSemCaixa || !podeEmitir || pagamentoImpedeEmissao
               ? "updv-btn updv-btn-primary opacity-50 cursor-not-allowed"
               : "updv-btn updv-btn-primary"
           }
-          disabled={pending || !podeEmitir || vendaNovaSemCaixa}
-          title={vendaNovaSemCaixa ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA : undefined}
+          disabled={pending || !podeEmitir || vendaNovaSemCaixa || pagamentoImpedeEmissao}
+          title={
+            vendaNovaSemCaixa
+              ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA
+              : pagamentoImpedeEmissao
+                ? mensagemPagamentoDesalinhado ?? undefined
+                : undefined
+          }
           onClick={emitir}
         >
           Emitir NF-e
@@ -2136,6 +2328,11 @@ export function NfeEmissaoForm({
                     className="nfe-sugestao"
                     onClick={() => {
                       startTransition(async () => {
+                        const persistidoCabecalho = await persistirCabecalhoSeSujo();
+                        if (!persistidoCabecalho.ok) {
+                          setErro(persistidoCabecalho.erro);
+                          return;
+                        }
                         const id = operacao.id ?? (await garantirOperacao());
                         if (!id) return;
                         const resultado = await adicionarItemOperacaoFiscal({
@@ -2160,7 +2357,7 @@ export function NfeEmissaoForm({
                   >
                     <span className="nfe-sugestao-titulo">{produto.nome}</span>
                     <span className="nfe-sugestao-meta">
-                      {produto.codigo || "sem código"} · {produto.unidade} · estoque{" "}
+                      {produto.codigo || "sem código"} · {produto.unidade} · Estoque:{" "}
                       {produto.estoque}
                       {produto.ncm ? ` · NCM ${produto.ncm}` : ""}
                     </span>
@@ -2173,7 +2370,8 @@ export function NfeEmissaoForm({
               </p>
             ) : (
               <p className="mt-1 text-[12px] text-zinc-500">
-                Produtos somente da empresa ativa. Estoque não é movimentado ao incluir.
+                Produtos ativos da empresa ativa, inclusive com estoque zero ou negativo.
+                Estoque é informativo e não impede a inclusão. O estoque não é movimentado ao incluir.
                 {tipoAtual === "venda"
                   ? " Na emissão, o PDV usa o preço de venda do catálogo — o valor fiscal do item não vai para o caixa."
                   : ""}
@@ -2214,7 +2412,25 @@ export function NfeEmissaoForm({
                       })
                     )
                   }
-                  onAtualizar={(quantidade, valorUnitario) =>
+                  onAlterarLocal={(quantidade, valorUnitario) =>
+                    setAjusteItens((atual) => ({
+                      ...atual,
+                      [item.id]: { quantidade, valorUnitario },
+                    }))
+                  }
+                  onAtualizar={(quantidade, valorUnitario) => {
+                    const persistido = itens.find((linha) => linha.id === item.id);
+                    if (
+                      persistido &&
+                      persistido.quantidade === quantidade &&
+                      persistido.valorUnitario === valorUnitario
+                    ) {
+                      return;
+                    }
+                    setAjusteItens((atual) => ({
+                      ...atual,
+                      [item.id]: { quantidade, valorUnitario },
+                    }));
                     executar(() =>
                       atualizarItemOperacaoFiscal({
                         operacaoId: operacao.id as string,
@@ -2222,11 +2438,11 @@ export function NfeEmissaoForm({
                         quantidade,
                         valorUnitario,
                       })
-                    )
-                  }
+                    );
+                  }}
                 />
               ))}
-              {itens.length === 0 && !podeEditar ? (
+              {itensExibidos.length === 0 && !podeEditar ? (
                 <tr>
                   <td colSpan={8} className="text-zinc-500">
                     Nenhum item.
@@ -2321,6 +2537,10 @@ export function NfeEmissaoForm({
             onSalvar={async (dados) => {
               if (!podeEditarCabecalho || !operacao.id) {
                 return { ok: false, erro: edicaoDocumento.motivo ?? "Salve o rascunho antes do transporte." };
+              }
+              const persistidoCabecalho = await persistirCabecalhoSeSujo();
+              if (!persistidoCabecalho.ok) {
+                return persistidoCabecalho;
               }
               const resultado = await salvarTransporteOperacaoFiscal({
                 operacaoId: operacao.id,
@@ -2745,6 +2965,7 @@ export function NfeEmissaoForm({
             <textarea
               className="updv-input min-h-20 w-full py-2"
               value={infoUsuario}
+              maxLength={5000}
               disabled={!podeEditarCabecalho}
               onChange={(event) => {
                 setInfoUsuario(event.target.value);
@@ -2757,6 +2978,7 @@ export function NfeEmissaoForm({
             <textarea
               className="updv-input min-h-20 w-full py-2"
               value={infoFisco}
+              maxLength={2000}
               disabled={!podeEditarCabecalho}
               onChange={(event) => {
                 setInfoFisco(event.target.value);
@@ -2870,6 +3092,7 @@ function ItemLinha({
   pending,
   onAbrir,
   onExcluir,
+  onAlterarLocal,
   onAtualizar,
 }: {
   item: ItemFormularioNfe;
@@ -2878,17 +3101,133 @@ function ItemLinha({
   pending: boolean;
   onAbrir: () => void;
   onExcluir: () => void;
+  onAlterarLocal: (quantidade: number, valorUnitario: number) => void;
   onAtualizar: (quantidade: number, valorUnitario: number) => void;
 }) {
+  const [qtdeTexto, setQtdeTexto] = useState(() =>
+    formatarQuantidadeItemNfe(item.quantidade, item.unidade)
+  );
+  const [precoTexto, setPrecoTexto] = useState(() =>
+    formatarPrecoItemNfe(item.valorUnitario)
+  );
+  const campoFocado = useRef(false);
+
+  useEffect(() => {
+    if (campoFocado.current) {
+      return;
+    }
+    setQtdeTexto(formatarQuantidadeItemNfe(item.quantidade, item.unidade));
+    setPrecoTexto(formatarPrecoItemNfe(item.valorUnitario));
+  }, [item.id, item.quantidade, item.unidade, item.valorUnitario]);
+
+  const totalExibido = useMemo(() => {
+    const quantidadeOk = validarQuantidadeItemNfe({
+      quantidade: parseNumeroComercialNfe(qtdeTexto),
+      unidade: item.unidade,
+    });
+    const precoOk = validarValorUnitarioItemNfe(parseNumeroComercialNfe(precoTexto));
+    if (!quantidadeOk.ok || !precoOk.ok) {
+      return item.valorTotal;
+    }
+    return totalItemNfe(quantidadeOk.quantidade, precoOk.valorUnitario);
+  }, [item.unidade, item.valorTotal, precoTexto, qtdeTexto]);
+
+  function aplicarRascunho(qtde: string, preco: string) {
+    const quantidadeOk = validarQuantidadeItemNfe({
+      quantidade: parseNumeroComercialNfe(qtde),
+      unidade: item.unidade,
+    });
+    const precoOk = validarValorUnitarioItemNfe(parseNumeroComercialNfe(preco));
+    if (!quantidadeOk.ok || !precoOk.ok) {
+      return;
+    }
+    onAlterarLocal(quantidadeOk.quantidade, precoOk.valorUnitario);
+  }
+
+  function confirmarCampo() {
+    campoFocado.current = false;
+    const quantidadeOk = validarQuantidadeItemNfe({
+      quantidade: parseNumeroComercialNfe(qtdeTexto),
+      unidade: item.unidade,
+    });
+    const precoOk = validarValorUnitarioItemNfe(parseNumeroComercialNfe(precoTexto));
+    if (!quantidadeOk.ok || !precoOk.ok) {
+      setQtdeTexto(formatarQuantidadeItemNfe(item.quantidade, item.unidade));
+      setPrecoTexto(formatarPrecoItemNfe(item.valorUnitario));
+      onAlterarLocal(item.quantidade, item.valorUnitario);
+      return;
+    }
+    setQtdeTexto(formatarQuantidadeItemNfe(quantidadeOk.quantidade, item.unidade));
+    setPrecoTexto(formatarPrecoItemNfe(precoOk.valorUnitario));
+    onAtualizar(quantidadeOk.quantidade, precoOk.valorUnitario);
+  }
+
   return (
     <>
       <tr>
-        <td>{item.descricao}</td>
+        <td>
+          {item.descricao}
+          <span className="nfe-item-estoque">Estoque: {item.estoque}</span>
+        </td>
         <td>{item.codigo || "—"}</td>
         <td>{item.unidade || "UN"}</td>
-        <td className="num">{item.quantidade}</td>
-        <td className="num">{moeda.format(item.valorUnitario)}</td>
-        <td className="num">{moeda.format(item.valorTotal)}</td>
+        <td className="num">
+          {podeEditar ? (
+            <CampoValor
+              className={`${nfeInput} nfe-item-qtd`}
+              inputMode={unidadePermiteDecimal(item.unidade) ? "decimal" : "numeric"}
+              value={qtdeTexto}
+              disabled={pending}
+              aria-label={`Quantidade de ${item.descricao}`}
+              onFocus={() => {
+                campoFocado.current = true;
+              }}
+              onChange={(event) => {
+                const valor = event.target.value;
+                setQtdeTexto(valor);
+                aplicarRascunho(valor, precoTexto);
+              }}
+              onBlur={confirmarCampo}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  (event.target as HTMLInputElement).blur();
+                }
+              }}
+            />
+          ) : (
+            item.quantidade
+          )}
+        </td>
+        <td className="num">
+          {podeEditar ? (
+            <CampoValor
+              className={`${nfeInput} nfe-item-preco`}
+              inputMode="decimal"
+              value={precoTexto}
+              disabled={pending}
+              aria-label={`Preço unitário de ${item.descricao}`}
+              onFocus={() => {
+                campoFocado.current = true;
+              }}
+              onChange={(event) => {
+                const valor = event.target.value;
+                setPrecoTexto(valor);
+                aplicarRascunho(qtdeTexto, valor);
+              }}
+              onBlur={confirmarCampo}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  (event.target as HTMLInputElement).blur();
+                }
+              }}
+            />
+          ) : (
+            moeda.format(item.valorUnitario)
+          )}
+        </td>
+        <td className="num">{moeda.format(totalExibido)}</td>
         <td>{item.ncm || "—"}</td>
         <td>
           <button type="button" className="updv-btn-row" onClick={onAbrir}>
@@ -2911,46 +3250,6 @@ function ItemLinha({
             CFOP: {item.cfop || "resolvido na validação"} · NCM: {item.ncm || "—"} ·
             ICMS/CSOSN: {item.icms || "grupo fiscal do produto"} · CEST/PIS/COFINS/IBS/CBS
             pelo motor na verificação. Sem regra, a emissão é bloqueada.
-            {podeEditar ? (
-              <span className="ml-3 inline-flex gap-2">
-                <CampoValor
-                  key={`qtd-${item.id}-${item.quantidade}`}
-                  className={`${nfeInput} w-20`}
-                  defaultValue={String(item.quantidade).replace(".", ",")}
-                  id={`qtd-${item.id}`}
-                  inputMode="decimal"
-                />
-                <CampoValor
-                  key={`vu-${item.id}-${item.valorUnitario}`}
-                  className={`${nfeInput} w-28`}
-                  defaultValue={String(item.valorUnitario).replace(".", ",")}
-                  id={`vu-${item.id}`}
-                  inputMode="decimal"
-                />
-                <button
-                  type="button"
-                  className="updv-btn-row"
-                  disabled={pending}
-                  onClick={() => {
-                    const qtd = Number(
-                      String(
-                        (document.getElementById(`qtd-${item.id}`) as HTMLInputElement)
-                          ?.value ?? ""
-                      ).replace(",", ".")
-                    );
-                    const vu = Number(
-                      String(
-                        (document.getElementById(`vu-${item.id}`) as HTMLInputElement)
-                          ?.value ?? ""
-                      ).replace(",", ".")
-                    );
-                    onAtualizar(qtd, vu);
-                  }}
-                >
-                  Atualizar
-                </button>
-              </span>
-            ) : null}
           </td>
         </tr>
       ) : null}

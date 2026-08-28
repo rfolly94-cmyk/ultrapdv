@@ -176,6 +176,7 @@ function caixaBase(parcial: Partial<RelatorioCaixaDados> = {}): RelatorioCaixaDa
     reaberto: false,
     reaberturas: [],
     ciclos_fechamento: [],
+    eventos_gaveta: [],
     movimentos,
     conferencia: [],
     ...totais,

@@ -31,6 +31,18 @@ export const NOMES_INTENCAO_DETERMINISTICA = [
   "fiscal.cest",
   "fiscal.ibs_cbs",
   "fiscal.grupo",
+  "navegacao.pdv",
+  "navegacao.produtos",
+  "navegacao.novo_produto",
+  "navegacao.clientes",
+  "navegacao.novo_cliente",
+  "navegacao.vendas",
+  "vendas.abrir",
+  "navegacao.caixa",
+  "navegacao.carteira",
+  "navegacao.nfe",
+  "navegacao.nfce",
+  "navegacao.fiscal",
 ] as const;
 
 export type NomeIntencaoDeterministica =

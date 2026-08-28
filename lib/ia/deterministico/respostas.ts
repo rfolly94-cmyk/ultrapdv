@@ -325,6 +325,30 @@ const TEMPLATES: Record<NomeIntencaoDeterministica, Template> = {
   "fiscal.cest": (_intencao, dados) => templateProduto(dados, "cest"),
   "fiscal.ibs_cbs": (_intencao, dados) => templateProduto(dados, "ibs"),
   "fiscal.grupo": (_intencao, dados) => templateProduto(dados, "grupo"),
+  "navegacao.pdv": (_i, dados) => texto(dados.mensagem) || "Vou abrir o PDV.",
+  "navegacao.produtos": (_i, dados) => texto(dados.mensagem) || "Vou abrir os produtos.",
+  "navegacao.novo_produto": (_i, dados) =>
+    texto(dados.mensagem) || "Vou abrir o cadastro de produto.",
+  "navegacao.clientes": (_i, dados) => texto(dados.mensagem) || "Vou abrir os clientes.",
+  "navegacao.novo_cliente": (_i, dados) =>
+    texto(dados.mensagem) || "Vou abrir o cadastro de cliente.",
+  "navegacao.vendas": (_i, dados) => texto(dados.mensagem) || "Vou abrir as vendas.",
+  "vendas.abrir": (_i, dados) => {
+    if (dados.ambiguidade) {
+      return texto(dados.mensagem) || "Encontrei mais de uma venda. Qual delas você quer abrir?";
+    }
+    const numero = texto(dados.numero) || "—";
+    return `Encontrei a venda ${numero}. Vou abrir para você.`;
+  },
+  "navegacao.caixa": (_i, dados) =>
+    texto(dados.mensagem) || "Vou abrir o Caixa para você realizar a operação.",
+  "navegacao.carteira": (_i, dados) =>
+    texto(dados.mensagem) || "Vou abrir a Carteira.",
+  "navegacao.nfe": (_i, dados) =>
+    texto(dados.mensagem) || "Vou abrir o fluxo oficial de NF-e.",
+  "navegacao.nfce": (_i, dados) =>
+    texto(dados.mensagem) || "Vou abrir o PDV para o fluxo de NFC-e.",
+  "navegacao.fiscal": (_i, dados) => texto(dados.mensagem) || "Vou abrir o Fiscal.",
 };
 
 function templateProduto(

@@ -188,18 +188,6 @@ export function verificarOperacaoFiscal(params: {
         `${item.descricao}: valor unitário zero. Confirme se este é o valor fiscal desejado.`
       );
     }
-    if (
-      item.estoqueDisponivel != null &&
-      item.quantidade > Number(item.estoqueDisponivel) + 0.00005
-    ) {
-      pendencias.push({
-        codigo: "estoque",
-        mensagem:
-          params.tipoOperacaoInterno === "transferencia"
-            ? `Estoque insuficiente para transferir ${item.descricao}.`
-            : `Estoque insuficiente para ${item.descricao}.`,
-      });
-    }
     if (!/^\d{8}$/.test(String(item.ncm ?? "").replace(/\D/g, ""))) {
       pendencias.push({
         codigo: "ncm",

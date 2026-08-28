@@ -84,11 +84,11 @@ test("modelo não recebe ferramentas de escrita nem SQL/RPC genérica", () => {
     assert.equal((NOMES_FERRAMENTAS_IA as readonly string[]).includes(nome), false, nome);
     assert.equal(ferramentaEscritaAutonoma(nome), true);
   }
-  assert.ok(NOMES_FERRAMENTAS_IA.includes("propor_atualizacao_fiscal_produto"));
-  assert.ok(NOMES_FERRAMENTAS_IA.includes("propor_atribuicao_grupo_fiscal"));
-  assert.ok(NOMES_FERRAMENTAS_IA.includes("propor_criacao_grupo_fiscal"));
-  assert.ok(NOMES_FERRAMENTAS_IA.includes("propor_atualizacao_produto"));
-  assert.ok(NOMES_FERRAMENTAS_IA.includes("propor_acao_notificacao"));
+  assert.equal(NOMES_FERRAMENTAS_IA.includes("propor_atualizacao_fiscal_produto" as never), false);
+  assert.equal(NOMES_FERRAMENTAS_IA.includes("propor_atribuicao_grupo_fiscal" as never), false);
+  assert.equal(NOMES_FERRAMENTAS_IA.includes("propor_criacao_grupo_fiscal" as never), false);
+  assert.equal(NOMES_FERRAMENTAS_IA.includes("propor_atualizacao_produto" as never), false);
+  assert.equal(NOMES_FERRAMENTAS_IA.includes("propor_acao_notificacao" as never), false);
   assert.match(fonte("lib/ia/executar-assistente.ts"), /ferramentaEscritaAutonoma/);
   assert.match(fonte("lib/ia/executar-assistente.ts"), /MAX_CHAMADAS_POR_MENSAGEM/);
 });
@@ -125,5 +125,5 @@ test("contexto de grupo fiscal e central de notificações", () => {
 
 test("lote de escrita não é implementado nesta fase", () => {
   assert.doesNotMatch(fonte("lib/ia/ferramentas/propor.ts"), /propor_atualizacao_fiscal_lote|aplicar_lote/);
-  assert.match(fonte("lib/ia/prompts/sistema.ts"), /escrita em lote/);
+  assert.match(fonte("lib/ia/prompts/sistema.ts"), /SOMENTE LEITURA/);
 });

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ConfiguracoesModuleTabs } from "@/components/configuracoes/configuracoes-module-tabs";
 import { PageShell } from "@/components/layout/page-shell";
 import { exigirEmpresaOperacionalOuRedirecionar } from "@/lib/assinatura/exigir-empresa-operacional";
-import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
+import { carregarConfiguracaoCaixaEmpresa } from "@/lib/caixa/carregar";
 import { buscarCaixaAbertoEmpresa } from "@/lib/caixa/sessao-aberta";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
@@ -38,8 +38,8 @@ export default async function ConfiguracoesCaixaPage() {
   const empresaId = String(vinculo.empresa_id);
   await exigirEmpresaOperacionalOuRedirecionar(empresaId);
 
-  const [controleAtivo, caixaAberto, sessao] = await Promise.all([
-    controleCaixaAtivo(supabase, empresaId),
+  const [configuracao, caixaAberto, sessao] = await Promise.all([
+    carregarConfiguracaoCaixaEmpresa(supabase, empresaId),
     buscarCaixaAbertoEmpresa(supabase, empresaId),
     obterPermissoesSessao(),
   ]);
@@ -60,11 +60,12 @@ export default async function ConfiguracoesCaixaPage() {
       ]}
       tabs={<ConfiguracoesModuleTabs />}
     >
-      <div className="updv-config">
+      <div className="updv-config space-y-4">
         <CaixaControleForm
-          controleAtivo={controleAtivo}
+          controleAtivo={configuracao.controleAtivo}
           caixaAberto={caixaAberto !== null}
           podeEditar={podeEditar}
+          abrirGavetaAposVendaDinheiro={configuracao.abrirGavetaAposVendaDinheiro}
         />
       </div>
     </PageShell>

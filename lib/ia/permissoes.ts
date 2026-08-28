@@ -2,7 +2,11 @@ import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
 import type { AcaoDoModulo, ModuloPermissao, PermissoesEfetivas } from "@/lib/permissoes/tipos";
 
-import type { NomeFerramentaIa, ResultadoFerramentaIa } from "./tipos";
+import type {
+  NomeFerramentaIa,
+  NomeFerramentaResultadoIa,
+  ResultadoFerramentaIa,
+} from "./tipos";
 import { MENSAGEM_IA_SEM_PERMISSAO } from "./tipos";
 
 export type RecursoFerramentaIa =
@@ -12,7 +16,8 @@ export type RecursoFerramentaIa =
   | "clientes"
   | "caixa"
   | "fiscal"
-  | "relatorios";
+  | "relatorios"
+  | "pdv";
 
 const MODULO_RECURSO: Record<
   RecursoFerramentaIa,
@@ -25,6 +30,7 @@ const MODULO_RECURSO: Record<
   caixa: { modulo: "caixa", recurso: "caixa" },
   fiscal: { modulo: "fiscal", recurso: "fiscal" },
   relatorios: { modulo: "relatorios", recurso: "relatorios" },
+  pdv: { modulo: "pdv", recurso: "pdv" },
 };
 
 export async function autorizarFerramentaIa<M extends ModuloPermissao>(params: {
@@ -54,7 +60,7 @@ export async function autorizarFerramentaIa<M extends ModuloPermissao>(params: {
 }
 
 export function recusaFerramentaIa(
-  ferramenta: NomeFerramentaIa,
+  ferramenta: NomeFerramentaIa | NomeFerramentaResultadoIa,
   auth: { ok: false; erro: string; codigo: "sem_permissao" }
 ): ResultadoFerramentaIa {
   return {

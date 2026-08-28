@@ -351,6 +351,8 @@ export function camposCabecalhoParaSnapshot(input: {
   horaEmissao?: string | null;
   dataSaida?: string | null;
   horaSaida?: string | null;
+  informacaoComplementarUsuario?: string | null;
+  informacaoAdicionalFisco?: string | null;
 }): Record<string, unknown> {
   const extra: Record<string, unknown> = {};
   if (input.tpNf !== undefined) {
@@ -396,6 +398,12 @@ export function camposCabecalhoParaSnapshot(input: {
   if (input.horaSaida !== undefined) {
     const hora = String(input.horaSaida ?? "").trim();
     extra.hora_saida = hora && validarHoraFiscal(hora) ? hora : null;
+  }
+  if (input.informacaoComplementarUsuario !== undefined) {
+    extra.informacao_complementar_usuario = input.informacaoComplementarUsuario;
+  }
+  if (input.informacaoAdicionalFisco !== undefined) {
+    extra.informacao_adicional_fisco = input.informacaoAdicionalFisco;
   }
   return extra;
 }

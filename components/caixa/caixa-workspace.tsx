@@ -18,6 +18,7 @@ import { CaixaResumoSessao } from "@/components/caixa/caixa-resumo-sessao";
 import { CaixaResumoValores } from "@/components/caixa/caixa-resumo-valores";
 import { definirFechamentoCaixaCego, iniciarFechamentoCaixa } from "@/app/caixa/actions";
 import { CaixaHistoricoCiclos } from "@/components/caixa/caixa-historico-ciclos";
+import { CaixaEventosGaveta } from "@/components/caixa/caixa-eventos-gaveta";
 import { CaixaRelatorioAcoes } from "@/components/caixa/caixa-relatorio-acoes";
 import { ModalReabrirCaixa } from "@/components/caixa/caixa-reabrir-modal";
 import { conferenciaRevelaEsperado } from "@/lib/caixa/conferencia";
@@ -37,6 +38,7 @@ import {
   MENSAGEM_CONTROLE_CAIXA_DESATIVADO,
   MENSAGEM_CONTROLE_CAIXA_DESATIVADO_DETALHE,
 } from "@/lib/caixa/mensagens";
+import { executarAberturaGaveta } from "@/lib/caixa/abrir-gaveta-cliente";
 
 const STATUS_LABEL: Record<string, string> = {
   aberto: "Aberto",
@@ -64,6 +66,11 @@ export function CaixaWorkspace({
   const [erroCego, setErroCego] = useState<string | null>(null);
   const [erroFechar, setErroFechar] = useState<string | null>(null);
   const [pendingFechar, startFechar] = useTransition();
+  const [pendingGaveta, startGaveta] = useTransition();
+  const [msgGaveta, setMsgGaveta] = useState<{
+    tipo: "ok" | "erro";
+    texto: string;
+  } | null>(null);
   const [conferenciaInicial, setConferenciaInicial] =
     useState<ConferenciaCaixa | null>(null);
   const [modal, setModal] = useState<
@@ -106,6 +113,18 @@ export function CaixaWorkspace({
     setConferenciaInicial(null);
   }
 
+  function abrirGavetaManual() {
+    startGaveta(async () => {
+      const saida = await executarAberturaGaveta({ origem: "caixa" });
+      if (!saida.ok) {
+        setMsgGaveta({ tipo: "erro", texto: saida.erro });
+        return;
+      }
+      setMsgGaveta({ tipo: "ok", texto: saida.mensagem });
+      router.refresh();
+    });
+  }
+
   function alternarCego(habilitado: boolean) {
     startCego(async () => {
       const saida = await definirFechamentoCaixaCego({ habilitado });
@@ -120,9 +139,14 @@ export function CaixaWorkspace({
 
   return (
     <div className="space-y-4 px-4 py-4">
-      {erroCego || erroFechar ? (
+      {erroCego || erroFechar || msgGaveta?.tipo === "erro" ? (
         <PageAlert type="erro" className="mx-0 mt-0">
-          {erroCego || erroFechar}
+          {erroCego || erroFechar || msgGaveta?.texto}
+        </PageAlert>
+      ) : null}
+      {msgGaveta?.tipo === "ok" ? (
+        <PageAlert type="sucesso" className="mx-0 mt-0">
+          {msgGaveta.texto}
         </PageAlert>
       ) : null}
 
@@ -185,6 +209,14 @@ export function CaixaWorkspace({
                     </button>
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  className="updv-btn updv-btn-ghost"
+                  disabled={pendingGaveta}
+                  onClick={abrirGavetaManual}
+                >
+                  {pendingGaveta ? "Abrindo..." : "Abrir gaveta"}
+                </button>
                 {podeFechar ? (
                   <button
                     type="button"
@@ -237,6 +269,7 @@ export function CaixaWorkspace({
               </h3>
               <CaixaMovimentosTabela movimentos={atual.movimentos} />
             </div>
+            <CaixaEventosGaveta eventos={atual.eventos_gaveta} />
             <CaixaHistoricoCiclos
               ciclos={atual.ciclos_fechamento}
               reaberturas={atual.reaberturas}
@@ -459,6 +492,7 @@ export function CaixaWorkspace({
               </p>
             ) : null}
             <CaixaMovimentosTabela movimentos={anterior.movimentos} />
+            <CaixaEventosGaveta eventos={anterior.eventos_gaveta} />
             <CaixaHistoricoCiclos
               ciclos={anterior.ciclos_fechamento}
               reaberturas={anterior.reaberturas}
@@ -497,6 +531,7 @@ function AppResumoAtual({
           <p className="text-[13px] text-zinc-500">{caixa.observacao_abertura}</p>
         ) : null}
         <CaixaMovimentosTabela movimentos={caixa.movimentos} />
+        <CaixaEventosGaveta eventos={caixa.eventos_gaveta} />
       </div>
     </DetailDrawer>
   );

@@ -20,6 +20,7 @@ import { janelaPeriodoAssistente, periodoAssistenteValido, arredondarMoeda } fro
 import { hrefVendaAssistente } from "../rotas";
 import {
   MENSAGEM_IA_FALHA_CONSULTA,
+  type NomeFerramentaIa,
   type PeriodoAssistente,
   type ResultadoFerramentaIa,
 } from "../tipos";
@@ -170,7 +171,7 @@ export async function consultarVendasIa(
           total: Number(data.valor_total ?? 0),
           desconto: Number(data.desconto ?? 0),
         },
-        acoes: [{ label: "Ver venda", href: hrefVendaAssistente(String(data.id)) }],
+        acoes: [{ type: "open_details", label: "Ver venda", href: hrefVendaAssistente(String(data.id)), entityId: String(data.id), entityTipo: "venda" }],
       };
     }
     const periodo = periodoAssistenteValido(String(args.periodo ?? "hoje"));
@@ -373,4 +374,158 @@ export async function rankingProdutosIa(
       codigo: "falha",
     };
   }
+}
+
+export async function consultarVendaIa(
+  ctx: ContextoFerramentaIa,
+  args: Record<string, unknown>
+): Promise<ResultadoFerramentaIa> {
+  const auth = await autorizarFerramentaIa({
+    empresaId: ctx.empresaId,
+    permissoes: ctx.permissoes,
+    recurso: "vendas",
+    acao: "acessar",
+  });
+  if (!auth.ok) {
+    return recusaFerramentaIa("consultar_venda", auth);
+  }
+  const vendaId = String(args.vendaId ?? ctx.tela.vendaId ?? "").trim();
+  const numeroBruto = String(args.numero ?? "").trim();
+  const numero = Number(numeroBruto);
+  try {
+    let query = ctx.supabase
+      .from("vendas")
+      .select(
+        "id, empresa_id, numero, status, valor_total, desconto, cliente_id, finalizada_at, created_at"
+      )
+      .eq("empresa_id", ctx.empresaId)
+      .limit(8);
+    if (vendaId) {
+      query = query.eq("id", vendaId);
+    } else if (numeroBruto && Number.isFinite(numero)) {
+      query = query.eq("numero", numero);
+    } else {
+      return {
+        ok: false,
+        ferramenta: "consultar_venda",
+        erro: "Informe o número ou o identificador da venda.",
+        codigo: "nao_encontrado",
+      };
+    }
+    const { data, error } = await query;
+    if (error) {
+      return {
+        ok: false,
+        ferramenta: "consultar_venda",
+        erro: MENSAGEM_IA_FALHA_CONSULTA,
+        codigo: "falha",
+      };
+    }
+    const vendas = filtrarRegistrosDaEmpresaAtiva(data ?? [], ctx.empresaId);
+    if (vendas.length === 0) {
+      return {
+        ok: false,
+        ferramenta: "consultar_venda",
+        erro: "Venda não encontrada nesta empresa.",
+        codigo: "nao_encontrado",
+      };
+    }
+    if (vendas.length > 1) {
+      return {
+        ok: true,
+        ferramenta: "consultar_venda",
+        dados: {
+          ambiguidade: true,
+          mensagem: `Encontrei ${vendas.length} vendas com esse número. Qual delas você quer abrir?`,
+          itens: vendas.map((item) => ({
+            id: item.id,
+            numero: item.numero,
+            status: item.status,
+            total: Number(item.valor_total ?? 0),
+          })),
+        },
+        acoes: vendas.slice(0, 8).map((item) => ({
+          type: "select_entity" as const,
+          label: `Venda ${item.numero}`,
+          href: hrefVendaAssistente(String(item.id)),
+          entityId: String(item.id),
+          entityTipo: "venda",
+        })),
+      };
+    }
+    const dataVenda = vendas[0];
+    return {
+      ok: true,
+      ferramenta: "consultar_venda",
+      dados: {
+        id: dataVenda.id,
+        numero: dataVenda.numero,
+        status: dataVenda.status,
+        total: Number(dataVenda.valor_total ?? 0),
+        desconto: Number(dataVenda.desconto ?? 0),
+      },
+      acoes: [
+        {
+          type: "open_details",
+          label: "Abrir venda",
+          href: hrefVendaAssistente(String(dataVenda.id)),
+          entityId: String(dataVenda.id),
+          entityTipo: "venda",
+        },
+      ],
+    };
+  } catch {
+    return {
+      ok: false,
+      ferramenta: "consultar_venda",
+      erro: MENSAGEM_IA_FALHA_CONSULTA,
+      codigo: "falha",
+    };
+  }
+}
+
+export async function consultarTotalVendidoIa(
+  ctx: ContextoFerramentaIa,
+  args: Record<string, unknown>
+): Promise<ResultadoFerramentaIa> {
+  const resultado = await consultarVendasIa(ctx, args);
+  if (!resultado.ok) {
+    return { ...resultado, ferramenta: "consultar_total_vendido" };
+  }
+  return {
+    ...resultado,
+    ferramenta: "consultar_total_vendido",
+    dados: {
+      periodo: resultado.dados?.periodo,
+      total: resultado.dados?.total,
+      quantidadeVendas: resultado.dados?.quantidadeVendas,
+      ticketMedio: resultado.dados?.ticketMedio,
+    },
+  };
+}
+
+export async function consultarFormasPagamentoIa(
+  ctx: ContextoFerramentaIa,
+  args: Record<string, unknown>
+): Promise<ResultadoFerramentaIa> {
+  const resultado = await consultarVendasIa(ctx, args);
+  if (!resultado.ok) {
+    return { ...resultado, ferramenta: "consultar_formas_pagamento" };
+  }
+  return {
+    ...resultado,
+    ferramenta: "consultar_formas_pagamento",
+    dados: {
+      periodo: resultado.dados?.periodo,
+      formas: resultado.dados?.formas ?? [],
+    },
+  };
+}
+
+export async function consultarProdutosMaisVendidosIa(
+  ctx: ContextoFerramentaIa,
+  args: Record<string, unknown>
+): Promise<ResultadoFerramentaIa> {
+  const resultado = await rankingProdutosIa(ctx, args);
+  return { ...resultado, ferramenta: "consultar_produtos_mais_vendidos" as NomeFerramentaIa };
 }

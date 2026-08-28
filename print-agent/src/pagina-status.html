@@ -36,6 +36,10 @@
       .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; }
       label.campo { display: block; font-size: 14px; margin-top: 12px; }
       label.campo span { display: block; color: var(--muted); margin-bottom: 4px; }
+      .secao { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+      .secao h2 { font-size: 15px; margin: 0 0 8px; }
+      .check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 10px; }
+      .check input { width: auto; margin: 0; }
       .muted { color: var(--muted); }
       .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
       .dot.ok { background: var(--ok); }
@@ -94,6 +98,23 @@
           <option value="a4">A4</option>
         </select>
       </label>
+      <section class="secao" id="secaoGaveta">
+        <h2>Gaveta de dinheiro</h2>
+        <label class="check">
+          <input type="checkbox" id="chkGaveta" />
+          Usar gaveta de dinheiro
+        </label>
+        <label class="campo">
+          <span>Pulso / pino</span>
+          <select id="selPino">
+            <option value="0">Pino 0</option>
+            <option value="1">Pino 1</option>
+          </select>
+        </label>
+        <div class="acoes">
+          <button type="button" id="btnGaveta">Testar abertura da gaveta</button>
+        </div>
+      </section>
       <div class="acoes">
         <button type="button" class="primario" id="btnSalvar">Salvar configuração</button>
         <button type="button" id="btnTeste">Testar impressão</button>
@@ -124,6 +145,8 @@
       const dlg = document.getElementById("dlgPorta");
       const selImpressora = document.getElementById("selImpressora");
       const selPapel = document.getElementById("selPapel");
+      const chkGaveta = document.getElementById("chkGaveta");
+      const selPino = document.getElementById("selPino");
       let impressorasCarregadas = false;
 
       function pintarStatus(texto, tipo) {
@@ -179,6 +202,8 @@
             const printers = await api("/printers");
             preencherImpressoras(printers.data.impressoras, data.lastPrinter);
             selPapel.value = data.lastPaper || "80mm";
+            chkGaveta.checked = data.drawerEnabled === true;
+            selPino.value = Number(data.drawerPin) === 1 ? "1" : "0";
             impressorasCarregadas = true;
           }
         } catch {
@@ -229,7 +254,12 @@
         const { data } = await api("/config/printer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ impressora, papel: selPapel.value }),
+          body: JSON.stringify({
+            impressora,
+            papel: selPapel.value,
+            gavetaHabilitada: chkGaveta.checked,
+            gavetaPino: Number(selPino.value) === 1 ? 1 : 0,
+          }),
         });
         msg.textContent = data.ok ? "Configuração salva." : (data.erro || "Não foi possível salvar.");
         if (data.ok) {
@@ -250,6 +280,26 @@
           body: JSON.stringify({ impressora, papel: selPapel.value }),
         });
         msg.textContent = data.ok ? "Teste enviado à impressora." : (data.erro || "Falha no teste.");
+      };
+
+      document.getElementById("btnGaveta").onclick = async () => {
+        const impressora = selImpressora.value;
+        if (!impressora) {
+          msg.textContent = "Selecione uma impressora instalada neste computador.";
+          return;
+        }
+        msg.textContent = "Enviando pulso à gaveta…";
+        const { data } = await api("/drawer/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            impressora,
+            pino: Number(selPino.value) === 1 ? 1 : 0,
+          }),
+        });
+        msg.textContent = data.ok
+          ? "Gaveta aberta com sucesso"
+          : (data.erro || "Não foi possível abrir a gaveta.");
       };
 
       document.getElementById("btnReiniciar").onclick = async () => {

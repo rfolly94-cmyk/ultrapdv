@@ -3,12 +3,14 @@ import { INTENCOES_CARTEIRA } from "./carteira";
 import { INTENCOES_CLIENTES } from "./clientes";
 import { INTENCOES_ESTOQUE } from "./estoque";
 import { INTENCOES_FISCAL } from "./fiscal";
+import { INTENCOES_NAVEGACAO } from "./navegacao";
 import { INTENCOES_NOTIFICACOES } from "./notificacoes";
 import { INTENCOES_PRODUTO } from "./produtos";
 import { INTENCOES_VENDAS } from "./vendas";
 import type { DefinicaoIntencao } from "../tipos";
 
 export const DEFINICOES_INTENCAO: DefinicaoIntencao[] = [
+  ...INTENCOES_NAVEGACAO,
   ...INTENCOES_VENDAS,
   ...INTENCOES_CARTEIRA,
   ...INTENCOES_ESTOQUE,

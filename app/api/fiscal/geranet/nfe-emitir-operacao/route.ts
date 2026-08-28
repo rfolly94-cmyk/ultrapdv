@@ -78,6 +78,8 @@ import {
 import {
   montarInformacaoAdicionalFisco,
   montarInformacaoComplementarNfe,
+  textoUsuarioInfAdFiscoNfe,
+  textoUsuarioInfCplNfe,
 } from "@/lib/fiscal/nfe55/infos-adicionais";
 import {
   MENSAGEM_FRETE_9_COM_DADOS,
@@ -893,10 +895,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const snapshot = (operacao.snapshot_fiscal ?? {}) as {
-      informacao_complementar_usuario?: string | null;
-      informacao_adicional_fisco?: string | null;
-    };
     let fusoHorario: string;
     try {
       fusoHorario = exigirFusoHorarioFiscalDaEmissao({
@@ -975,16 +973,18 @@ export async function POST(request: NextRequest) {
         finalidade: cabecalhoNfe.finNfe || identidadeFiscal.finNfe,
         frete: transporteResolvido.dados.mod_frete ?? "9",
         informacaoAdicionalFisco: montarInformacaoAdicionalFisco({
-          textoUsuario:
-            snapshot.informacao_adicional_fisco ??
-            operacao.informacao_adicional_fisco,
+          textoUsuario: textoUsuarioInfAdFiscoNfe({
+            snapshot: operacao.snapshot_fiscal,
+            coluna: operacao.informacao_adicional_fisco,
+          }),
         }),
         informacaoComplementar: montarInformacaoComplementarNfe({
           textosAutomaticos: [],
           padraoEmpresa: fiscal.informacao_complementar_padrao,
-          textoUsuario:
-            snapshot.informacao_complementar_usuario ??
-            operacao.informacao_complementar_usuario,
+          textoUsuario: textoUsuarioInfCplNfe({
+            snapshot: operacao.snapshot_fiscal,
+            coluna: operacao.informacao_complementar_usuario,
+          }),
         }),
       },
       transporte: transporteNfeParaPayloadGeranet(transporteResolvido.dados),

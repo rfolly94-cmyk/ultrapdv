@@ -10,7 +10,7 @@ import {
   MENSAGEM_CAIXA_FECHADO_NFE_VENDA,
   MENSAGEM_CAIXA_FECHADO_SEM_PERMISSAO,
 } from "@/lib/caixa/mensagens";
-import { nfeVendaNovaExigeCaixa, vendaIdNfeMaterializada } from "@/lib/caixa/nfe-venda";
+import { nfeVendaNovaExigeCaixa, recusarInicioVendaNfeSemCaixa, vendaIdNfeMaterializada } from "@/lib/caixa/nfe-venda";
 import { totaisDoLivro } from "@/lib/caixa/saldo";
 import { fonte } from "@/lib/multiempresa/fonte";
 import { presetDoPerfil } from "@/lib/permissoes/presets";
@@ -118,6 +118,127 @@ test("natureza real: só venda comercial nova com recebimento exige Caixa", () =
   );
   const seed = fonte("supabase/migrations/20260817200000_fiscal_naturezas_operacao.sql");
   assert.match(seed, /\('venda', 'Venda', false, true, true, true\)/);
+});
+
+test("1. nova operação + natureza venda + Caixa fechado bloqueia imediatamente", () => {
+  assert.equal(
+    recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: "venda",
+      controleAtivo: true,
+      caixaAberto: false,
+    }),
+    MENSAGEM_CAIXA_FECHADO_NFE_VENDA
+  );
+  const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
+  const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
+  const criar = actions.slice(
+    actions.indexOf("export async function criarOperacaoFiscal"),
+    actions.indexOf("export async function salvarDestinatarioBonificacao")
+  );
+  const mudar = form.slice(
+    form.indexOf("function mudarNatureza"),
+    form.indexOf("function persistirCabecalhoFiscal")
+  );
+  assert.match(form, /recusarInicioVendaNfeSemCaixa/);
+  assert.match(mudar, /if \(recusaCaixaParaTipo\(tipoNovo\)\)/);
+  assert.match(mudar, /return;/);
+  assert.match(criar, /recusarNovaVendaNfeSemCaixaAberto/);
+  assert.match(criar, /if \(recusaCaixa\)/);
+  assert.ok(
+    criar.indexOf("recusarNovaVendaNfeSemCaixaAberto") <
+      criar.indexOf('.from("fiscal_operacoes")')
+  );
+  assert.match(form, /PdvCaixaFechado/);
+  assert.match(form, /variante="overlay"/);
+});
+
+test("2. nova operação + natureza venda + Caixa aberto permite iniciar", () => {
+  assert.equal(
+    recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: "venda",
+      vinculaVenda: true,
+      controleAtivo: true,
+      caixaAberto: true,
+    }),
+    null
+  );
+  const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
+  const mudar = form.slice(
+    form.indexOf("function mudarNatureza"),
+    form.indexOf("function persistirCabecalhoFiscal")
+  );
+  assert.match(mudar, /criarOperacaoFiscal\(\{ naturezaId: novoId \}\)/);
+});
+
+test("3. natureza sem venda financeira + Caixa fechado permite iniciar", () => {
+  assert.equal(
+    recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: "bonificacao",
+      vinculaVenda: false,
+      controleAtivo: true,
+      caixaAberto: false,
+    }),
+    null
+  );
+  assert.equal(
+    recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: "transferencia",
+      vinculaVenda: false,
+      controleAtivo: true,
+      caixaAberto: false,
+    }),
+    null
+  );
+  assert.equal(
+    recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: "venda",
+      controleAtivo: false,
+      caixaAberto: false,
+    }),
+    null
+  );
+});
+
+test("4. venda já finalizada + Caixa fechado permite emitir NF-e", () => {
+  assert.equal(
+    recusarInicioVendaNfeSemCaixa({
+      tipoOperacaoInterno: "venda",
+      vendaId: "venda-pdv-existente",
+      controleAtivo: true,
+      caixaAberto: false,
+    }),
+    null
+  );
+  const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const cancelar = fonte("app/api/fiscal/emissoes/[id]/cancelar/route.ts");
+  const reconciliar = fonte("app/api/fiscal/emissoes/[id]/reconciliar/route.ts");
+  assert.doesNotMatch(emitirVenda, /recusarNovaVendaNfeSemCaixaAberto/);
+  assert.doesNotMatch(emitirVenda, /recusarInicioVendaNfeSemCaixa/);
+  assert.doesNotMatch(cancelar, /recusarNovaVendaNfeSemCaixaAberto/);
+  assert.doesNotMatch(reconciliar, /recusarNovaVendaNfeSemCaixaAberto/);
+  semCaixa("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+});
+
+test("5. empresa A não usa Caixa da empresa B", () => {
+  const servidor = fonte("lib/caixa/nfe-venda-servidor.ts");
+  const sessao = fonte("lib/caixa/sessao-aberta.ts");
+  const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
+  const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
+  const criar = actions.slice(
+    actions.indexOf("export async function criarOperacaoFiscal"),
+    actions.indexOf("export async function salvarDestinatarioBonificacao")
+  );
+  assert.match(servidor, /buscarCaixaAbertoEmpresa\(params\.supabase, params\.empresaId\)/);
+  assert.match(servidor, /controleCaixaAtivo\(params\.supabase, params\.empresaId\)/);
+  assert.match(sessao, /\.eq\("empresa_id", id\)/);
+  assert.match(sessao, /registroPertenceAEmpresaAtiva/);
+  assert.match(criar, /empresaId,/);
+  assert.doesNotMatch(criar, /input\.empresaId|input\.empresa_id/);
+  const criarChamada = form.slice(
+    form.indexOf("criarOperacaoFiscal({ naturezaId: novoId })") - 20,
+    form.indexOf("criarOperacaoFiscal({ naturezaId: novoId })") + 60
+  );
+  assert.doesNotMatch(criarChamada, /empresa_id/);
 });
 
 test("1. Nova NF-e Venda em dinheiro entra no Caixa", () => {
@@ -481,7 +602,7 @@ test("rascunho Editar NF-e: guard não depende da URL Nova NF-e", () => {
   assert.match(form, /operacao\.vendaId/);
   assert.match(form, /operacao\.tipo/);
   assert.match(form, /data-nfe-caixa-bloqueado=\{vendaNovaSemCaixa/);
-  assert.match(form, /disabled=\{pending \|\| !podeEmitir \|\| vendaNovaSemCaixa\}/);
+  assert.match(form, /disabled=\{pending \|\| !podeEmitir \|\| vendaNovaSemCaixa \|\| pagamentoImpedeEmissao\}/);
   assert.match(form, /if \(vendaNovaSemCaixa\)/);
   assert.match(form, /setCaixaLiberadoLocal\(true\)/);
   assert.match(form, /onAberto=/);

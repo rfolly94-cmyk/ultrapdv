@@ -1062,6 +1062,7 @@ export function montarPayloadNfeGeranet(
             .informacaoAdicionalFisco
         ),
 
+      // Geranet mapeia nfe.informacaoComplementar → infAdic.infCpl no XML/DANFE.
       informacaoComplementar:
         texto(
           config

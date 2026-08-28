@@ -1,11 +1,12 @@
 const PREFIXOS = [
+  "/pdv",
   "/produtos",
   "/estoque",
   "/clientes",
   "/vendas",
   "/fiscal",
   "/caixa",
-  "/configuracoes/fiscal",
+  "/configuracoes",
   "/relatorios",
 ] as const;
 
@@ -52,4 +53,24 @@ export function hrefFiscalAssistente() {
 
 export function hrefNotificacoesAssistente() {
   return "/configuracoes/notificacoes";
+}
+
+export function hrefPdvAssistente() {
+  return "/pdv";
+}
+
+export function hrefNovoProdutoAssistente() {
+  return "/produtos?novo=1";
+}
+
+export function hrefNovoClienteAssistente() {
+  return "/clientes?novo=1";
+}
+
+export function hrefNfeNovaAssistente() {
+  return "/fiscal/nfe/nova";
+}
+
+export function hrefConfiguracoesAssistente() {
+  return "/configuracoes/fiscal";
 }

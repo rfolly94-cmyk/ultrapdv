@@ -6,6 +6,7 @@ import { hrefCaixaAssistente } from "../rotas";
 import { arredondarMoeda } from "../periodo";
 import {
   MENSAGEM_IA_FALHA_CONSULTA,
+  type NomeFerramentaIa,
   type ResultadoFerramentaIa,
 } from "../tipos";
 import type { ContextoFerramentaIa } from "./contexto";
@@ -32,7 +33,7 @@ export async function consultarCaixaIa(
         ok: true,
         ferramenta: "consultar_caixa",
         dados: { aberto: false, mensagem: "Não há caixa aberto." },
-        acoes: [{ label: "Abrir caixa", href: hrefCaixaAssistente() }],
+        acoes: [{ type: "navigate", label: "Abrir caixa", href: hrefCaixaAssistente() }],
       };
     }
     const movimentos = atual.movimentos.slice(-8).map((item) => ({
@@ -59,7 +60,7 @@ export async function consultarCaixaIa(
         fechamentoCego: painel.fechamentoCego,
         movimentos,
       },
-      acoes: [{ label: "Abrir caixa", href: hrefCaixaAssistente() }],
+      acoes: [{ type: "navigate", label: "Abrir caixa", href: hrefCaixaAssistente() }],
     };
   } catch {
     return {
@@ -69,4 +70,50 @@ export async function consultarCaixaIa(
       codigo: "falha",
     };
   }
+}
+
+function comNomeCaixa(
+  ferramenta: NomeFerramentaIa,
+  resultado: ResultadoFerramentaIa
+): ResultadoFerramentaIa {
+  return { ...resultado, ferramenta };
+}
+
+export async function consultarStatusCaixaIa(ctx: ContextoFerramentaIa) {
+  const resultado = await consultarCaixaIa(ctx);
+  if (!resultado.ok) {
+    return comNomeCaixa("consultar_status_caixa", resultado);
+  }
+  return {
+    ...resultado,
+    ferramenta: "consultar_status_caixa" as const,
+    dados: {
+      aberto: resultado.dados?.aberto ?? false,
+      mensagem: resultado.dados?.mensagem,
+      numero: resultado.dados?.numero,
+    },
+  };
+}
+
+export async function consultarCaixaAtualIa(ctx: ContextoFerramentaIa) {
+  return comNomeCaixa("consultar_caixa_atual", await consultarCaixaIa(ctx));
+}
+
+export async function consultarMovimentosCaixaIa(ctx: ContextoFerramentaIa) {
+  const resultado = await consultarCaixaIa(ctx);
+  if (!resultado.ok) {
+    return comNomeCaixa("consultar_movimentos_caixa", resultado);
+  }
+  return {
+    ...resultado,
+    ferramenta: "consultar_movimentos_caixa" as const,
+    dados: {
+      aberto: resultado.dados?.aberto,
+      movimentos: resultado.dados?.movimentos ?? [],
+    },
+  };
+}
+
+export async function consultarResumoCaixaIa(ctx: ContextoFerramentaIa) {
+  return comNomeCaixa("consultar_resumo_caixa", await consultarCaixaIa(ctx));
 }

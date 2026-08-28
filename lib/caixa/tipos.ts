@@ -50,6 +50,17 @@ export type CaixaReabertura = {
   motivo: string;
 };
 
+export type CaixaEventoGaveta = {
+  id: string;
+  caixa_id: string;
+  tipo: "abertura_gaveta";
+  origem: "caixa" | "pdv" | "venda";
+  venda_id: string | null;
+  usuario_id: string;
+  usuario_nome: string | null;
+  created_at: string;
+};
+
 export type CaixaCicloFechamento = {
   id: string;
   versao: number;
@@ -90,6 +101,7 @@ export type CaixaSessao = {
   reaberto: boolean;
   reaberturas: CaixaReabertura[];
   ciclos_fechamento: CaixaCicloFechamento[];
+  eventos_gaveta: CaixaEventoGaveta[];
 };
 
 export type CaixaTotais = {

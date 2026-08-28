@@ -894,7 +894,77 @@ test("cenário H: Sumatra sem libmupdf ou com nome de instalador é rejeitado", 
   assert.match(fonte("pagina-status.html"), /selImpressora/);
   assert.match(fonte("pagina-status.html"), /Salvar configuração/);
   assert.match(fonte("pagina-status.html"), /selectedIndex = -1/);
+  assert.match(fonte("pagina-status.html"), /Gaveta de dinheiro/);
+  assert.match(fonte("pagina-status.html"), /Testar abertura da gaveta/);
+  assert.match(fonte("pagina-status.html"), /\/drawer\/open/);
   assert.doesNotMatch(fonte("pagina-status.html"), /impressoras\[0\]/);
+});
+
+test("POST /drawer/open usa a impressora selecionada e recusa gaveta desabilitada na origem web", async () => {
+  let chamada = null;
+  await comServidor(
+    {
+      obterConfigLocal: async () => ({
+        lastPrinter: "ELGIN i9",
+        lastPaper: "80mm",
+        drawerEnabled: false,
+        drawerPin: 0,
+      }),
+      listarImpressoras: async () => [{ nome: "ELGIN i9", padrao: true }],
+      aoAbrirGaveta: async (impressora, config) => {
+        chamada = { impressora, config };
+        return { ok: true, impressora, pino: config.pino };
+      },
+    },
+    async (base) => {
+      const recusa = await postJson(
+        `${base}/drawer/open`,
+        {},
+        { Origin: "http://localhost:3000" }
+      );
+      assert.equal(recusa.body.ok, false);
+      assert.match(recusa.body.erro, /desabilitada/i);
+      assert.equal(chamada, null);
+
+      const testeLocal = await postJson(`${base}/drawer/open`, {
+        impressora: "ELGIN i9",
+        pino: 1,
+      });
+      assert.equal(testeLocal.body.ok, true);
+      assert.equal(chamada.impressora, "ELGIN i9");
+      assert.equal(chamada.config.habilitada, true);
+      assert.equal(chamada.config.pino, 1);
+    }
+  );
+});
+
+test("POST /drawer/open com gaveta habilitada usa lastPrinter e pino persistido", async () => {
+  let chamada = null;
+  await comServidor(
+    {
+      obterConfigLocal: async () => ({
+        lastPrinter: "ELGIN i9",
+        lastPaper: "80mm",
+        drawerEnabled: true,
+        drawerPin: 0,
+      }),
+      listarImpressoras: async () => [{ nome: "ELGIN i9", padrao: true }],
+      aoAbrirGaveta: async (impressora, config) => {
+        chamada = { impressora, config };
+        return { ok: true, impressora };
+      },
+    },
+    async (base) => {
+      const r = await postJson(
+        `${base}/drawer/open`,
+        { impressora: "Outra", pino: 1 },
+        { Origin: "http://localhost:3000" }
+      );
+      assert.equal(r.body.ok, true);
+      assert.equal(chamada.impressora, "ELGIN i9");
+      assert.equal(chamada.config.pino, 0);
+    }
+  );
 });
 
 test("log de impressão registra motor, exit code e apaga o temporário", async () => {

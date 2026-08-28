@@ -9,6 +9,10 @@ import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
 import { pagamentosRascunhoDoSnapshot } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 import { lerCabecalhoFiscalDoSnapshot } from "@/lib/fiscal/nfe55/cabecalho-fiscal";
+import {
+  textoUsuarioInfAdFiscoNfe,
+  textoUsuarioInfCplNfe,
+} from "@/lib/fiscal/nfe55/infos-adicionais";
 import { totaisNotaDoSnapshot } from "@/lib/fiscal/nfe55/totais-nota";
 import { lerEnderecoEntregaDoSnapshot } from "@/lib/fiscal/nfe55/endereco-entrega";
 import { lerAutorizadosXmlDoSnapshot } from "@/lib/fiscal/nfe55/autorizados-xml";
@@ -470,8 +474,14 @@ export async function carregarFormularioNfeEmissao({
       saidaProcessadaEm: operacao?.saida_estoque_processada_at ?? null,
       recebimentoProcessadoEm: operacao?.recebimento_processado_at ?? null,
       dadosTransporte: (operacao?.dados_transporte ?? null) as DadosTransporteVenda | null,
-      informacaoComplementarUsuario: operacao?.informacao_complementar_usuario ?? null,
-      informacaoAdicionalFisco: operacao?.informacao_adicional_fisco ?? null,
+      informacaoComplementarUsuario: textoUsuarioInfCplNfe({
+        snapshot: operacao?.snapshot_fiscal,
+        coluna: operacao?.informacao_complementar_usuario,
+      }),
+      informacaoAdicionalFisco: textoUsuarioInfAdFiscoNfe({
+        snapshot: operacao?.snapshot_fiscal,
+        coluna: operacao?.informacao_adicional_fisco,
+      }),
       serieEmissao: emissao?.serie
         ? String(emissao.serie)
         : cabecalho.serie != null

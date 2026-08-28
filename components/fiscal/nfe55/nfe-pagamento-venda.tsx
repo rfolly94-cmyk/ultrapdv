@@ -151,8 +151,10 @@ export function NfePagamentoVenda({
   return (
     <div className="space-y-3">
       <p className="text-[12.5px] text-zinc-500">
-        O total comercial usa o preço de venda do catálogo. O valor fiscal editado no item não
-        altera caixa, PIX nem carteira.
+        O pagamento acompanha o total desta NF-e (itens, quantidade, preço e
+        desconto). Com uma única forma, o valor é ajustado automaticamente.
+        Com várias formas, os valores informados são preservados até fecharem o
+        total, considerando o troco em dinheiro.
       </p>
       <p className="text-[13px] font-medium text-zinc-800">
         Total comercial: {formatarCentavosBr(totalCatalogoCentavos)}
@@ -235,7 +237,7 @@ export function NfePagamentoVenda({
       ) : null}
       <div
         className={`rounded-md border p-3 text-[12.5px] ${
-          avaliacao.bloqueado
+          avaliacao.bloqueado || avaliacao.restanteCentavos > 0
             ? "border-red-300 bg-red-50 text-red-800"
             : "border-zinc-200 bg-zinc-50 text-zinc-700"
         }`}
@@ -244,9 +246,11 @@ export function NfePagamentoVenda({
         <p>
           {avaliacao.restanteCentavos > 0
             ? `Faltam ${formatarCentavosBr(avaliacao.restanteCentavos)}`
-            : avaliacao.trocoCentavos > 0
-              ? `Troco ${formatarCentavosBr(avaliacao.trocoCentavos)}`
-              : "Pagamento fecha o total comercial."}
+            : avaliacao.bloqueado
+              ? `Sobra ${formatarCentavosBr(avaliacao.excedenteCentavos)} sem forma com troco`
+              : avaliacao.trocoCentavos > 0
+                ? `Troco ${formatarCentavosBr(avaliacao.trocoCentavos)}`
+                : "Pagamento fecha o total da venda."}
         </p>
         {avaliacao.mensagem ? <p className="mt-1 whitespace-pre-line">{avaliacao.mensagem}</p> : null}
       </div>

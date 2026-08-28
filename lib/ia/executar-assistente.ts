@@ -1,15 +1,17 @@
-import { dadosComoBlocoNaoInstrucao, ignorarEmpresaIdDoCliente } from "./contexto";
+import { dadosComoBlocoNaoInstrucao } from "./contexto";
 import { DEFINICOES_FERRAMENTAS_IA, executarFerramentaIa } from "./ferramentas/registro";
+import { ferramentaDoCatalogo } from "./ferramentas/catalogo";
 import type { ContextoFerramentaIa } from "./ferramentas/contexto";
 import { ferramentaEscritaAutonoma } from "./acoes/regras";
-import { responderDeterministico } from "./deterministico/responder";
 import { registrarTelemetriaIa } from "./deterministico/telemetria";
 import { chatComFerramentasIa, type MensagemProviderIa } from "./provider";
 import { promptSistemaAssistente } from "./prompts/sistema";
-import type { CardPropostaAcao } from "./acoes/tipos";
+import { sanitizarAcoesFrontendAssistente } from "./acoes-frontend";
+import { MAX_CONSULTAR_DADOS_POR_MENSAGEM } from "./consulta/tipos";
 import {
   MENSAGEM_IA_FALHA_CONSULTA,
-  MENSAGEM_IA_PRECISA_MODO,
+  MENSAGEM_IA_NAO_CONFIGURADO,
+  MENSAGEM_IA_PROVEDOR_SEM_CREDITO,
   NOMES_FERRAMENTAS_IA,
   type AcaoAssistente,
   type ContextoDeterministicoAssistente,
@@ -17,13 +19,13 @@ import {
   type ModoRespostaAssistente,
   type NomeFerramentaIa,
   type PropostaFiscalProduto,
-  type ResultadoFerramentaIa,
 } from "./tipos";
 import type { ContextoAnaliticoAssistente } from "./analitico/tipos";
-import { MAX_CONSULTAS_ANALITICAS_POR_MENSAGEM } from "./analitico/tipos";
 
 const MAX_RODADAS = 4;
 const MAX_CHAMADAS_POR_MENSAGEM = 8;
+const MAX_HISTORICO = 8;
+const MAX_CHARS_HISTORICO = 1500;
 
 function parseArgs(bruto: string) {
   try {
@@ -31,14 +33,17 @@ function parseArgs(bruto: string) {
     if (!json || typeof json !== "object" || Array.isArray(json)) {
       return {};
     }
-    return ignorarEmpresaIdDoCliente(json as Record<string, unknown>);
+    return json as Record<string, unknown>;
   } catch {
     return {};
   }
 }
 
 function ferramentaConhecida(nome: string): nome is NomeFerramentaIa {
-  return (NOMES_FERRAMENTAS_IA as readonly string[]).includes(nome);
+  return (
+    (NOMES_FERRAMENTAS_IA as readonly string[]).includes(nome) &&
+    Boolean(ferramentaDoCatalogo(nome))
+  );
 }
 
 function ultimoContextoDeterministico(
@@ -75,6 +80,44 @@ function ultimoContextoAnalitico(
   return null;
 }
 
+function str(valor: unknown) {
+  const saida = String(valor ?? "").trim();
+  return saida || null;
+}
+
+function contextoDeDadosTool(
+  empresaId: string,
+  ferramenta: string,
+  dados: Record<string, unknown> | undefined
+): ContextoDeterministicoAssistente | null {
+  if (!dados) {
+    return { empresaId, intencao: ferramenta };
+  }
+  const rows = Array.isArray(dados.rows) ? dados.rows : [];
+  const primeiro =
+    rows[0] && typeof rows[0] === "object"
+      ? (rows[0] as Record<string, unknown>)
+      : dados;
+  return {
+    empresaId,
+    intencao: ferramenta,
+    clienteId: str(primeiro.cliente_id ?? primeiro.id),
+    clienteNome: str(primeiro.cliente_nome ?? primeiro.nome ?? primeiro["cliente.nome"]),
+    produtoId: str(primeiro.produto_id),
+    produtoNome: str(primeiro.produto_nome ?? primeiro["produto.nome"]),
+  };
+}
+
+function mensagemErroProvider(codigo: "nao_configurado" | "falha" | "sem_credito") {
+  if (codigo === "nao_configurado") {
+    return MENSAGEM_IA_NAO_CONFIGURADO;
+  }
+  if (codigo === "sem_credito") {
+    return MENSAGEM_IA_PROVEDOR_SEM_CREDITO;
+  }
+  return MENSAGEM_IA_FALHA_CONSULTA;
+}
+
 export async function executarAssistenteIa(params: {
   ctx: ContextoFerramentaIa;
   historico: MensagemAssistente[];
@@ -84,7 +127,7 @@ export async function executarAssistenteIa(params: {
   texto: string;
   acoes: AcaoAssistente[];
   propostaFiscal: PropostaFiscalProduto | null;
-  propostaAcao: CardPropostaAcao | null;
+  propostaAcao: null;
   modo: ModoRespostaAssistente;
   contextoDeterministico: ContextoDeterministicoAssistente | null;
   contextoAnalitico: ContextoAnaliticoAssistente | null;
@@ -93,31 +136,11 @@ export async function executarAssistenteIa(params: {
     params.historico,
     params.ctx.empresaId
   );
+  const contextoAnterior = ultimoContextoDeterministico(
+    params.historico,
+    params.ctx.empresaId
+  );
   const ctx = { ...params.ctx, contextoAnalitico: contextoAnaliticoAnterior };
-  const direto = await responderDeterministico({
-    ctx,
-    pergunta: params.pergunta,
-    interpretacao: {
-      empresaId: params.ctx.empresaId,
-      produtoIdTela: params.ctx.tela.produtoId,
-      clienteIdTela: params.ctx.tela.clienteId,
-      emissaoIdTela: params.ctx.tela.emissaoId,
-      vendaIdTela: params.ctx.tela.vendaId,
-      anterior: ultimoContextoDeterministico(params.historico, params.ctx.empresaId),
-    },
-  });
-  if (direto) {
-    registrarTelemetriaIa("deterministico");
-    return {
-      texto: direto.texto,
-      acoes: direto.acoes,
-      propostaFiscal: null,
-      propostaAcao: null,
-      modo: "direto",
-      contextoDeterministico: direto.contextoDeterministico,
-      contextoAnalitico: null,
-    };
-  }
 
   const mensagens: MensagemProviderIa[] = [
     {
@@ -126,11 +149,12 @@ export async function executarAssistenteIa(params: {
         empresaNome: params.empresaNome,
         contextoTela: ctx.tela.rotulo,
         contextoAnalitico: contextoAnaliticoAnterior,
+        contextoEntidade: contextoAnterior,
       }),
     },
-    ...params.historico.slice(-12).map((item) => ({
+    ...params.historico.slice(-MAX_HISTORICO).map((item) => ({
       role: (item.papel === "usuario" ? "user" : "assistant") as "user" | "assistant",
-      content: item.conteudo.slice(0, 2000),
+      content: item.conteudo.slice(0, MAX_CHARS_HISTORICO),
     })),
     {
       role: "user",
@@ -139,11 +163,10 @@ export async function executarAssistenteIa(params: {
   ];
 
   const acoes: AcaoAssistente[] = [];
-  let propostaFiscal: PropostaFiscalProduto | null = null;
-  let propostaAcao: CardPropostaAcao | null = null;
   let chamadas = 0;
-  let analiticas = 0;
+  let consultasDados = 0;
   let contextoAnalitico: ContextoAnaliticoAssistente | null = contextoAnaliticoAnterior;
+  let contextoDeterministico: ContextoDeterministicoAssistente | null = contextoAnterior;
 
   for (let rodada = 0; rodada < MAX_RODADAS; rodada += 1) {
     const resposta = await chatComFerramentasIa({
@@ -157,24 +180,34 @@ export async function executarAssistenteIa(params: {
           : "erroProvider"
       );
       return {
-        texto: MENSAGEM_IA_PRECISA_MODO,
-        acoes,
-        propostaFiscal,
-        propostaAcao,
+        texto: mensagemErroProvider(resposta.codigo),
+        acoes: sanitizarAcoesFrontendAssistente(acoes),
+        propostaFiscal: null,
+        propostaAcao: null,
         modo: "ia",
-        contextoDeterministico: null,
+        contextoDeterministico,
         contextoAnalitico,
       };
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        JSON.stringify({
+          origem: "ia-assistente",
+          provider: true,
+          toolCalls: resposta.toolCalls.map((item) => item.name),
+          rodada,
+        })
+      );
     }
     if (!resposta.toolCalls.length) {
       registrarTelemetriaIa("ia");
       return {
         texto: resposta.texto?.trim() || MENSAGEM_IA_FALHA_CONSULTA,
-        acoes,
-        propostaFiscal,
-        propostaAcao,
+        acoes: sanitizarAcoesFrontendAssistente(acoes),
+        propostaFiscal: null,
+        propostaAcao: null,
         modo: "ia",
-        contextoDeterministico: null,
+        contextoDeterministico,
         contextoAnalitico,
       };
     }
@@ -193,15 +226,19 @@ export async function executarAssistenteIa(params: {
           content: JSON.stringify({
             ok: false,
             erro: "Ferramenta não permitida.",
+            codigo: "ferramenta_inexistente",
           }),
         });
         continue;
       }
       chamadas += 1;
-      if (chamada.name === "consultar_analitico") {
-        analiticas += 1;
+      if (chamada.name === "consultar_dados") {
+        consultasDados += 1;
       }
-      if (chamadas > MAX_CHAMADAS_POR_MENSAGEM || analiticas > MAX_CONSULTAS_ANALITICAS_POR_MENSAGEM) {
+      if (
+        chamadas > MAX_CHAMADAS_POR_MENSAGEM ||
+        consultasDados > MAX_CONSULTAR_DADOS_POR_MENSAGEM
+      ) {
         mensagens.push({
           role: "tool",
           toolCallId: chamada.id,
@@ -212,19 +249,28 @@ export async function executarAssistenteIa(params: {
         });
         continue;
       }
-      const resultado: ResultadoFerramentaIa = await executarFerramentaIa(
+      const inicioTool = Date.now();
+      const resultado = await executarFerramentaIa(
         chamada.name,
         ctx,
         parseArgs(chamada.arguments)
       );
+      if (process.env.NODE_ENV === "development") {
+        console.info(
+          JSON.stringify({
+            origem: "ia-assistente",
+            ferramenta: chamada.name,
+            ok: resultado.ok,
+            duracaoMs: Date.now() - inicioTool,
+            rowCount:
+              resultado.ok && resultado.dados && typeof resultado.dados.rowCount === "number"
+                ? resultado.dados.rowCount
+                : null,
+          })
+        );
+      }
       if (resultado.acoes?.length) {
         acoes.push(...resultado.acoes);
-      }
-      if (resultado.propostaFiscal) {
-        propostaFiscal = resultado.propostaFiscal;
-      }
-      if (resultado.propostaAcao) {
-        propostaAcao = resultado.propostaAcao;
       }
       const contextoNovo = resultado.dados?.contextoAnalitico;
       if (contextoNovo && typeof contextoNovo === "object") {
@@ -233,6 +279,10 @@ export async function executarAssistenteIa(params: {
           contextoAnalitico = bruto;
         }
       }
+      const extraido = contextoDeDadosTool(ctx.empresaId, chamada.name, resultado.dados);
+      if (extraido) {
+        contextoDeterministico = extraido;
+      }
       mensagens.push({
         role: "tool",
         toolCallId: chamada.id,
@@ -240,7 +290,12 @@ export async function executarAssistenteIa(params: {
           chamada.name,
           resultado.ok
             ? { ok: true, dados: resultado.dados }
-            : { ok: false, erro: resultado.erro, codigo: resultado.codigo }
+            : {
+                ok: false,
+                erro: resultado.erro,
+                codigo: resultado.codigo,
+                dados: resultado.dados ?? null,
+              }
         ),
       });
     }
@@ -249,11 +304,11 @@ export async function executarAssistenteIa(params: {
   registrarTelemetriaIa("ia");
   return {
     texto: "Consultei os dados da empresa. Veja o resumo nas ações abaixo.",
-    acoes,
-    propostaFiscal,
-    propostaAcao,
+    acoes: sanitizarAcoesFrontendAssistente(acoes),
+    propostaFiscal: null,
+    propostaAcao: null,
     modo: "ia",
-    contextoDeterministico: null,
+    contextoDeterministico,
     contextoAnalitico,
   };
 }

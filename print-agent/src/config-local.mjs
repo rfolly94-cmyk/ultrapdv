@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { PORTA_PADRAO, portaValida } from "./portas.mjs";
+import { sanitizarGavetaHabilitada, sanitizarPinoGaveta } from "./gaveta.mjs";
 
 let ultimoArquivo = null;
 
@@ -42,6 +43,8 @@ export function configPadrao() {
     activePort: PORTA_PADRAO,
     lastPrinter: null,
     lastPaper: "80mm",
+    drawerEnabled: false,
+    drawerPin: 0,
   };
 }
 
@@ -61,6 +64,8 @@ function sanitizar(bruto) {
     activePort: active,
     lastPrinter,
     lastPaper,
+    drawerEnabled: sanitizarGavetaHabilitada(bruto?.drawerEnabled),
+    drawerPin: sanitizarPinoGaveta(bruto?.drawerPin),
   };
 }
 

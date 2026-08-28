@@ -403,14 +403,16 @@ test("permissão omite métrica bloqueada e isolamento fica na fonte da empresa"
 });
 
 test("fonte: uma tool genérica, limites, híbrido e fiscal especializado", () => {
+  assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_dados"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_analitico"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("classificar_produto_fiscal"));
-  assert.match(fonte("lib/ia/ferramentas/registro.ts"), /consultar_analitico/);
+  assert.match(fonte("lib/ia/ferramentas/catalogo.ts"), /consultar_dados/);
   assert.doesNotMatch(fonte("lib/ia/ferramentas/registro.ts"), /executar_sql|chamar_rpc|alterar_tabela/);
-  assert.match(fonte("lib/ia/executar-assistente.ts"), /MAX_CONSULTAS_ANALITICAS_POR_MENSAGEM/);
+  assert.match(fonte("lib/ia/executar-assistente.ts"), /MAX_CONSULTAR_DADOS_POR_MENSAGEM/);
   assert.match(fonte("lib/ia/executar-assistente.ts"), /MAX_RODADAS = 4/);
   assert.match(fonte("lib/ia/executar-assistente.ts"), /MAX_CHAMADAS_POR_MENSAGEM = 8/);
   assert.doesNotMatch(fonte("lib/ia/executar-assistente.ts"), /planejarConsultaAnalitica/);
+  assert.doesNotMatch(fonte("lib/ia/executar-assistente.ts"), /responderDeterministico/);
   assert.match(fonte("lib/ia/analitico/fontes.ts"), /\.eq\("empresa_id", ctx\.empresaId\)/);
   assert.match(fonte("lib/ia/analitico/fontes.ts"), /filtrarRegistrosDaEmpresaAtiva/);
   assert.match(fonte("lib/ia/analitico/observabilidade.ts"), /NODE_ENV !== "development"/);

@@ -29,6 +29,12 @@ export const STATUS_PROPOSTA_IA = [
 export type StatusPropostaIa = (typeof STATUS_PROPOSTA_IA)[number];
 
 export const FERRAMENTAS_ESCRITA_IA = [
+  "propor_atualizacao_fiscal",
+  "propor_atualizacao_fiscal_produto",
+  "propor_atribuicao_grupo_fiscal",
+  "propor_criacao_grupo_fiscal",
+  "propor_atualizacao_produto",
+  "propor_acao_notificacao",
   "aplicar_atualizacao_fiscal_produto",
   "aplicar_atribuicao_grupo_fiscal",
   "criar_grupo_fiscal_confirmado",

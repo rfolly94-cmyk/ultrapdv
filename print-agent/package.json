@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test src/agent.test.mjs src/portas.test.mjs",
+    "test": "node --test src/agent.test.mjs src/portas.test.mjs src/gaveta.test.mjs",
     "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1",
     "stop": "node src/stop.mjs"
   }

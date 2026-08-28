@@ -27,6 +27,66 @@ function revalidarControleCaixa() {
   revalidatePath("/fiscal/nfe", "layout");
 }
 
+export async function definirAbrirGavetaAposVendaDinheiro(input: {
+  ativo: boolean;
+}): Promise<Resultado> {
+  const supabase = await createClient();
+  const { data: claimsData, error: authError } = await supabase.auth.getClaims();
+  const usuarioId = claimsData?.claims?.sub;
+
+  if (authError || !usuarioId) {
+    redirect("/login");
+  }
+
+  const { data: vinculo } = await supabase
+    .from("usuarios_empresas")
+    .select("empresa_id")
+    .eq("usuario_id", String(usuarioId))
+    .eq("principal", true)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  if (!vinculo) {
+    redirect("/onboarding");
+  }
+
+  const empresaId = String(vinculo.empresa_id);
+  await exigirEmpresaOperacionalOuRedirecionar(empresaId);
+
+  try {
+    await exigirPermissao({
+      modulo: "configuracoes",
+      acao: "editar_empresa",
+    });
+  } catch (error) {
+    if (error instanceof ErroPermissao && error.status === 401) {
+      redirect("/login");
+    }
+    if (error instanceof ErroPermissao) {
+      return { ok: false, erro: error.message };
+    }
+    throw error;
+  }
+
+  const { error } = await supabase.rpc(
+    "rpc_definir_abrir_gaveta_apos_venda_dinheiro",
+    { p_ativo: input.ativo === true }
+  );
+
+  if (error) {
+    return {
+      ok: false,
+      erro: mensagemErroCaixa(
+        error,
+        "Não foi possível atualizar a abertura automática da gaveta."
+      ),
+    };
+  }
+
+  revalidarControleCaixa();
+  return { ok: true };
+}
+
 export async function definirControleCaixa(input: {
   ativo: boolean;
 }): Promise<Resultado> {

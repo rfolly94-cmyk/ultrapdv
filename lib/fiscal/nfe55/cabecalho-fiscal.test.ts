@@ -42,6 +42,8 @@ test("TESTE A: snapshot do cabeçalho persiste série/número/datas/intermediado
     horaEmissao: "09:00",
     dataSaida: "2026-08-19",
     horaSaida: "14:30",
+    informacaoComplementarUsuario: "Pedido conferido.",
+    informacaoAdicionalFisco: null,
   });
   const lido = lerCabecalhoFiscalDoSnapshot({
     pagamentos_rascunho: [{ formaPagamentoId: "x", valorCentavos: 100 }],
@@ -58,6 +60,8 @@ test("TESTE A: snapshot do cabeçalho persiste série/número/datas/intermediado
   assert.equal(lido.horaEmissao, "09:00");
   assert.equal(lido.dataSaida, "2026-08-19");
   assert.equal(lido.horaSaida, "14:30");
+  assert.equal(snapshot.informacao_complementar_usuario, "Pedido conferido.");
+  assert.equal(snapshot.informacao_adicional_fisco, null);
 });
 
 test("TESTE B: número duplicado na mesma empresa/ambiente/modelo/série é bloqueado", () => {

@@ -13,6 +13,7 @@ import {
   enviarMensagemAssistenteIaAction,
 } from "@/app/ia/actions";
 import { PageAlert } from "@/components/ui/page-alert";
+import { sanitizarAcoesFrontendAssistente } from "@/lib/ia/acoes-frontend";
 import type { CardPropostaAcao } from "@/lib/ia/acoes/tipos";
 import type { MensagemAssistente, PropostaFiscalProduto } from "@/lib/ia/tipos";
 
@@ -319,7 +320,7 @@ export function AssistenteIaPainel({
             <p className="mt-1 text-[12px] text-zinc-500">
               {iaDisponivel
                 ? "Pergunte sobre vendas, estoque, carteira, caixa, fiscal ou avisos."
-                : "Consultas de vendas, estoque, clientes, carteira, caixa, fiscal cadastrado e notificações funcionam sem IA."}
+                : "O Assistente precisa do provedor de IA configurado neste ambiente."}
             </p>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {sugestoes.map((item) => (
@@ -348,7 +349,7 @@ export function AssistenteIaPainel({
             <p className="whitespace-pre-wrap">{item.conteudo}</p>
             {item.papel === "assistente" && item.modo ? (
               <p className="mt-1 text-[10px] uppercase tracking-wide text-zinc-400">
-                {item.modo === "direto" ? "Consulta direta" : "Assistente IA"}
+                Assistente IA
               </p>
             ) : null}
             {item.propostaAcao ? (
@@ -367,47 +368,20 @@ export function AssistenteIaPainel({
             ) : null}
             {item.acoes?.length ? (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {item.acoes.map((acao, index) => {
-                  if (item.propostaAcao && (acao.confirmarAcao || acao.cancelarAcao)) {
+                {sanitizarAcoesFrontendAssistente(item.acoes).map((acao, index) => {
+                  if (!acao.href) {
                     return null;
                   }
-                  if (acao.href) {
-                    return (
-                      <Link
-                        key={`${acao.label}-${index}`}
-                        href={acao.href}
-                        className="updv-btn-row"
-                        onClick={onFechar}
-                      >
-                        {acao.label}
-                      </Link>
-                    );
-                  }
-                  if (acao.desfazerAcao) {
-                    return (
-                      <button
-                        key={`${acao.label}-${index}`}
-                        type="button"
-                        className="updv-btn-row"
-                        onClick={() => desfazer(acao.desfazerAcao!.propostaId)}
-                      >
-                        {acao.label}
-                      </button>
-                    );
-                  }
-                  if (acao.aplicarFiscal && !item.propostaAcao) {
-                    return (
-                      <button
-                        key={`${acao.label}-${index}`}
-                        type="button"
-                        className="updv-btn-row"
-                        onClick={() => aplicarLegado(acao.aplicarFiscal!.propostaId)}
-                      >
-                        {acao.label}
-                      </button>
-                    );
-                  }
-                  return null;
+                  return (
+                    <Link
+                      key={`${acao.label}-${index}`}
+                      href={acao.href}
+                      className="updv-btn-row"
+                      onClick={onFechar}
+                    >
+                      {acao.label}
+                    </Link>
+                  );
                 })}
               </div>
             ) : null}

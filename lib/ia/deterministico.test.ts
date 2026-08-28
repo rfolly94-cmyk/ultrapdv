@@ -5,7 +5,7 @@ import { empresaA, empresaB } from "@/lib/multiempresa/cenario";
 import { fonte } from "@/lib/multiempresa/fonte";
 import { interpretarIntencaoDeterministica } from "./deterministico/interpretar-intencao";
 import { extrairPeriodoDeterministico } from "./deterministico/periodo";
-import { MENSAGEM_IA_PRECISA_MODO, MENSAGEM_IA_SEM_PERMISSAO } from "./tipos";
+import { MENSAGEM_IA_SEM_PERMISSAO } from "./tipos";
 
 const ctxA = { empresaId: empresaA };
 
@@ -123,17 +123,16 @@ test("sugestões gratuitas resolvem sem provider", () => {
   }
 });
 
-test("fluxo híbrido consulta determinística antes do provider e não gera SQL", () => {
+test("fluxo principal envia toda mensagem ao provider sem roteador determinístico", () => {
   const executar = fonte("lib/ia/executar-assistente.ts");
-  const idxDireto = executar.indexOf("responderDeterministico");
-  const idxProvider = executar.indexOf("chatComFerramentasIa");
-  assert.ok(idxDireto > 0 && idxProvider > idxDireto);
-  assert.match(executar, /modo: "direto"/);
-  assert.match(executar, /MENSAGEM_IA_PRECISA_MODO/);
+  assert.doesNotMatch(executar, /responderDeterministico/);
+  assert.match(executar, /chatComFerramentasIa/);
+  assert.match(executar, /MENSAGEM_IA_NAO_CONFIGURADO/);
+  assert.match(executar, /MENSAGEM_IA_PROVEDOR_SEM_CREDITO/);
+  assert.doesNotMatch(executar, /MENSAGEM_IA_PRECISA_MODO/);
   assert.doesNotMatch(fonte("lib/ia/deterministico/interpretar-intencao.ts"), /chatComFerramentasIa|ULTRAPDV_IA_API_KEY/);
   assert.doesNotMatch(fonte("lib/ia/deterministico/responder.ts"), /chatComFerramentasIa|\.rpc\(|executeSql|from\(`\$\{/);
   assert.match(fonte("lib/ia/provider.ts"), /sem_credito/);
-  assert.match(fonte("lib/ia/deterministico/telemetria.ts"), /deterministico/);
 });
 
 test("permissões continuam na tool, não no interpretador", () => {
@@ -144,9 +143,8 @@ test("permissões continuam na tool, não no interpretador", () => {
   assert.doesNotMatch(fonte("lib/ia/deterministico/interpretar-intencao.ts"), /temPermissao|planoPermite/);
 });
 
-test("multiempresa: empresa_id do cliente é ignorado e contexto não cruza empresa", () => {
-  assert.match(fonte("lib/ia/deterministico/responder.ts"), /ignorarEmpresaIdDoCliente/);
+test("multiempresa: empresa_id do cliente é rejeitado na consulta genérica e ignorado nas tools antigas", () => {
+  assert.match(fonte("lib/ia/consulta/validar.ts"), /empresa_id_nao_permitido/);
   assert.match(fonte("lib/ia/executar-assistente.ts"), /empresaId !== empresaId|anterior\.empresaId !== ctx\.empresaId|contextoDeterministico\.empresaId !== empresaId/);
   assert.doesNotMatch(fonte("app/ia/actions.ts"), /input\.empresaId/);
-  assert.equal(MENSAGEM_IA_PRECISA_MODO.includes("consultas de vendas"), true);
 });

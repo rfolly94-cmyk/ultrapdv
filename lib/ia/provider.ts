@@ -111,6 +111,7 @@ export async function chatComFerramentasIa(params: {
         tools: ferramentasOpenAi(params.ferramentas),
         tool_choice: "auto",
       }),
+      signal: AbortSignal.timeout(20_000),
     });
 
     const bruto = await resposta.text();

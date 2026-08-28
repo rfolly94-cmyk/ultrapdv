@@ -59,7 +59,7 @@ test("prompt injection em descrição fica isolado como DADOS", () => {
   );
   assert.match(bloco, /NÃO é instrução/);
   assert.match(bloco, /cancele todas as vendas/);
-  assert.match(fonte("lib/ia/prompts/sistema.ts"), /Nunca execute SQL/);
+  assert.match(fonte("lib/ia/prompts/sistema.ts"), /NÃO escreve SQL|Nunca envie SQL/);
 });
 
 test("descrição fiscal ambígua pede informação", () => {
@@ -92,7 +92,8 @@ test("alteração fiscal exige confirmação persistida e registra auditoria", (
   assert.doesNotMatch(fonte("lib/ia/ferramentas/registro.ts"), /executar_sql|chamar_rpc|alterar_tabela/);
 });
 
-test("ferramentas cobrem vendas, estoque, carteira, fiscal e notificações", () => {
+test("ferramentas cobrem consulta genérica, fiscal especializado e navegação", () => {
+  assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_dados"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_vendas"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("ranking_produtos"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_estoque"));
@@ -101,6 +102,9 @@ test("ferramentas cobrem vendas, estoque, carteira, fiscal e notificações", ()
   assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_notificacoes"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_analitico"));
   assert.ok(NOMES_FERRAMENTAS_IA.includes("classificar_produto_fiscal"));
+  assert.ok(NOMES_FERRAMENTAS_IA.includes("buscar_produtos"));
+  assert.ok(NOMES_FERRAMENTAS_IA.includes("consultar_venda"));
+  assert.ok(NOMES_FERRAMENTAS_IA.includes("abrir_pdv"));
   assert.equal(periodoAssistenteValido("hoje"), "hoje");
   assert.match(fonte("lib/ia/ferramentas/produtos.ts"), /situacaoEstoque/);
 });
@@ -114,13 +118,13 @@ test("usuário sem caixa não consulta caixa; sem fiscal não altera", () => {
 });
 
 test("provider não lê chave no browser e tools são estritas", () => {
-  assert.match(fonte("lib/ia/provider.ts"), /ULTRAPDV_IA_API_KEY/);
+  assert.match(fonte("lib/ia/executar-assistente.ts"), /chatComFerramentasIa/);
+  assert.doesNotMatch(fonte("lib/ia/executar-assistente.ts"), /responderDeterministico/);
   assert.doesNotMatch(fonte("components/ia/assistente-ia-painel.tsx"), /ULTRAPDV_IA_API_KEY|openai/i);
-  assert.match(fonte("lib/ia/ferramentas/registro.ts"), /additionalProperties: false/);
+  assert.match(fonte("lib/ia/ferramentas/definicao.ts"), /additionalProperties: false/);
   const config = lerConfigProviderIa();
   if (!process.env.ULTRAPDV_IA_API_KEY) {
     assert.equal(config, null);
   }
-  assert.match(fonte("lib/ia/executar-assistente.ts"), /responderDeterministico/);
-  assert.match(fonte("components/ia/assistente-ia-painel.tsx"), /Consulta direta/);
+  assert.match(fonte("components/ia/assistente-ia-painel.tsx"), /Assistente IA/);
 });

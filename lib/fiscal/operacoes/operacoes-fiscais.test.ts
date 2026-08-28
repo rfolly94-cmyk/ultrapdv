@@ -134,6 +134,15 @@ test("C. confirmar saída reduz estoque uma vez via RPC transacional", () => {
   assert.match(migracao, /for update/);
   assert.match(actions, /rpc_confirmar_saida_operacao_fiscal/);
   assert.match(editor, /Confirmar saída da mercadoria/);
+  const migracaoSaidaNegativa = fonte(
+    "supabase/migrations/20260828120000_nfe_saida_estoque_negativo.sql"
+  );
+  assert.match(migracaoSaidaNegativa, /rpc_confirmar_saida_operacao_fiscal/);
+  assert.match(migracaoSaidaNegativa, /v_atual := v_anterior - v_item.quantidade/);
+  assert.doesNotMatch(
+    migracaoSaidaNegativa,
+    /Estoque insuficiente para confirmar a saída/
+  );
 });
 
 test("D. duplo clique de saída é idempotente", () => {
@@ -708,4 +717,25 @@ test("Cabeçalho fiscal: rascunho edita série/número/datas; transmissão conge
   assert.match(rpcNumero, /p_numero bigint default null/);
   assert.match(rpcNumero, /grant execute/);
   assert.match(rpcNumero, /to service_role/);
+});
+
+test("Informações complementares: Validar e Emitir leem o mesmo infCpl do snapshot", () => {
+  const verificarFn = actions.slice(
+    actions.indexOf("export async function verificarOperacaoFiscalAction"),
+    actions.indexOf("export async function confirmarSaidaOperacaoFiscal")
+  );
+  assert.match(verificarFn, /textoUsuarioInfCplNfe/);
+  assert.match(emitirVenda, /montarInformacaoComplementarNfe/);
+  assert.match(emitirVenda, /textoUsuarioInfCplNfe/);
+  assert.match(emitir, /textoUsuarioInfCplNfe/);
+  assert.match(editor, /informacaoComplementarUsuario: infoUsuario/);
+  assert.match(editor, /persistirCabecalhoSeSujo/);
+  const emitirVendaInfCpl = emitirVenda.slice(
+    emitirVenda.lastIndexOf("informacaoComplementar:")
+  );
+  assert.match(emitirVendaInfCpl, /montarInformacaoComplementarNfe/);
+  assert.doesNotMatch(
+    emitirVendaInfCpl.slice(0, 400),
+    /informacaoComplementar:\s*fiscal\s*\.informacao_complementar_padrao/
+  );
 });

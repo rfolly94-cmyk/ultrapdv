@@ -64,6 +64,12 @@ import {
   validarAutorizadosXml,
 } from "@/lib/fiscal/nfe55/autorizados-xml";
 import { responsavelTecnicoDoCadastroFiscal } from "@/lib/fiscal/nfe55/responsavel-tecnico";
+import {
+  montarInformacaoAdicionalFisco,
+  montarInformacaoComplementarNfe,
+  textoUsuarioInfAdFiscoNfe,
+  textoUsuarioInfCplNfe,
+} from "@/lib/fiscal/nfe55/infos-adicionais";
 
 import {
   montarPayloadNfeGeranet,
@@ -905,7 +911,7 @@ export async function POST(
       await supabase
         .from("fiscal_operacoes")
         .select(
-          "id, empresa_id, snapshot_fiscal, natureza_id, fin_nfe, natureza_descricao, tp_nf"
+          "id, empresa_id, snapshot_fiscal, natureza_id, fin_nfe, natureza_descricao, tp_nf, informacao_complementar_usuario, informacao_adicional_fisco"
         )
         .eq(
           "empresa_id",
@@ -2636,9 +2642,33 @@ export async function POST(
             cabecalhoNfe.indicativoIntermediador,
           naturezaOperacao:
             identidadeEmissao.descricao,
+          informacaoAdicionalFisco:
+            montarInformacaoAdicionalFisco({
+              textoUsuario: textoUsuarioInfAdFiscoNfe({
+                snapshot: snapshotOperacao,
+                coluna:
+                  operacaoVenda &&
+                  String(operacaoVenda.empresa_id) ===
+                    String(empresaId)
+                    ? operacaoVenda.informacao_adicional_fisco
+                    : null,
+              }),
+            }),
           informacaoComplementar:
-            fiscal
-              .informacao_complementar_padrao,
+            montarInformacaoComplementarNfe({
+              textosAutomaticos: [],
+              padraoEmpresa:
+                fiscal.informacao_complementar_padrao,
+              textoUsuario: textoUsuarioInfCplNfe({
+                snapshot: snapshotOperacao,
+                coluna:
+                  operacaoVenda &&
+                  String(operacaoVenda.empresa_id) ===
+                    String(empresaId)
+                    ? operacaoVenda.informacao_complementar_usuario
+                    : null,
+              }),
+            }),
           tipo:
             cabecalhoNfe.tpNf ||
             identidadeEmissao.tpNf,

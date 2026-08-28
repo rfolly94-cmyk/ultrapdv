@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 
-import { definirControleCaixa } from "@/app/configuracoes/caixa/actions";
+import { definirControleCaixa, definirAbrirGavetaAposVendaDinheiro } from "@/app/configuracoes/caixa/actions";
 import { AppModal } from "@/components/ui/app-modal";
 import { PageAlert } from "@/components/ui/page-alert";
 import {
@@ -19,13 +19,17 @@ export function CaixaControleForm({
   controleAtivo,
   caixaAberto,
   podeEditar,
+  abrirGavetaAposVendaDinheiro,
 }: {
   controleAtivo: boolean;
   caixaAberto: boolean;
   podeEditar: boolean;
+  abrirGavetaAposVendaDinheiro: boolean;
 }) {
   const [pending, start] = useTransition();
+  const [pendingGaveta, startGaveta] = useTransition();
   const [ativo, setAtivo] = useState(controleAtivo);
+  const [gavetaAuto, setGavetaAuto] = useState(abrirGavetaAposVendaDinheiro);
   const [confirmarDesativar, setConfirmarDesativar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
@@ -62,7 +66,21 @@ export function CaixaControleForm({
     aplicar(true);
   }
 
+  function alternarGavetaAuto(proximo: boolean) {
+    setErro(null);
+    setSucesso(null);
+    startGaveta(async () => {
+      const saida = await definirAbrirGavetaAposVendaDinheiro({ ativo: proximo });
+      if (!saida.ok) {
+        setErro(saida.erro);
+        return;
+      }
+      setGavetaAuto(proximo);
+    });
+  }
+
   return (
+    <>
     <div className="rounded-md border border-zinc-200 bg-white p-4">
       <h2 className="text-[15px] font-semibold text-zinc-950">
         Usar controle de Caixa
@@ -137,10 +155,32 @@ export function CaixaControleForm({
         }
       >
         <p className="text-[13px] text-zinc-600">
-          Novas vendas e recebimentos deixarão de fazer parte do fechamento de
-          Caixa. O histórico existente será preservado.
+          Novas vendas e recebimentos deixarão de fazer parte do fechamento de Caixa. O histórico existente será preservado.
         </p>
       </AppModal>
     </div>
+
+    <div className="rounded-md border border-zinc-200 bg-white p-4">
+      <h2 className="text-[15px] font-semibold text-zinc-950">
+        Abrir gaveta automaticamente após finalizar venda em dinheiro
+      </h2>
+      <p className="mt-1 text-[13px] text-zinc-500">
+        Se a venda tiver pagamento em dinheiro, o PDV solicita a abertura física
+        da gaveta no Connector deste computador depois que a venda já estiver
+        concluída. Falha na gaveta não cancela nem duplica a venda.
+      </p>
+      <label className="mt-4 flex items-center gap-3 text-[13px] text-zinc-700">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-label="Abrir gaveta automaticamente após finalizar venda em dinheiro"
+          checked={gavetaAuto}
+          disabled={!podeEditar || pendingGaveta}
+          onChange={(event) => alternarGavetaAuto(event.target.checked)}
+        />
+        <span>{gavetaAuto ? "Ativado" : "Desativado"}</span>
+      </label>
+    </div>
+    </>
   );
 }

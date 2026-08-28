@@ -43,6 +43,16 @@ export const MENSAGEM_CONTROLE_CAIXA_ATIVADO =
 export const MENSAGEM_CONTROLE_CAIXA_BLOQUEIA_DESATIVAR =
   "Não é possível desativar o controle de Caixa enquanto houver um Caixa aberto. Feche a sessão atual primeiro.";
 
+export const MENSAGEM_GAVETA_CAIXA_FECHADO =
+  "Abra o Caixa para solicitar a abertura da gaveta.";
+
+export const MENSAGEM_GAVETA_ABERTA =
+  "Gaveta aberta com sucesso";
+
+export const MENSAGEM_GAVETA_VENDA_SEM_ABRIR =
+  "Venda concluída, mas não foi possível abrir a gaveta.";
+
+
 export function mensagemErroCaixaOperacao(erro: unknown) {
   const texto =
     erro instanceof Error

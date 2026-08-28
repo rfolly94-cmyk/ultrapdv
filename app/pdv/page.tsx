@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PdvShell } from "@/components/pdv/pdv-shell";
 import { carregarPedidoParaPdv } from "@/lib/catalogo/carregar-pedido-pdv";
 import { buscarCaixaAbertoEmpresa } from "@/lib/caixa/sessao-aberta";
-import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
+import { carregarConfiguracaoCaixaEmpresa } from "@/lib/caixa/carregar";
 import { sessaoCaixaLiberadaParaOperar } from "@/lib/caixa/controle";
 import { pathLogoDaEmpresa, urlPublicaLogoEmpresa } from "@/lib/empresa/logo";
 import { carregarPreferenciasPdvSessao } from "@/lib/pdv/preferencias-servidor";
@@ -124,7 +124,7 @@ export default async function PdvPage({
     preferencias,
     caixaAbertoRegistro,
     sessaoPermissoes,
-    controleAtivo,
+    configuracaoCaixa,
     estoqueResult,
     pdvConfigResult,
   ] = await Promise.all([
@@ -209,7 +209,7 @@ export default async function PdvPage({
     carregarPreferenciasPdvSessao(),
     buscarCaixaAbertoEmpresa(supabase, String(vinculo.empresa_id)),
     obterPermissoesSessao(),
-    controleCaixaAtivo(supabase, String(vinculo.empresa_id)),
+    carregarConfiguracaoCaixaEmpresa(supabase, String(vinculo.empresa_id)),
     supabase
       .from("estoque_atual")
       .select("empresa_id, produto_id, quantidade")
@@ -268,6 +268,7 @@ export default async function PdvPage({
   const permitirVendaSemEstoque = permitirVendaSemEstoqueDoRegistro(
     pdvConfig?.permitir_venda_sem_estoque
   );
+  const controleAtivo = configuracaoCaixa.controleAtivo;
 
   const fiscal = registroPertenceAEmpresaAtiva(
     fiscalResult.data,
@@ -349,6 +350,7 @@ export default async function PdvPage({
         controleAtivo,
         caixaAberto: caixaAbertoRegistro !== null,
       })}
+      caixaSessaoAberta={caixaAbertoRegistro !== null}
       podeAbrirCaixa={
         controleAtivo &&
         temPermissao(
@@ -359,6 +361,9 @@ export default async function PdvPage({
       }
       caixaReabertoAviso={
         controleAtivo ? caixaAbertoRegistro?.aviso ?? null : null
+      }
+      abrirGavetaAposVendaDinheiro={
+        configuracaoCaixa.abrirGavetaAposVendaDinheiro
       }
     />
   );

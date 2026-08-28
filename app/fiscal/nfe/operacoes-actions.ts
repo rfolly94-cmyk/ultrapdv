@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { executarFinalizacaoVendaPdv } from "@/app/pdv/actions";
 import { MENSAGEM_CAIXA_FECHADO_FINALIZAR, MENSAGEM_CAIXA_FECHADO_NFE_VENDA } from "@/lib/caixa/mensagens";
 import { nfeVendaNovaExigeCaixa, vendaIdNfeMaterializada } from "@/lib/caixa/nfe-venda";
+import { recusarNovaVendaNfeSemCaixaAberto } from "@/lib/caixa/nfe-venda-servidor";
 import { deveUsarLivroCaixa } from "@/lib/caixa/controle";
 import { controleCaixaAtivo } from "@/lib/caixa/controle-servidor";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
@@ -40,6 +41,19 @@ import {
   validarDataSaidaFiscal,
   validarHoraSaidaFiscal,
 } from "@/lib/fiscal/nfe55/cabecalho-fiscal";
+import {
+  LIMITE_INF_ADFISCO_NFE,
+  LIMITE_INF_CPL_NFE,
+  persistirTextoInfAdicNfe,
+  textoUsuarioInfAdFiscoNfe,
+  textoUsuarioInfCplNfe,
+} from "@/lib/fiscal/nfe55/infos-adicionais";
+import {
+  mesclarSnapshotItemComercial,
+  totalItemNfe,
+  validarQuantidadeItemNfe,
+  validarValorUnitarioItemNfe,
+} from "@/lib/fiscal/nfe55/item-comercial";
 import {
   mesclarSnapshotOperacao,
   pagamentosRascunhoDoSnapshot,
@@ -91,6 +105,8 @@ import {
   snapshotParaPersistirAutorizadosXml,
   validarAutorizadosXml,
 } from "@/lib/fiscal/nfe55/autorizados-xml";
+import { paraCentavos } from "@/lib/fiscal/distribuir-desconto-itens";
+import { compensarDiferencaSubtotalCatalogo } from "@/lib/fiscal/nfe55/sincronizar-pagamentos";
 import { validarPixNaFinalizacaoComercial } from "@/lib/pagamentos/pix/modo-ativo-servidor";
 import { avaliarTetoPagamentosNoServidor } from "@/lib/pdv/validar-teto-servidor";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -240,6 +256,15 @@ export async function criarOperacaoFiscal(input: {
 
     if (!tipo) {
       return { ok: false, erro: "Operação ainda não implementada nesta tela." };
+    }
+
+    const recusaCaixa = await recusarNovaVendaNfeSemCaixaAberto({
+      supabase,
+      empresaId,
+      tipoOperacaoInterno: tipo,
+    });
+    if (recusaCaixa) {
+      return recusaCaixa;
     }
 
     const destinatarioTipo = destinatarioTipoPeloTipoOperacao(tipo);
@@ -496,6 +521,15 @@ export async function salvarNaturezaOperacaoFiscal(input: {
       };
     }
     const tipoNovo = natureza.tipo_operacao_interno as TipoOperacaoNova;
+    const recusaCaixa = await recusarNovaVendaNfeSemCaixaAberto({
+      supabase,
+      empresaId,
+      tipoOperacaoInterno: tipoNovo,
+      vendaId: operacao.venda_id,
+    });
+    if (recusaCaixa) {
+      return recusaCaixa;
+    }
     const tipoMudou = !operacao.venda_id && tipoNovo !== operacao.tipo_operacao_interno;
     const destinatarioTipo = destinatarioTipoPeloTipoOperacao(
       operacao.venda_id ? "venda" : tipoNovo
@@ -758,12 +792,24 @@ export async function salvarCabecalhoFiscalOperacao(input: {
       : cabecalhoAtual.indicativoIntermediador;
     const infoUsuario =
       input.informacaoComplementarUsuario !== undefined
-        ? String(input.informacaoComplementarUsuario ?? "").trim() || null
-        : operacao.informacao_complementar_usuario;
+        ? persistirTextoInfAdicNfe(
+            input.informacaoComplementarUsuario,
+            LIMITE_INF_CPL_NFE
+          )
+        : persistirTextoInfAdicNfe(
+            operacao.informacao_complementar_usuario,
+            LIMITE_INF_CPL_NFE
+          );
     const infoFisco =
       input.informacaoAdicionalFisco !== undefined
-        ? String(input.informacaoAdicionalFisco ?? "").trim() || null
-        : operacao.informacao_adicional_fisco;
+        ? persistirTextoInfAdicNfe(
+            input.informacaoAdicionalFisco,
+            LIMITE_INF_ADFISCO_NFE
+          )
+        : persistirTextoInfAdicNfe(
+            operacao.informacao_adicional_fisco,
+            LIMITE_INF_ADFISCO_NFE
+          );
     const dataEmissaoPersistida =
       input.dataEmissao !== undefined ? dataEmissao || null : cabecalhoAtual.dataEmissao;
     const horaEmissaoPersistida =
@@ -792,6 +838,8 @@ export async function salvarCabecalhoFiscalOperacao(input: {
             horaEmissao: horaEmissaoPersistida,
             dataSaida: dataSaidaPersistida,
             horaSaida: horaSaidaPersistida,
+            informacaoComplementarUsuario: infoUsuario,
+            informacaoAdicionalFisco: infoFisco,
           }),
           auditoria_cabecalho: anexarAuditoriaCabecalhoFiscal(operacao.snapshot_fiscal, {
             usuario_id: usuarioId,
@@ -861,62 +909,68 @@ export async function adicionarItemOperacaoFiscal(input: {
     const { supabase, empresaId } = await getContexto();
     const { data: operacao } = await supabase
       .from("fiscal_operacoes")
-      .select("id, empresa_id, status, tipo_operacao_interno")
+      .select("id, empresa_id, status, tipo_operacao_interno, emissao_fiscal_id")
       .eq("id", input.operacaoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
     if (!operacao || !registroPertenceAEmpresaAtiva(operacao, empresaId)) {
       return { ok: false, erro: "Operação não encontrada na empresa ativa." };
     }
-    if (!operacaoPodeEditar(operacao.status) && operacao.status !== "pronta_para_emissao") {
-      return { ok: false, erro: "Esta operação não aceita novos itens." };
-    }
-    if (!(input.quantidade > 0)) {
-      return { ok: false, erro: "Informe uma quantidade maior que zero." };
-    }
-    if (
-      operacao.tipo_operacao_interno === "venda" &&
-      !Number.isInteger(input.quantidade)
-    ) {
-      return {
-        ok: false,
-        erro: "Venda usa o motor do PDV: a quantidade precisa ser um número inteiro.",
-      };
-    }
-    if (input.valorUnitario < 0) {
-      return { ok: false, erro: "O valor unitário não pode ser negativo." };
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueio = recusarEdicaoDocumentoFiscal(operacao, emissao);
+    if (bloqueio) {
+      return bloqueio;
     }
     const { data: produto } = await supabase
       .from("produtos")
-      .select("id, empresa_id, nome, preco_venda, grupo_fiscal_id")
+      .select("id, empresa_id, nome, preco_venda, grupo_fiscal_id, unidade_medida, ativo")
       .eq("id", input.produtoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
     if (!produto || !registroPertenceAEmpresaAtiva(produto, empresaId)) {
       return { ok: false, erro: "Produto não pertence à empresa ativa." };
     }
-    const { data: estoque } = await supabase
-      .from("estoque_atual")
-      .select("quantidade")
-      .eq("empresa_id", empresaId)
-      .eq("produto_id", produto.id)
-      .maybeSingle();
-    const disponivel = Number(estoque?.quantidade ?? 0);
-    if (input.quantidade > disponivel + 0.00005) {
+    if (produto.ativo === false) {
+      return { ok: false, erro: "Produto inativo." };
+    }
+    const quantidadeOk = validarQuantidadeItemNfe({
+      quantidade: input.quantidade,
+      unidade: produto.unidade_medida,
+    });
+    if (!quantidadeOk.ok) {
+      return { ok: false, erro: quantidadeOk.erro };
+    }
+    if (
+      operacao.tipo_operacao_interno === "venda" &&
+      !Number.isInteger(quantidadeOk.quantidade)
+    ) {
       return {
         ok: false,
-        erro: `Estoque insuficiente para ${produto.nome}. Disponível: ${disponivel}.`,
+        erro: "Venda usa o motor do PDV: a quantidade precisa ser um número inteiro.",
       };
     }
-    const unitario = Number(input.valorUnitario);
+    const precoOk = validarValorUnitarioItemNfe(input.valorUnitario);
+    if (!precoOk.ok) {
+      return { ok: false, erro: precoOk.erro };
+    }
+    const valorTotal = totalItemNfe(quantidadeOk.quantidade, precoOk.valorUnitario);
     const { error } = await supabase.from("fiscal_operacoes_itens").insert({
       empresa_id: empresaId,
       operacao_id: operacao.id,
       produto_id: produto.id,
-      quantidade: input.quantidade,
-      valor_unitario: unitario,
-      valor_total: Number((unitario * input.quantidade).toFixed(2)),
+      quantidade: quantidadeOk.quantidade,
+      valor_unitario: precoOk.valorUnitario,
+      valor_total: valorTotal,
       grupo_fiscal_id: produto.grupo_fiscal_id,
+      snapshot_fiscal: mesclarSnapshotItemComercial(null, {
+        quantidade: quantidadeOk.quantidade,
+        valor_unitario: precoOk.valorUnitario,
+        valor_total: valorTotal,
+      }),
     });
     if (error) {
       return { ok: false, erro: error.message };
@@ -924,12 +978,7 @@ export async function adicionarItemOperacaoFiscal(input: {
     await supabase
       .from("fiscal_operacoes")
       .update({
-        status:
-          operacao.status === "pronta_para_emissao"
-            ? "pronta_para_verificacao"
-            : operacao.status === "rascunho"
-              ? "rascunho"
-              : "pronta_para_verificacao",
+        status: statusAposEdicaoDocumentoFiscal(String(operacao.status)),
       })
       .eq("id", operacao.id)
       .eq("empresa_id", empresaId);
@@ -950,22 +999,25 @@ export async function atualizarItemOperacaoFiscal(input: {
     const { supabase, empresaId } = await getContexto();
     const { data: operacao } = await supabase
       .from("fiscal_operacoes")
-      .select("id, empresa_id, status")
+      .select("id, empresa_id, status, tipo_operacao_interno, emissao_fiscal_id")
       .eq("id", input.operacaoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
     if (!operacao || !registroPertenceAEmpresaAtiva(operacao, empresaId)) {
       return { ok: false, erro: "Operação não encontrada na empresa ativa." };
     }
-    if (!operacaoPodeEditar(operacao.status) && operacao.status !== "pronta_para_emissao") {
-      return { ok: false, erro: "Esta operação não pode mais alterar itens." };
-    }
-    if (!(input.quantidade > 0) || input.valorUnitario < 0) {
-      return { ok: false, erro: "Quantidade e valor unitário inválidos." };
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueio = recusarEdicaoDocumentoFiscal(operacao, emissao);
+    if (bloqueio) {
+      return bloqueio;
     }
     const { data: item } = await supabase
       .from("fiscal_operacoes_itens")
-      .select("id, empresa_id, produto_id")
+      .select("id, empresa_id, produto_id, snapshot_fiscal, cfop_resolvido, grupo_fiscal_id")
       .eq("id", input.itemId)
       .eq("operacao_id", operacao.id)
       .eq("empresa_id", empresaId)
@@ -973,28 +1025,62 @@ export async function atualizarItemOperacaoFiscal(input: {
     if (!item || !registroPertenceAEmpresaAtiva(item, empresaId)) {
       return { ok: false, erro: "Item não encontrado nesta operação." };
     }
-    const { data: estoque } = await supabase
-      .from("estoque_atual")
-      .select("quantidade")
+    const { data: produto } = await supabase
+      .from("produtos")
+      .select("id, empresa_id, unidade_medida")
+      .eq("id", item.produto_id)
       .eq("empresa_id", empresaId)
-      .eq("produto_id", item.produto_id)
       .maybeSingle();
-    const disponivel = Number(estoque?.quantidade ?? 0);
-    if (input.quantidade > disponivel + 0.00005) {
-      return { ok: false, erro: `Estoque insuficiente. Disponível: ${disponivel}.` };
+    if (!produto || !registroPertenceAEmpresaAtiva(produto, empresaId)) {
+      return { ok: false, erro: "Produto não pertence à empresa ativa." };
     }
+    const quantidadeOk = validarQuantidadeItemNfe({
+      quantidade: input.quantidade,
+      unidade: produto.unidade_medida,
+    });
+    if (!quantidadeOk.ok) {
+      return { ok: false, erro: quantidadeOk.erro };
+    }
+    if (
+      operacao.tipo_operacao_interno === "venda" &&
+      !Number.isInteger(quantidadeOk.quantidade)
+    ) {
+      return {
+        ok: false,
+        erro: "Venda usa o motor do PDV: a quantidade precisa ser um número inteiro.",
+      };
+    }
+    const precoOk = validarValorUnitarioItemNfe(input.valorUnitario);
+    if (!precoOk.ok) {
+      return { ok: false, erro: precoOk.erro };
+    }
+    const valorTotal = totalItemNfe(quantidadeOk.quantidade, precoOk.valorUnitario);
     const { error } = await supabase
       .from("fiscal_operacoes_itens")
       .update({
-        quantidade: input.quantidade,
-        valor_unitario: input.valorUnitario,
-        valor_total: Number((input.valorUnitario * input.quantidade).toFixed(2)),
+        quantidade: quantidadeOk.quantidade,
+        valor_unitario: precoOk.valorUnitario,
+        valor_total: valorTotal,
+        cfop_resolvido: item.cfop_resolvido,
+        grupo_fiscal_id: item.grupo_fiscal_id,
+        snapshot_fiscal: mesclarSnapshotItemComercial(item.snapshot_fiscal, {
+          quantidade: quantidadeOk.quantidade,
+          valor_unitario: precoOk.valorUnitario,
+          valor_total: valorTotal,
+        }),
       })
       .eq("id", item.id)
       .eq("empresa_id", empresaId);
     if (error) {
       return { ok: false, erro: error.message };
     }
+    await supabase
+      .from("fiscal_operacoes")
+      .update({
+        status: statusAposEdicaoDocumentoFiscal(String(operacao.status)),
+      })
+      .eq("id", operacao.id)
+      .eq("empresa_id", empresaId);
     revalidar(operacao.id);
     return { ok: true, mensagem: "Item atualizado. O estoque não foi movimentado." };
   } catch (error) {
@@ -1216,7 +1302,7 @@ export async function salvarInformacoesAdicionaisOperacao(input: {
     const { supabase, empresaId } = await getContexto();
     const { data: operacao } = await supabase
       .from("fiscal_operacoes")
-      .select("id, empresa_id, status, emissao_fiscal_id")
+      .select("id, empresa_id, status, emissao_fiscal_id, snapshot_fiscal")
       .eq("id", input.operacaoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
@@ -1232,13 +1318,23 @@ export async function salvarInformacoesAdicionaisOperacao(input: {
     if (bloqueio) {
       return bloqueio;
     }
+    const infoUsuario = persistirTextoInfAdicNfe(
+      input.informacaoComplementarUsuario,
+      LIMITE_INF_CPL_NFE
+    );
+    const infoFisco = persistirTextoInfAdicNfe(
+      input.informacaoAdicionalFisco,
+      LIMITE_INF_ADFISCO_NFE
+    );
     const { error } = await supabase
       .from("fiscal_operacoes")
       .update({
-        informacao_complementar_usuario:
-          String(input.informacaoComplementarUsuario ?? "").trim() || null,
-        informacao_adicional_fisco:
-          String(input.informacaoAdicionalFisco ?? "").trim() || null,
+        informacao_complementar_usuario: infoUsuario,
+        informacao_adicional_fisco: infoFisco,
+        snapshot_fiscal: mesclarSnapshotOperacao(operacao.snapshot_fiscal, {
+          informacao_complementar_usuario: infoUsuario,
+          informacao_adicional_fisco: infoFisco,
+        }),
         status: statusAposEdicaoDocumentoFiscal(String(operacao.status)),
       })
       .eq("id", operacao.id)
@@ -1334,16 +1430,6 @@ export async function verificarOperacaoFiscalAction(input: {
             .eq("empresa_id", empresaId)
             .in("produto_id", produtoIds)
         : { data: [] };
-    const estoques =
-      produtoIds.length > 0
-        ? (
-            await supabase
-              .from("estoque_atual")
-              .select("produto_id, quantidade")
-              .eq("empresa_id", empresaId)
-              .in("produto_id", produtoIds)
-          ).data ?? []
-        : [];
     const grupoIds = [
       ...new Set(
         (produtos ?? [])
@@ -1442,9 +1528,6 @@ export async function verificarOperacaoFiscalAction(input: {
       (produtosFiscal ?? []).map((item) => [String(item.produto_id), item])
     );
     const grupoPorId = new Map((grupos ?? []).map((g) => [String(g.id), g]));
-    const estoquePorProduto = new Map(
-      estoques.map((item) => [String(item.produto_id), Number(item.quantidade ?? 0)])
-    );
 
     const verificacao = verificarOperacaoFiscal({
       empresaIdAtiva: empresaId,
@@ -1474,7 +1557,6 @@ export async function verificarOperacaoFiscalAction(input: {
           cfopInterestadual: grupo?.cfop_interestadual,
           quantidade: Number(item.quantidade),
           valorUnitario: Number(item.valor_unitario),
-          estoqueDisponivel: estoquePorProduto.get(String(item.produto_id)) ?? 0,
         };
       }),
       regrasCfop: normalizarRegrasCfopDaEmpresaAtiva(regras, empresaId),
@@ -1508,6 +1590,7 @@ export async function verificarOperacaoFiscalAction(input: {
       const itensVenda = (itens ?? []).map((item) => ({
         produtoId: String(item.produto_id),
         quantidade: Number(item.quantidade),
+        precoUnitarioCentavos: paraCentavos(item.valor_unitario),
       }));
       if (itensVenda.some((item) => !Number.isInteger(item.quantidade))) {
         return {
@@ -1525,6 +1608,7 @@ export async function verificarOperacaoFiscalAction(input: {
         freteCentavos: totaisCentavos.frete,
         acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
         pagamentos,
+        rejeitarPagamentoIncompleto: true,
       });
       if (!teto.ok) {
         return { ok: false, erro: teto.erro };
@@ -1532,12 +1616,13 @@ export async function verificarOperacaoFiscalAction(input: {
     }
 
     for (const item of verificacao.itens) {
+      const persistido = (itens ?? []).find((linha) => String(linha.id) === item.id);
       await supabase
         .from("fiscal_operacoes_itens")
         .update({
           cfop_resolvido: item.cfop,
           grupo_fiscal_id: item.grupoFiscalId,
-          snapshot_fiscal: {
+          snapshot_fiscal: mesclarSnapshotOperacao(persistido?.snapshot_fiscal, {
             cfop: item.cfop,
             ncm: item.ncm,
             icms_cst_csosn: item.icmsCstCsosn,
@@ -1545,7 +1630,8 @@ export async function verificarOperacaoFiscalAction(input: {
             grupo_fiscal_nome: item.grupoFiscalNome,
             quantidade: item.quantidade,
             valor_unitario: item.valorUnitario,
-          },
+            valor_total: totalItemNfe(item.quantidade, item.valorUnitario),
+          }),
         })
         .eq("id", item.id)
         .eq("empresa_id", empresaId);
@@ -1572,8 +1658,14 @@ export async function verificarOperacaoFiscalAction(input: {
           destinatario_id: operacao.destinatario_id,
           destino_empresa_id: operacao.destino_empresa_id,
           transporte: operacao.dados_transporte,
-          informacao_complementar_usuario: operacao.informacao_complementar_usuario,
-          informacao_adicional_fisco: operacao.informacao_adicional_fisco,
+          informacao_complementar_usuario: textoUsuarioInfCplNfe({
+            snapshot: operacao.snapshot_fiscal,
+            coluna: operacao.informacao_complementar_usuario,
+          }),
+          informacao_adicional_fisco: textoUsuarioInfAdFiscoNfe({
+            snapshot: operacao.snapshot_fiscal,
+            coluna: operacao.informacao_adicional_fisco,
+          }),
           alertas: verificacao.alertas,
         }),
       })
@@ -1721,8 +1813,9 @@ export async function buscarProdutosOperacaoFiscal(input: {
     }
     const { data: produtos } = await supabase
       .from("produtos")
-      .select("id, empresa_id, nome, codigo, codigo_barras, unidade_medida, preco_venda")
+      .select("id, empresa_id, nome, codigo, codigo_barras, unidade_medida, preco_venda, ativo")
       .eq("empresa_id", empresaId)
+      .eq("ativo", true)
       .or(
         `nome.ilike.%${termo}%,codigo.ilike.%${termo}%,codigo_barras.ilike.%${termo}%`
       )
@@ -2219,7 +2312,8 @@ export async function prepararVendaParaEmissaoNfe(input: {
       .select(
         `
         id, empresa_id, status, tipo_operacao_interno, natureza_id,
-        destinatario_id, snapshot_fiscal, venda_id
+        destinatario_id, snapshot_fiscal, venda_id,
+        informacao_complementar_usuario, informacao_adicional_fisco
       `
       )
       .eq("id", input.operacaoId)
@@ -2251,12 +2345,13 @@ export async function prepararVendaParaEmissaoNfe(input: {
       }
       const { data: itens } = await supabase
         .from("fiscal_operacoes_itens")
-        .select("produto_id, quantidade")
+        .select("produto_id, quantidade, valor_unitario")
         .eq("empresa_id", empresaId)
         .eq("operacao_id", operacao.id);
       const itensVenda = (itens ?? []).map((item) => ({
         produtoId: String(item.produto_id),
         quantidade: Number(item.quantidade),
+        precoUnitarioCentavos: paraCentavos(item.valor_unitario),
       }));
       if (itensVenda.length === 0) {
         return { ok: false, erro: "Inclua ao menos um produto da empresa ativa." };
@@ -2274,6 +2369,19 @@ export async function prepararVendaParaEmissaoNfe(input: {
 
       const totaisNota = totaisNotaDoSnapshot(operacao.snapshot_fiscal);
       const totaisCentavos = totaisNotaCentavos(totaisNota);
+      const tetoFiscal = await avaliarTetoPagamentosNoServidor({
+        supabase,
+        empresaId,
+        itens: itensVenda,
+        descontoCentavos: totaisCentavos.desconto,
+        freteCentavos: totaisCentavos.frete,
+        acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
+        pagamentos,
+        rejeitarPagamentoIncompleto: true,
+      });
+      if (!tetoFiscal.ok) {
+        return { ok: false, erro: tetoFiscal.erro };
+      }
       const pixModo = await validarPixNaFinalizacaoComercial({
         supabase,
         empresaId,
@@ -2299,6 +2407,33 @@ export async function prepararVendaParaEmissaoNfe(input: {
         fluxoExigeCaixa: exigeCaixa,
       });
 
+      const produtoIds = [...new Set(itensVenda.map((item) => item.produtoId))];
+      const { data: produtosCatalogo } = await supabase
+        .from("produtos")
+        .select("id, empresa_id, preco_venda")
+        .eq("empresa_id", empresaId)
+        .in("id", produtoIds);
+      const precoCatalogoPorId = new Map(
+        (produtosCatalogo ?? [])
+          .filter((produto) => registroPertenceAEmpresaAtiva(produto, empresaId))
+          .map((produto) => [String(produto.id), paraCentavos(produto.preco_venda)])
+      );
+      const subtotalAlvoCentavos = itensVenda.reduce(
+        (soma, item) => soma + Math.round(item.quantidade) * item.precoUnitarioCentavos,
+        0
+      );
+      const subtotalCatalogoCentavos = itensVenda.reduce(
+        (soma, item) =>
+          soma + Math.round(item.quantidade) * (precoCatalogoPorId.get(item.produtoId) ?? 0),
+        0
+      );
+      const extrasComerciais = compensarDiferencaSubtotalCatalogo({
+        subtotalCatalogoCentavos,
+        subtotalAlvoCentavos,
+        descontoCentavos: totaisCentavos.desconto,
+        acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
+      });
+
       // Motor comercial da NF-e de venda nova: mesmo RPC atômico do PDV web
       // quando o controle de Caixa está ativo. Sem controle, materializa
       // pela RPC comercial sem livro. Emissão fiscal posterior não relança Caixa.
@@ -2306,11 +2441,14 @@ export async function prepararVendaParaEmissaoNfe(input: {
         {
           idempotencyKey: String(operacao.id),
           clienteId: String(operacao.destinatario_id),
-          descontoCentavos: totaisCentavos.desconto,
+          descontoCentavos: extrasComerciais.descontoCentavos,
           freteCentavos: totaisCentavos.frete,
-          acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
-          trocoCentavos: 0,
-          itens: itensVenda,
+          acrescimoCentavos: extrasComerciais.acrescimoCentavos,
+          trocoCentavos: tetoFiscal.trocoCentavos,
+          itens: itensVenda.map((item) => ({
+            produtoId: item.produtoId,
+            quantidade: item.quantidade,
+          })),
           pagamentos,
         },
         {
@@ -2351,22 +2489,28 @@ export async function prepararVendaParaEmissaoNfe(input: {
     }
 
     const snapDest = lerSnapshotDestinatarioFiscal(operacao.snapshot_fiscal);
+    const patchVenda = {
+      ...(snapDest.consumidorFinalDefinido || snapDest.indicadorIe
+        ? snapshotDestinatarioParaPersistir({
+            consumidorFinal: Boolean(snapDest.consumidorFinal),
+            origem: snapDest.origem ?? "operacao",
+            indicadorIe: snapDest.indicadorIe ?? "9",
+          })
+        : {}),
+      informacao_complementar_usuario: textoUsuarioInfCplNfe({
+        snapshot: operacao.snapshot_fiscal,
+        coluna: operacao.informacao_complementar_usuario,
+      }),
+      informacao_adicional_fisco: textoUsuarioInfAdFiscoNfe({
+        snapshot: operacao.snapshot_fiscal,
+        coluna: operacao.informacao_adicional_fisco,
+      }),
+    };
     const { error: naturezaErro } = await admin
       .from("vendas")
       .update({
         natureza_id: operacao.natureza_id,
-        ...(snapDest.consumidorFinalDefinido || snapDest.indicadorIe
-          ? {
-              snapshot_fiscal: mesclarSnapshotOperacao(
-                venda.snapshot_fiscal,
-                snapshotDestinatarioParaPersistir({
-                  consumidorFinal: Boolean(snapDest.consumidorFinal),
-                  origem: snapDest.origem ?? "operacao",
-                  indicadorIe: snapDest.indicadorIe ?? "9",
-                })
-              ),
-            }
-          : {}),
+        snapshot_fiscal: mesclarSnapshotOperacao(venda.snapshot_fiscal, patchVenda),
       })
       .eq("id", vendaId)
       .eq("empresa_id", empresaId);

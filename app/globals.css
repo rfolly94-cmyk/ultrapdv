@@ -420,6 +420,29 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.nfe-item-estoque {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #71717a;
+}
+
+.nfe-itens .nfe-item-qtd,
+.nfe-itens .nfe-item-preco {
+  width: 5.75rem;
+  min-width: 4.75rem;
+  height: 28px;
+  padding: 0 6px;
+  margin-left: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.nfe-itens .nfe-item-preco {
+  width: 6.75rem;
+}
+
 .nfe-totais {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

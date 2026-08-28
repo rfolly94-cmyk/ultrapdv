@@ -16,6 +16,13 @@ import {
   impressoraSegura,
   mensagemErroImpressora,
 } from "./imprimir.mjs";
+import {
+  abrirGaveta,
+  configuracaoGavetaDeConfig,
+  sanitizarGavetaHabilitada,
+  sanitizarPinoGaveta,
+  MENSAGEM_GAVETA_DESABILITADA,
+} from "./gaveta.mjs";
 import { obterOuCriarDispositivoId } from "./identidade.mjs";
 import {
   consultarSaudeLocal,
@@ -215,7 +222,12 @@ export function criarServidor(deps = {}) {
   const aoSalvarImpressora = deps.aoSalvarImpressora;
   const obterConfig =
     deps.obterConfigLocal ??
-    (async () => ({ lastPrinter: null, lastPaper: "80mm" }));
+    (async () => ({
+      lastPrinter: null,
+      lastPaper: "80mm",
+      drawerEnabled: false,
+      drawerPin: 0,
+    }));
   const aoTestarImpressao = deps.aoTestarImpressao ?? (async (input) => {
     const motor = await localizar();
     const impressoras = await listar();
@@ -324,6 +336,8 @@ export function criarServidor(deps = {}) {
             dispositivoId,
             lastPrinter: cfg.lastPrinter || null,
             lastPaper: cfg.lastPaper || "80mm",
+            drawerEnabled: sanitizarGavetaHabilitada(cfg.drawerEnabled),
+            drawerPin: sanitizarPinoGaveta(cfg.drawerPin),
             motorImpressao: motorParaHealth(motor),
           },
           origemCheck.origem,
@@ -452,14 +466,25 @@ export function criarServidor(deps = {}) {
         const papel = ["58mm", "80mm", "a4"].includes(payloadCfg.papel)
           ? payloadCfg.papel
           : "80mm";
+        const patchImpressora = {
+          impressora: nomeImpressora,
+          papel,
+        };
+        if ("gavetaHabilitada" in payloadCfg || "drawerEnabled" in payloadCfg) {
+          patchImpressora.drawerEnabled = sanitizarGavetaHabilitada(
+            payloadCfg.gavetaHabilitada ?? payloadCfg.drawerEnabled
+          );
+        }
+        if ("gavetaPino" in payloadCfg || "drawerPin" in payloadCfg) {
+          patchImpressora.drawerPin = sanitizarPinoGaveta(
+            payloadCfg.gavetaPino ?? payloadCfg.drawerPin
+          );
+        }
         if (!aoSalvarImpressora) {
           json(res, 501, { ok: false, erro: "Indisponível." }, origemCheck.origem, origens);
           return;
         }
-        const salvo = await aoSalvarImpressora({
-          impressora: nomeImpressora,
-          papel,
-        });
+        const salvo = await aoSalvarImpressora(patchImpressora);
         json(
           res,
           200,
@@ -467,6 +492,12 @@ export function criarServidor(deps = {}) {
             ok: true,
             lastPrinter: salvo?.lastPrinter || nomeImpressora,
             lastPaper: salvo?.lastPaper || papel,
+            drawerEnabled: sanitizarGavetaHabilitada(
+              salvo?.drawerEnabled ?? patchImpressora.drawerEnabled
+            ),
+            drawerPin: sanitizarPinoGaveta(
+              salvo?.drawerPin ?? patchImpressora.drawerPin
+            ),
           },
           origemCheck.origem,
           origens
@@ -579,6 +610,89 @@ export function criarServidor(deps = {}) {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/drawer/open") {
+        const brutoGaveta = await lerBody(req).catch(() => Buffer.from("{}"));
+        let payloadGaveta = {};
+        try {
+          payloadGaveta = JSON.parse(brutoGaveta.toString("utf8") || "{}");
+        } catch {
+          payloadGaveta = {};
+        }
+        if (
+          payloadGaveta &&
+          typeof payloadGaveta === "object" &&
+          !Array.isArray(payloadGaveta) &&
+          (payloadGaveta.comando ||
+            payloadGaveta.command ||
+            payloadGaveta.path ||
+            payloadGaveta.arquivo)
+        ) {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload recusado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const adminLocal = podeAdministrar(origemCheck.origem, portaReq);
+        const cfgGaveta = await obterConfig();
+        const impressorasGaveta = await listar();
+        const pedidaGaveta = adminLocal
+          ? payloadGaveta?.impressora
+          : null;
+        const impressoraGaveta = escolherImpressora({
+          pedida: pedidaGaveta,
+          lastPrinter: cfgGaveta.lastPrinter,
+          impressoras: impressorasGaveta,
+        });
+        if (!impressoraGaveta) {
+          throw new Error(
+            mensagemErroImpressora({
+              pedida: pedidaGaveta,
+              lastPrinter: cfgGaveta.lastPrinter,
+            })
+          );
+        }
+
+        const cfgAbrir = configuracaoGavetaDeConfig(cfgGaveta);
+        if (adminLocal) {
+          cfgAbrir.habilitada = true;
+          if (payloadGaveta && ("pino" in payloadGaveta || "gavetaPino" in payloadGaveta)) {
+            cfgAbrir.pino = sanitizarPinoGaveta(
+              payloadGaveta.pino ?? payloadGaveta.gavetaPino
+            );
+          }
+        }
+        if (!cfgAbrir.habilitada) {
+          json(
+            res,
+            400,
+            { ok: false, erro: MENSAGEM_GAVETA_DESABILITADA },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const abrir =
+          deps.aoAbrirGaveta ??
+          ((alvo, config, extra) => abrirGaveta(alvo, config, extra));
+        const resultadoGaveta = await abrir(impressoraGaveta, cfgAbrir, {
+          impressoras: impressorasGaveta,
+        });
+        json(
+          res,
+          200,
+          { ok: true, ...resultadoGaveta },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
       json(
         res,
         404,
@@ -676,8 +790,15 @@ async function iniciar() {
         await salvarConfigLocal({ lastPrinter: impressora, lastPaper: papel });
       },
       obterConfigLocal: carregarConfigLocal,
-      aoSalvarImpressora: async ({ impressora, papel }) => {
-        return salvarConfigLocal({ lastPrinter: impressora, lastPaper: papel });
+      aoSalvarImpressora: async ({ impressora, papel, drawerEnabled, drawerPin }) => {
+        const patch = { lastPrinter: impressora, lastPaper: papel };
+        if (drawerEnabled !== undefined) {
+          patch.drawerEnabled = drawerEnabled;
+        }
+        if (drawerPin !== undefined) {
+          patch.drawerPin = drawerPin;
+        }
+        return salvarConfigLocal(patch);
       },
       imprimirPdfComSumatra: async (opts) =>
         imprimirPdfComSumatra({

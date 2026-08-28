@@ -1,6 +1,7 @@
 import {
   MENSAGEM_PAGAMENTOS_ULTRAPASSAM,
   avaliarPagamentosPdv,
+  formatarCentavosBr,
   recalcularTotalLiquidoVenda,
 } from "./pagamentos-teto";
 
@@ -18,6 +19,7 @@ export async function avaliarTetoPagamentosNoServidor(params: {
   itens: Array<{
     produtoId: string;
     quantidade: number;
+    precoUnitarioCentavos?: number;
   }>;
   descontoCentavos: number;
   freteCentavos?: number;
@@ -26,11 +28,13 @@ export async function avaliarTetoPagamentosNoServidor(params: {
     formaPagamentoId: string;
     valorCentavos: number;
   }>;
+  rejeitarPagamentoIncompleto?: boolean;
 }): Promise<
   | {
       ok: true;
       trocoCentavos: number;
       totalVendaCentavos: number;
+      restanteCentavos: number;
     }
   | {
       ok: false;
@@ -70,7 +74,11 @@ export async function avaliarTetoPagamentosNoServidor(params: {
   const totalVendaCentavos = recalcularTotalLiquidoVenda({
     itens: params.itens.map((item) => ({
       quantidade: item.quantidade,
-      precoUnitarioCentavos: precoPorId.get(item.produtoId) ?? 0,
+      precoUnitarioCentavos:
+        item.precoUnitarioCentavos != null &&
+        Number.isFinite(item.precoUnitarioCentavos)
+          ? Math.round(item.precoUnitarioCentavos)
+          : precoPorId.get(item.produtoId) ?? 0,
     })),
     descontoCentavos: params.descontoCentavos,
     freteCentavos: params.freteCentavos,
@@ -123,9 +131,17 @@ export async function avaliarTetoPagamentosNoServidor(params: {
     };
   }
 
+  if (params.rejeitarPagamentoIncompleto && avaliacao.restanteCentavos > 0) {
+    return {
+      ok: false,
+      erro: `Pagamentos não conferem com o total da venda. Faltam ${formatarCentavosBr(avaliacao.restanteCentavos)}.`,
+    };
+  }
+
   return {
     ok: true,
     trocoCentavos: avaliacao.trocoCentavos,
     totalVendaCentavos,
+    restanteCentavos: avaliacao.restanteCentavos,
   };
 }

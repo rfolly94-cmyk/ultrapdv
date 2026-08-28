@@ -18,12 +18,12 @@ import { hrefProdutoAssistente } from "../rotas";
 import { autorizarFerramentaIa, recusaFerramentaIa } from "../permissoes";
 import {
   MENSAGEM_IA_FALHA_CONSULTA,
-  type NomeFerramentaIa,
+  type NomeFerramentaResultadoIa,
   type ResultadoFerramentaIa,
 } from "../tipos";
 import type { ContextoFerramentaIa } from "../ferramentas/contexto";
 
-async function authFiscal(ctx: ContextoFerramentaIa, ferramenta: NomeFerramentaIa) {
+async function authFiscal(ctx: ContextoFerramentaIa, ferramenta: NomeFerramentaResultadoIa) {
   const auth = await autorizarFerramentaIa({
     empresaId: ctx.empresaId,
     permissoes: ctx.permissoes,
@@ -254,7 +254,7 @@ export async function classificarProdutoFiscalMotorIa(
     supabase: ctx.supabase,
     empresaId: ctx.empresaId,
     usuarioId: ctx.usuarioId,
-    registrarAnalise: true,
+    registrarAnalise: false,
     entrada: {
       produtoId,
       descricao: String(args.descricao ?? "") || null,

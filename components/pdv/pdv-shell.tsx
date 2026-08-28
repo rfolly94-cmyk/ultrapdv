@@ -130,6 +130,12 @@ import { salvarPreferenciasPdvAction } from "@/app/pdv/preferencias-actions";
 import { PdvBuscaResultados } from "@/components/pdv/pdv-busca-resultados";
 import { PdvPreferenciasModal } from "@/components/pdv/pdv-preferencias-modal";
 import { avaliarQuantidadeEstoquePdv } from "@/lib/pdv/venda-sem-estoque";
+import { executarAberturaGaveta } from "@/lib/caixa/abrir-gaveta-cliente";
+import { deveAbrirGavetaAposVenda } from "@/lib/caixa/gaveta";
+import {
+  MENSAGEM_GAVETA_CAIXA_FECHADO,
+  MENSAGEM_GAVETA_VENDA_SEM_ABRIR,
+} from "@/lib/caixa/mensagens";
 
 type Produto = {
   id: string;
@@ -215,8 +221,10 @@ type Props = {
   emitirNfceAutomaticoPdv?: boolean;
   ambienteFiscal?: 1 | 2;
   caixaAberto: boolean;
+  caixaSessaoAberta?: boolean;
   podeAbrirCaixa: boolean;
   caixaReabertoAviso?: CaixaAvisoReaberto | null;
+  abrirGavetaAposVendaDinheiro?: boolean;
 };
 
 type FiscalUltimaVenda = {
@@ -410,8 +418,10 @@ export function PdvShell({
   emitirNfceAutomaticoPdv = false,
   ambienteFiscal = 2,
   caixaAberto,
+  caixaSessaoAberta = false,
   podeAbrirCaixa,
   caixaReabertoAviso = null,
+  abrirGavetaAposVendaDinheiro = false,
 }: Props) {
   const router = useRouter();
   const podeDesconto = useTemPermissao("pdv", "aplicar_desconto");
@@ -595,6 +605,7 @@ export function PdvShell({
     numero: number;
     totalCentavos: number;
     fiscal: FiscalUltimaVenda | null;
+    avisoGaveta?: string | null;
   } | null>(null);
 
   const [
@@ -1348,6 +1359,16 @@ export function PdvShell({
     setToastPdv("Preferências do PDV salvas.");
   }
 
+  async function abrirGavetaPdv() {
+    setMenuUsuarioAberto(false);
+    if (!caixaSessaoAberta) {
+      setToastPdv(MENSAGEM_GAVETA_CAIXA_FECHADO);
+      return;
+    }
+    const saida = await executarAberturaGaveta({ origem: "pdv" });
+    setToastPdv(saida.ok ? saida.mensagem : saida.erro);
+  }
+
   function abrirCliente(contexto: ContextoClientePdv = "manual") {
     setContextoCliente(contexto);
     setModalCliente(true);
@@ -1840,6 +1861,28 @@ export function PdvShell({
           return;
         }
 
+        const pagamentosDaVenda = pagamentosCalculados;
+        let avisoGaveta: string | null = null;
+        if (
+          deveAbrirGavetaAposVenda({
+            configAtiva: abrirGavetaAposVendaDinheiro,
+            pagamentos: pagamentosDaVenda,
+          })
+        ) {
+          try {
+            const gaveta = await executarAberturaGaveta({
+              origem: "venda",
+              vendaId: resultado.vendaId,
+              exigirCaixaAberto: false,
+            });
+            if (!gaveta.ok) {
+              avisoGaveta = MENSAGEM_GAVETA_VENDA_SEM_ABRIR;
+            }
+          } catch {
+            avisoGaveta = MENSAGEM_GAVETA_VENDA_SEM_ABRIR;
+          }
+        }
+
         setUltimaVenda({
           vendaId:
             resultado.vendaId,
@@ -1857,6 +1900,7 @@ export function PdvShell({
                 danfeDisponivel: false,
               }
             : null,
+          avisoGaveta,
         });
         setImpressaoPos({
           status: "idle",
@@ -1945,10 +1989,17 @@ export function PdvShell({
         if (
           event.key === "F2" ||
           event.key === "F3" ||
+          event.key === "F4" ||
           event.key === "F5"
         ) {
           event.preventDefault();
         }
+        return;
+      }
+
+      if (event.key === "F4") {
+        event.preventDefault();
+        void abrirGavetaPdv();
         return;
       }
 
@@ -2112,6 +2163,12 @@ export function PdvShell({
                 ultimaVenda.totalCentavos
               )}
             </p>
+
+            {ultimaVenda.avisoGaveta ? (
+              <p className="mt-3 whitespace-pre-line text-sm text-amber-800">
+                {ultimaVenda.avisoGaveta}
+              </p>
+            ) : null}
 
             {impressaoPos.status === "imprimindo" ? (
               <p className="mt-3 text-sm text-zinc-500">Enviando para impressão...</p>
@@ -2315,6 +2372,15 @@ export function PdvShell({
                 </button>
                 {menuUsuarioAberto ? (
                   <div className="absolute right-0 top-9 z-20 min-w-[180px] rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                      onClick={() => {
+                        void abrirGavetaPdv();
+                      }}
+                    >
+                      Abrir gaveta
+                    </button>
                     <Link
                       href="/logout"
                       className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
@@ -2602,6 +2668,7 @@ export function PdvShell({
             </p>
             <p>F2 Concluir venda</p>
             <p>F3 Desconto</p>
+            <p>F4 Abrir gaveta</p>
             <p>F5 Cliente</p>
             <p>Esc fecha janela / sai do PDV</p>
             {descontoAplicado > 0 && (

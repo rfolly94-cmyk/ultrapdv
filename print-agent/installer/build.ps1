@@ -33,6 +33,7 @@ $obrigatorios = @(
   (Join-Path $raiz "src\server.mjs"),
   (Join-Path $raiz "src\motor.mjs"),
   (Join-Path $raiz "src\imprimir.mjs"),
+  (Join-Path $raiz "src\gaveta.mjs"),
   (Join-Path $raiz "src\identidade.mjs"),
   (Join-Path $raiz "src\instancia.mjs"),
   (Join-Path $raiz "src\origens.mjs"),
@@ -207,7 +208,7 @@ if (Test-Path $nodeLicense) {
 }
 
 $appFiles = @(
-  "server.mjs", "motor.mjs", "imprimir.mjs", "identidade.mjs", "instancia.mjs",
+  "server.mjs", "motor.mjs", "imprimir.mjs", "gaveta.mjs", "identidade.mjs", "instancia.mjs",
   "origens.mjs", "raiz.mjs", "versao.mjs", "stop.mjs", "verify.mjs",
   "portas.mjs", "config-local.mjs", "log.mjs", "pdf-teste.mjs", "mutex.mjs",
   "tray.mjs", "pagina-status.html"

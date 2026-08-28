@@ -90,7 +90,8 @@ test("2-6. PDV web: ativo exige sessão; desativado finaliza sem livro", () => {
   const api = fonte("app/api/pdv/finalizar/route.ts");
 
   assert.match(page, /sessaoCaixaLiberadaParaOperar/);
-  assert.match(page, /controleCaixaAtivo\(/);
+  assert.match(page, /carregarConfiguracaoCaixaEmpresa\(/);
+  assert.match(page, /controleAtivo/);
   assert.match(actions, /exigirCaixaAberto:\s*true/);
   assert.match(actions, /fluxoExigeCaixa = opcoes\?\.exigirCaixaAberto === true/);
   assert.match(actions, /controleCaixaAtivo/);

@@ -34,6 +34,8 @@ const EXIGE_IA = [
 
 const FOLLOWUP_CLIENTE = /^(e )?(o |quanto (esta |ta )?)?(vencido|aberto|credito|limite|debito)\b/;
 const FOLLOWUP_PRODUTO = /^(e )?(o |qual )?(preco|estoque|ncm|cest|codigo|grupo)\b/;
+const FOLLOWUP_NOVO_ALVO =
+  /^(e (a |o |as |os )?)([a-zá-ú0-9][a-zá-ú0-9 .'-]{0,40})$/;
 
 function pontuar(texto: string, definicao: DefinicaoIntencao) {
   let pontos = 0;
@@ -101,6 +103,45 @@ export function interpretarIntencaoDeterministica(
     }
   }
 
+  if (
+    anterior &&
+    (anterior.intencao.startsWith("carteira.") || anterior.intencao.startsWith("clientes.")) &&
+    !FOLLOWUP_CLIENTE.test(normalizado)
+  ) {
+    const matchAlvo = normalizado.match(FOLLOWUP_NOVO_ALVO);
+    const alvo = String(matchAlvo?.[3] ?? "").trim();
+    if (
+      alvo &&
+      alvo !== "estoque" &&
+      alvo !== "caixa" &&
+      alvo !== "produto" &&
+      alvo !== "venda"
+    ) {
+      const carteiraCliente = DEFINICOES_INTENCAO.find((item) => item.nome === "carteira.cliente");
+      if (carteiraCliente && (!melhor || melhor.pontos < 22)) {
+        melhor = { definicao: carteiraCliente, pontos: 22 };
+        const bruto = carteiraCliente.args({
+          periodo,
+          busca: alvo,
+          clienteId: null,
+          produtoId: null,
+        });
+        return {
+          nome: carteiraCliente.nome,
+          confianca: 22,
+          periodo,
+          busca: alvo,
+          clienteId: null,
+          produtoId: null,
+          foco: carteiraCliente.nome,
+          ferramenta: carteiraCliente.ferramenta,
+          encadear: carteiraCliente.encadear ?? [],
+          args: ignorarEmpresaIdDoCliente(bruto),
+        };
+      }
+    }
+  }
+
   if (!melhor || melhor.pontos < LIMIAR) {
     return null;
   }
@@ -116,6 +157,7 @@ export function interpretarIntencaoDeterministica(
       melhor.definicao.nome.startsWith("carteira.") ||
       melhor.definicao.nome.startsWith("estoque.") ||
       melhor.definicao.nome.startsWith("caixa.") ||
+      melhor.definicao.nome.startsWith("navegacao.") ||
       melhor.definicao.nome.startsWith("notificacoes.") ||
       melhor.definicao.nome === "fiscal.diagnostico" ||
       melhor.definicao.nome === "fiscal.notas_rejeitadas");
@@ -140,6 +182,12 @@ export function interpretarIntencaoDeterministica(
     clienteId: busca ? null : clienteId,
     produtoId: busca ? null : produtoId,
   });
+  if (melhor.definicao.nome === "vendas.abrir") {
+    const numero = normalizado.match(/venda\s+(\d+)/)?.[1];
+    if (numero) {
+      bruto.numero = numero;
+    }
+  }
   const args = ignorarEmpresaIdDoCliente(bruto);
 
   return {

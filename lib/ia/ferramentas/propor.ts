@@ -19,7 +19,7 @@ import { hrefProdutoAssistente } from "../rotas";
 import {
   MENSAGEM_IA_FALHA_CONSULTA,
   type AcaoAssistente,
-  type NomeFerramentaIa,
+  type NomeFerramentaPropostaIa,
   type ResultadoFerramentaIa,
 } from "../tipos";
 import type { ContextoFerramentaIa } from "./contexto";
@@ -40,7 +40,7 @@ function acoesProposta(propostaId: string, href?: string | null): AcaoAssistente
 }
 
 function cardParaResultado(
-  ferramenta: NomeFerramentaIa,
+  ferramenta: NomeFerramentaPropostaIa,
   card: CardPropostaAcao,
   extra?: Record<string, unknown>
 ): ResultadoFerramentaIa {
@@ -59,7 +59,7 @@ function cardParaResultado(
 
 async function persistirCard(params: {
   ctx: ContextoFerramentaIa;
-  ferramenta: NomeFerramentaIa;
+  ferramenta: NomeFerramentaPropostaIa;
   tipo: PayloadAcaoIa extends never ? never : import("../acoes/tipos").TipoAcaoIa;
   entidadeTipo: import("../acoes/tipos").EntidadeAcaoIa;
   entidadeId: string | null;
@@ -140,7 +140,7 @@ export async function proporAtualizacaoFiscalProdutoIa(
   ctx: ContextoFerramentaIa,
   args: Record<string, unknown>
 ): Promise<ResultadoFerramentaIa> {
-  const ferramenta: NomeFerramentaIa = "propor_atualizacao_fiscal_produto";
+  const ferramenta: NomeFerramentaPropostaIa = "propor_atualizacao_fiscal_produto";
   const authProd = await autorizarFerramentaIa({
     empresaId: ctx.empresaId,
     permissoes: ctx.permissoes,
@@ -299,7 +299,7 @@ export async function proporAtribuicaoGrupoFiscalIa(
   ctx: ContextoFerramentaIa,
   args: Record<string, unknown>
 ): Promise<ResultadoFerramentaIa> {
-  const ferramenta: NomeFerramentaIa = "propor_atribuicao_grupo_fiscal";
+  const ferramenta: NomeFerramentaPropostaIa = "propor_atribuicao_grupo_fiscal";
   const auth = await autorizarFerramentaIa({
     empresaId: ctx.empresaId,
     permissoes: ctx.permissoes,
@@ -408,7 +408,7 @@ export async function proporCriacaoGrupoFiscalIa(
   ctx: ContextoFerramentaIa,
   args: Record<string, unknown>
 ): Promise<ResultadoFerramentaIa> {
-  const ferramenta: NomeFerramentaIa = "propor_criacao_grupo_fiscal";
+  const ferramenta: NomeFerramentaPropostaIa = "propor_criacao_grupo_fiscal";
   const auth = await autorizarFerramentaIa({
     empresaId: ctx.empresaId,
     permissoes: ctx.permissoes,
@@ -531,7 +531,7 @@ export async function proporAtualizacaoProdutoIa(
   ctx: ContextoFerramentaIa,
   args: Record<string, unknown>
 ): Promise<ResultadoFerramentaIa> {
-  const ferramenta: NomeFerramentaIa = "propor_atualizacao_produto";
+  const ferramenta: NomeFerramentaPropostaIa = "propor_atualizacao_produto";
   const produtoId = uuid(args.produtoId) || uuid(ctx.tela.produtoId);
   if (!produtoId) {
     return {
@@ -679,7 +679,7 @@ export async function proporAcaoNotificacaoIa(
   ctx: ContextoFerramentaIa,
   args: Record<string, unknown>
 ): Promise<ResultadoFerramentaIa> {
-  const ferramenta: NomeFerramentaIa = "propor_acao_notificacao";
+  const ferramenta: NomeFerramentaPropostaIa = "propor_acao_notificacao";
   const acaoRaw = String(args.acao ?? "lida");
   const acao =
     acaoRaw === "dispensar" ? "dispensar" : acaoRaw === "adiar" ? "adiar" : "lida";
