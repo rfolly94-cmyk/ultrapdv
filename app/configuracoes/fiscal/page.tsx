@@ -6,6 +6,7 @@ import {
 } from "./actions";
 
 import { PageAlert } from "@/components/ui/page-alert";
+import { BaseFiscalStatusCard } from "@/components/fiscal/base-fiscal-status-card";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import { opcoesFusoHorarioFiscal } from "@/lib/fiscal/fuso-horario-empresa";
 import { createClient } from "@/lib/supabase/server";
@@ -581,6 +582,7 @@ export default async function FiscalPage({
             </button>
           </div>
         </form>
+        <BaseFiscalStatusCard />
     </div>
   );
 }

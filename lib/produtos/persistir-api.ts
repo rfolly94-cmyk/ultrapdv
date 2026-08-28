@@ -805,3 +805,73 @@ export async function carregarProdutoApi(input: {
     opcoes,
   };
 }
+
+export async function persistirCamposBasicosProdutoApi(input: {
+  supabase: ClienteSupabase;
+  empresaId: string;
+  produtoId: string;
+  descricao?: string | null;
+  categoriaId?: string | null;
+  alterarDescricao?: boolean;
+  alterarCategoria?: boolean;
+}): Promise<ResultadoPersistencia> {
+  const { data: atual, error: erroAtual } = await input.supabase
+    .from("produtos")
+    .select(
+      "id, codigo, codigo_barras, nome, descricao, categoria_id, marca_id, unidade_medida, preco_custo, preco_venda, ativo"
+    )
+    .eq("empresa_id", input.empresaId)
+    .eq("id", input.produtoId)
+    .maybeSingle();
+  if (erroAtual || !atual) {
+    return { ok: false, erro: "Produto não encontrado nesta empresa." };
+  }
+  return persistirProdutoComercialApi({
+    supabase: input.supabase,
+    empresaId: input.empresaId,
+    produtoId: input.produtoId,
+    dados: {
+      codigo: atual.codigo,
+      codigoBarras: atual.codigo_barras,
+      nome: atual.nome,
+      descricao: input.alterarDescricao ? input.descricao : atual.descricao,
+      categoriaId: input.alterarCategoria ? input.categoriaId : atual.categoria_id,
+      marcaId: atual.marca_id,
+      unidade: atual.unidade_medida,
+      precoCusto: atual.preco_custo,
+      precoVenda: atual.preco_venda,
+      ativo: atual.ativo !== false,
+    },
+  });
+}
+
+export async function persistirEstoqueMinimoProdutoApi(input: {
+  supabase: ClienteSupabase;
+  empresaId: string;
+  produtoId: string;
+  estoqueMinimo: number;
+}): Promise<ResultadoPersistencia> {
+  if (!Number.isFinite(input.estoqueMinimo) || input.estoqueMinimo < 0) {
+    return { ok: false, erro: "Estoque mínimo inválido." };
+  }
+  const { data: atual } = await input.supabase
+    .from("estoque_atual")
+    .select("estoque_maximo")
+    .eq("empresa_id", input.empresaId)
+    .eq("produto_id", input.produtoId)
+    .maybeSingle();
+  const maximo = atual?.estoque_maximo == null ? null : Number(atual.estoque_maximo);
+  if (maximo != null && Number.isFinite(maximo) && maximo < input.estoqueMinimo) {
+    return { ok: false, erro: "Estoque máximo deve ser maior ou igual ao mínimo." };
+  }
+  const { error } = await input.supabase.rpc("rpc_atualizar_limites_estoque_produto", {
+    p_empresa_id: input.empresaId,
+    p_produto_id: input.produtoId,
+    p_estoque_minimo: input.estoqueMinimo,
+    p_estoque_maximo: maximo,
+  });
+  if (error) {
+    return { ok: false, erro: error.message };
+  }
+  return { ok: true, mensagem: "Estoque mínimo atualizado." };
+}

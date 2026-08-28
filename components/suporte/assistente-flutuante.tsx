@@ -3,6 +3,7 @@
 import { MessageCircle, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { AssistenteIaPainel } from "@/components/ia/assistente-ia-painel";
 import { CentralAjudaMenu } from "@/components/suporte/central-ajuda-menu";
 import { SuporteChat } from "@/components/suporte/suporte-chat";
 import {
@@ -26,7 +27,8 @@ import { createClient } from "@/lib/supabase/client";
 const LIMIAR_ARRASTE = 6;
 
 export function AssistenteFlutuante() {
-  const [aberto, setAberto] = useState<"menu" | "chat" | null>(null);
+  const [aberto, setAberto] = useState<"menu" | "chat" | "ia" | null>(null);
+  const [perguntaIa, setPerguntaIa] = useState<string | null>(null);
   const [posicao, setPosicao] = useState<PosicaoAssistente>(POSICAO_ASSISTENTE_PADRAO);
   const [xy, setXy] = useState({ x: 0, y: 0 });
   const [naoLidas, setNaoLidas] = useState(0);
@@ -79,6 +81,18 @@ export function AssistenteFlutuante() {
     window.addEventListener("resize", ajustar);
     return () => window.removeEventListener("resize", ajustar);
   }, [aplicarPosicao, posicao]);
+
+  useEffect(() => {
+    function abrirIa(evento: Event) {
+      const detalhe = (evento as CustomEvent<{ pergunta?: string }>).detail;
+      setPerguntaIa(detalhe?.pergunta ?? "Analise este produto.");
+      setAberto("ia");
+    }
+    window.addEventListener("ultrapdv:abrir-assistente-ia", abrirIa);
+    return () => {
+      window.removeEventListener("ultrapdv:abrir-assistente-ia", abrirIa);
+    };
+  }, []);
 
   useEffect(() => {
     if (!conversaId || aberto === "chat") {
@@ -153,7 +167,25 @@ export function AssistenteFlutuante() {
             top: Math.max(12, xy.y - 220),
           }}
         >
-          <CentralAjudaMenu onSuporte={() => void abrirChat()} />
+          <CentralAjudaMenu
+            onSuporte={() => void abrirChat()}
+            onAssistente={() => {
+              setPerguntaIa(null);
+              setAberto("ia");
+            }}
+          />
+        </div>
+      ) : null}
+
+      {aberto === "ia" ? (
+        <div className="pointer-events-auto absolute inset-x-3 bottom-3 top-auto h-[min(72vh,560px)] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl sm:inset-auto sm:bottom-auto sm:right-4 sm:top-4 sm:h-[min(80vh,640px)] sm:w-[380px]">
+          <AssistenteIaPainel
+            onFechar={() => {
+              setAberto(null);
+              setPerguntaIa(null);
+            }}
+            perguntaInicial={perguntaIa}
+          />
         </div>
       ) : null}
 

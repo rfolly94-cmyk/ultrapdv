@@ -3,14 +3,18 @@
 import {
   useMemo,
   useState,
+  useTransition,
   type ReactNode,
 } from "react";
 
 import { salvarFiscalProduto } from "./actions";
+import { analisarProdutoFiscalAction } from "./analisar-fiscal-action";
+import { AnaliseFiscalPainel } from "@/components/ia/analise-fiscal-painel";
 import {
   avaliarStatusFiscalProduto,
   type GrupoFiscalResumo,
 } from "@/lib/fiscal/status-fiscal-produto";
+import type { ResultadoClassificacaoFiscal } from "@/lib/fiscal/motor/tipos";
 import { ORIGENS_MERCADORIA } from "@/lib/fiscal/tabelas-fiscais";
 
 type Props = {
@@ -55,6 +59,11 @@ export function ProdutoFiscalForm({
     grupoFiscalId ?? ""
   );
   const [ncmAtual, setNcmAtual] = useState(ncm ?? "");
+  const [analise, setAnalise] = useState<ResultadoClassificacaoFiscal | null>(
+    null
+  );
+  const [erroAnalise, setErroAnalise] = useState<string | null>(null);
+  const [pendingAnalise, startAnalise] = useTransition();
 
   const grupoSelecionado = useMemo(
     () => grupos.find((grupo) => grupo.id === grupoId) ?? null,
@@ -84,12 +93,32 @@ export function ProdutoFiscalForm({
           </p>
         </div>
 
-        <a
-          href="/produtos"
-          className="text-sm font-medium text-zinc-500 hover:text-zinc-900"
-        >
-          Fechar
-        </a>
+        <div className="flex flex-col items-end gap-2">
+          <a
+            href="/produtos"
+            className="text-sm font-medium text-zinc-500 hover:text-zinc-900"
+          >
+            Fechar
+          </a>
+          <button
+            type="button"
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+            disabled={pendingAnalise}
+            onClick={() => {
+              setErroAnalise(null);
+              startAnalise(async () => {
+                const saida = await analisarProdutoFiscalAction(produtoId);
+                if (!saida.ok) {
+                  setErroAnalise(saida.erro);
+                  return;
+                }
+                setAnalise(saida.resultado);
+              });
+            }}
+          >
+            {pendingAnalise ? "Analisando..." : "Analisar com IA"}
+          </button>
+        </div>
       </div>
 
       <form action={salvarFiscalProduto} className="mt-7">
@@ -313,6 +342,21 @@ export function ProdutoFiscalForm({
           </a>
         </div>
       </form>
+      {erroAnalise ? (
+        <p className="mt-4 text-sm text-red-700">{erroAnalise}</p>
+      ) : null}
+      {analise ? (
+        <AnaliseFiscalPainel
+          resultado={analise}
+          onConversar={() => {
+            window.dispatchEvent(
+              new CustomEvent("ultrapdv:abrir-assistente-ia", {
+                detail: { pergunta: "Analise este produto." },
+              })
+            );
+          }}
+        />
+      ) : null}
     </section>
   );
 }

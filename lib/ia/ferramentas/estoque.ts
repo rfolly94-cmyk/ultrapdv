@@ -1,0 +1,1 @@
+export { consultarEstoqueIa } from "./produtos";

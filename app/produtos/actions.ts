@@ -61,6 +61,17 @@ import {
   validarQuantidadeContraEstoque,
   type LoteEstoque,
 } from "@/lib/produtos/lotes";
+import { produtoElegivelBalanca } from "@/lib/balancas/elegivel";
+import {
+  lerDadosBalancaProduto,
+  payloadProdutosBalancas,
+  validarDadosCadastroBalanca,
+} from "@/lib/balancas/dados-produto";
+import {
+  MENSAGEM_BALANCA_MIGRATION,
+  tabelaBalancaIndisponivel,
+} from "@/lib/balancas/schema";
+import { MENSAGEM_PLU_DUPLICADO } from "@/lib/balancas/tipos";
 
 type ResultadoProduto =
   | {
@@ -587,6 +598,95 @@ async function persistirDadosFiscaisProduto({
   return { ok: true, mensagem: "Configuração fiscal salva com sucesso." };
 }
 
+async function pluUsadoPorOutroProduto(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  empresaId: string,
+  plu: string,
+  produtoId: string | null
+) {
+  let consulta = supabase
+    .from("produtos_balancas")
+    .select("produto_id")
+    .eq("empresa_id", empresaId)
+    .eq("plu", plu)
+    .limit(2);
+
+  if (produtoId) {
+    consulta = consulta.neq("produto_id", produtoId);
+  }
+
+  const { data, error } = await consulta;
+  if (error) {
+    if (tabelaBalancaIndisponivel(error)) {
+      return { ok: false as const, erro: MENSAGEM_BALANCA_MIGRATION };
+    }
+    return { ok: false as const, erro: error.message };
+  }
+
+  return {
+    ok: true as const,
+    duplicado: Boolean(data && data.length > 0),
+  };
+}
+
+async function persistirDadosBalancaProduto({
+  supabase,
+  empresaId,
+  produtoId,
+  unidade,
+  formData,
+  nomeProduto,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  empresaId: string;
+  produtoId: string;
+  unidade: string;
+  formData: FormData;
+  nomeProduto: string;
+}): Promise<ResultadoProduto> {
+  if (!produtoElegivelBalanca(unidade)) {
+    return { ok: true, mensagem: "Produto salvo." };
+  }
+
+  const dadosBalanca = lerDadosBalancaProduto(formData, { nomeProduto });
+  const erroBalanca = validarDadosCadastroBalanca(dadosBalanca, unidade);
+  if (erroBalanca) {
+    return { ok: false, erro: erroBalanca };
+  }
+
+  if (dadosBalanca.plu) {
+    const uso = await pluUsadoPorOutroProduto(
+      supabase,
+      empresaId,
+      dadosBalanca.plu,
+      produtoId
+    );
+    if (!uso.ok) {
+      return { ok: false, erro: uso.erro };
+    }
+    if (uso.duplicado) {
+      return { ok: false, erro: MENSAGEM_PLU_DUPLICADO };
+    }
+  }
+
+  const { error } = await supabase.from("produtos_balancas").upsert(
+    payloadProdutosBalancas(empresaId, produtoId, dadosBalanca),
+    { onConflict: "empresa_id,produto_id" }
+  );
+
+  if (error) {
+    if (error.code === "23505") {
+      return { ok: false, erro: MENSAGEM_PLU_DUPLICADO };
+    }
+    if (tabelaBalancaIndisponivel(error)) {
+      return { ok: false, erro: MENSAGEM_BALANCA_MIGRATION };
+    }
+    return { ok: false, erro: error.message };
+  }
+
+  return { ok: true, mensagem: "Dados da balança salvos." };
+}
+
 export async function cadastrarProduto(
   formData: FormData
 ) {
@@ -815,10 +915,24 @@ export async function cadastrarProduto(
         voltarErro(erroFlags.message);
       }
     }
+
+    const balanca = await persistirDadosBalancaProduto({
+      supabase,
+      empresaId,
+      produtoId,
+      unidade: dados.unidade,
+      formData,
+      nomeProduto: dados.nome,
+    });
+
+    if (!balanca.ok) {
+      voltarErro(balanca.erro);
+    }
   }
 
   revalidatePath("/produtos");
   revalidatePath("/estoque");
+  revalidatePath("/configuracoes/balancas");
 
   redirect(
     "/produtos?sucesso=" +
@@ -979,6 +1093,23 @@ export async function editarProduto(
       erro: `${MENSAGEM_FISCAL_NAO_GRAVADO} ${fiscal.erro}`,
     };
   }
+
+  const balanca = await persistirDadosBalancaProduto({
+    supabase,
+    empresaId,
+    produtoId,
+    unidade: dados.unidade,
+    formData,
+    nomeProduto: dados.nome,
+  });
+
+  if (!balanca.ok) {
+    return { ok: false, erro: balanca.erro };
+  }
+
+  revalidatePath("/produtos");
+  revalidatePath("/estoque");
+  revalidatePath("/configuracoes/balancas");
 
   return {
     ok: true,

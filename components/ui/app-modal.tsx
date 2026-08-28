@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
 
 const larguras = {
   sm: "max-w-md",
@@ -45,10 +44,23 @@ export function AppModal({
           <button
             type="button"
             onClick={onClose}
-            className="updv-btn updv-btn-icon updv-btn-ghost"
+            className="updv-btn updv-btn-icon updv-btn-ghost inline-flex items-center justify-center"
             aria-label="Fechar"
           >
-            <X className="h-4 w-4" />
+            <svg
+              aria-hidden="true"
+              focusable="false"
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">

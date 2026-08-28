@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
 
 const larguras = {
   sm: "w-[440px]",
@@ -28,7 +27,7 @@ export function DetailDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div className="fixed inset-0 z-50 flex justify-end">
       <button
         type="button"
         aria-label="Fechar"
@@ -45,7 +44,20 @@ export function DetailDrawer({
             className="absolute left-3 rounded p-1 text-zinc-500 hover:bg-zinc-100"
             aria-label="Fechar"
           >
-            <X className="h-4 w-4" />
+            <svg
+              aria-hidden="true"
+              focusable="false"
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
           </button>
           <h2 className="truncate text-[15px] font-semibold text-zinc-950">
             {title}

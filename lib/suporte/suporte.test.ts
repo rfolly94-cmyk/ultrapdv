@@ -186,11 +186,11 @@ test("11. posição do botão persiste por usuario_id + empresa_id e não vaza e
   assert.equal(volta.lado, "left");
 });
 
-test("12. Master não depende da empresa ativa; IA não chama API", () => {
+test("12. Master não depende da empresa ativa; menu da IA não chama API", () => {
   assert.match(fonte("app/master/suporte/actions.ts"), /exigirMaster/);
   assert.doesNotMatch(fonte("app/master/suporte/actions.ts"), /buscarVinculoEmpresaAtiva/);
   const ia = fonte("components/suporte/central-ajuda-menu.tsx");
-  assert.match(ia, /Em breve/);
+  assert.match(ia, /Assistente UltraPDV/);
   assert.doesNotMatch(ia, /openai|gemini|anthropic|fetch\(/i);
   assert.match(fonte("components/suporte/assistente-flutuante.tsx"), /aria-label="Abrir Central de Ajuda"/);
 });

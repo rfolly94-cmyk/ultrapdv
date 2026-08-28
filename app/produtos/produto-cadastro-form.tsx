@@ -19,8 +19,10 @@ import {
   cadastrarMarcaRapida,
   cadastrarProduto,
 } from "./actions";
+import { ProdutoBalancaAba } from "./produto-balanca-aba";
 import { ProdutoCatalogoCampos } from "./produto-catalogo-campos";
 import { ProdutoValidadeAba } from "./produto-validade-aba";
+import { produtoElegivelBalanca } from "@/lib/balancas/elegivel";
 import { CampoValor } from "@/components/ui/campo-valor";
 import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 import {
@@ -59,6 +61,12 @@ export type ProdutoFormularioValores = {
   catalogo_mostrar_preco?: boolean;
   catalogo_imagem_path?: string | null;
   controlar_validade?: boolean;
+  plu?: string | null;
+  descricao_balanca?: string | null;
+  validade_etiqueta_dias?: number | null;
+  tara_padrao?: number | string | null;
+  departamento_balanca?: string | null;
+  mensagem_balanca?: string | null;
 };
 
 type ProdutoCadastroFormProps = {
@@ -154,7 +162,12 @@ export function ProdutoFormCampos({
   const unidadeInicial =
     produto?.unidade_medida || UNIDADE_MEDIDA_PADRAO;
   const [unidade, setUnidade] = useState(unidadeInicial);
-  const [aba, setAba] = useState<"cadastro" | "validade">("cadastro");
+  const [aba, setAba] = useState<"cadastro" | "validade" | "balanca">(
+    "cadastro"
+  );
+  const mostraAbaBalanca = produtoElegivelBalanca(unidade);
+  const abaExibida =
+    aba === "balanca" && !mostraAbaBalanca ? "cadastro" : aba;
   const catalogoNoPlano = useRecursoLiberado("catalogo");
 
   const unidades = useMemo(() => {
@@ -210,11 +223,14 @@ export function ProdutoFormCampos({
       >
         {(
           [
-            { id: "cadastro", label: "Cadastro" },
-            { id: "validade", label: "Validade" },
-          ] as const
+            { id: "cadastro" as const, label: "Cadastro" },
+            { id: "validade" as const, label: "Validade" },
+            ...(mostraAbaBalanca
+              ? [{ id: "balanca" as const, label: "Balança" }]
+              : []),
+          ]
         ).map((item) => {
-          const ativa = aba === item.id;
+          const ativa = abaExibida === item.id;
           return (
             <button
               key={item.id}
@@ -244,7 +260,7 @@ export function ProdutoFormCampos({
         />
       )}
 
-      <div className={aba === "cadastro" ? "contents" : "hidden"}>
+      <div className={abaExibida === "cadastro" ? "contents" : "hidden"}>
 
       {produto?.id ? (
         <Campo
@@ -451,12 +467,18 @@ export function ProdutoFormCampos({
       </details>
       </div>
 
-      <div className={aba === "validade" ? "md:col-span-3" : "hidden"}>
+      <div className={abaExibida === "validade" ? "md:col-span-3" : "hidden"}>
         <ProdutoValidadeAba
           produtoId={produto?.id}
           controlarValidade={Boolean(produto?.controlar_validade)}
         />
       </div>
+
+      {mostraAbaBalanca && (
+        <div className={abaExibida === "balanca" ? "contents" : "hidden"}>
+          <ProdutoBalancaAba produto={produto} />
+        </div>
+      )}
     </>
   );
 }

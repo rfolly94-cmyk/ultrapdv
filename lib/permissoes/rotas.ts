@@ -256,6 +256,14 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "configuracoes", acao: "acessar" };
   }
 
+  if (pathname.startsWith("/configuracoes/balancas")) {
+    return { tipo: "permissao", modulo: "configuracoes", acao: "acessar" };
+  }
+
+  if (pathname.startsWith("/configuracoes/notificacoes")) {
+    return { tipo: "permissao", modulo: "configuracoes", acao: "acessar" };
+  }
+
   if (pathname.startsWith("/configuracoes/fiscal")) {
     return { tipo: "permissao", modulo: "fiscal", acao: "configurar_fiscal" };
   }

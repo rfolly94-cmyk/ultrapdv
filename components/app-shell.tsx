@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AvisoCarencia } from "@/components/assinatura/aviso-carencia";
 import { LogoEmpresa } from "@/components/empresa/logo-empresa";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { SinoNotificacoes } from "@/components/notificacoes/sino-notificacoes";
 import { AssistenteFlutuante } from "@/components/suporte/assistente-flutuante";
 import type { IdentidadeEmpresaPublica } from "@/lib/empresa/logo";
 import { EntitlementsUiProvider } from "@/lib/plataforma/entitlements/contexto-ui";
@@ -112,6 +113,15 @@ export function AppShell({
               nome={identidade?.nome}
             />
           </span>
+          <span className="ml-auto">
+            <SinoNotificacoes
+              key={identidade?.empresaId ?? "none"}
+              compacto
+            />
+          </span>
+        </header>
+        <header className="sticky top-0 z-20 hidden h-12 items-center justify-end border-b border-zinc-200/80 bg-[var(--sidebar-bg)] px-4 print:hidden lg:flex">
+          <SinoNotificacoes key={identidade?.empresaId ?? "none"} />
         </header>
         <div className="min-h-screen">
           {assinaturaOperacional && carenciaAte ? (
@@ -120,7 +130,7 @@ export function AppShell({
           {children}
         </div>
       </div>
-      <AssistenteFlutuante />
+      <AssistenteFlutuante key={identidade?.empresaId ?? "none"} />
     </div>
   );
 

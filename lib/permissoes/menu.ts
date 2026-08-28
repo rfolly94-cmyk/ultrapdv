@@ -84,4 +84,16 @@ export const ABAS_CONFIGURACOES_PERMISSAO = [
     acao: "acessar" as const,
     recurso: "impressao_automatica" as const,
   },
+  {
+    label: "Balanças",
+    href: "/configuracoes/balancas",
+    modulo: "configuracoes" as const,
+    acao: "acessar" as const,
+  },
+  {
+    label: "Notificações",
+    href: "/configuracoes/notificacoes",
+    modulo: "configuracoes" as const,
+    acao: "acessar" as const,
+  },
 ];

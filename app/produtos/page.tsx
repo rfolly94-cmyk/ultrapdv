@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
+import { tabelaBalancaIndisponivel } from "@/lib/balancas/schema";
 
 type PageProps = {
   searchParams: Promise<{
@@ -121,6 +122,7 @@ export default async function ProdutosPage({
   const [
     { data: produtos, error },
     { data: estoques, error: estoqueError },
+    { data: produtosBalanca, error: balancaError },
   ] = await Promise.all([
     supabase
       .from("produtos")
@@ -157,6 +159,12 @@ export default async function ProdutosPage({
       .from("estoque_atual")
       .select("produto_id, quantidade")
       .eq("empresa_id", vinculo.empresa_id),
+    supabase
+      .from("produtos_balancas")
+      .select(
+        "produto_id, plu, descricao_balanca, validade_etiqueta_dias, tara_padrao, departamento, mensagem"
+      )
+      .eq("empresa_id", vinculo.empresa_id),
   ]);
 
   if (error) {
@@ -165,6 +173,10 @@ export default async function ProdutosPage({
 
   if (estoqueError) {
     throw new Error(estoqueError.message);
+  }
+
+  if (balancaError && !tabelaBalancaIndisponivel(balancaError)) {
+    throw new Error(balancaError.message);
   }
 
   const grupos = gruposFiscais ?? [];
@@ -183,6 +195,9 @@ export default async function ProdutosPage({
       item.produto_id,
       Number(item.quantidade ?? 0),
     ])
+  );
+  const balancaPorProduto = new Map(
+    (produtosBalanca ?? []).map((item) => [item.produto_id, item])
   );
   const categoriasAtivas = (categorias ?? []).filter(
     (item) => item.ativo
@@ -248,6 +263,15 @@ export default async function ProdutosPage({
         produto.catalogo_mostrar_preco !== false,
       catalogo_imagem_path: produto.catalogo_imagem_path,
       controlar_validade: Boolean(produto.controlar_validade),
+      plu: balancaPorProduto.get(produto.id)?.plu ?? null,
+      descricao_balanca:
+        balancaPorProduto.get(produto.id)?.descricao_balanca ?? null,
+      validade_etiqueta_dias:
+        balancaPorProduto.get(produto.id)?.validade_etiqueta_dias ?? null,
+      tara_padrao: balancaPorProduto.get(produto.id)?.tara_padrao ?? null,
+      departamento_balanca:
+        balancaPorProduto.get(produto.id)?.departamento ?? null,
+      mensagem_balanca: balancaPorProduto.get(produto.id)?.mensagem ?? null,
       quantidade:
         estoquePorProduto.get(produto.id) ?? 0,
       categoria_nome:
