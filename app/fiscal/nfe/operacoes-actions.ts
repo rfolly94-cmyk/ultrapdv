@@ -60,6 +60,11 @@ import {
   type PagamentoRascunhoNfe,
 } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 import {
+  snapshotFaturaNfe,
+  type CondicaoPagamentoNfe,
+  type FaturaNfe,
+} from "@/lib/fiscal/nfe55/fatura-nfe";
+import {
   normalizarTotaisNota,
   totaisNotaCentavos,
   totaisNotaDoSnapshot,
@@ -80,7 +85,6 @@ import { normalizarRegrasCfopDaEmpresaAtiva } from "@/lib/fiscal/operacoes/resol
 import {
   MENSAGEM_DOCUMENTO_FISCAL_NAO_EDITAVEL,
   MENSAGEM_NUMERACAO_IMUTAVEL,
-  operacaoPodeEditar,
   operacaoPodeConfirmarRecebimento,
   operacaoPodeConfirmarSaida,
   podeEditarDocumentoFiscal,
@@ -126,6 +130,8 @@ function mensagemErro(error: unknown, fallback: string) {
 function revalidar(operacaoId?: string, vendaId?: string) {
   revalidatePath("/fiscal");
   revalidatePath("/fiscal/nfe/nova");
+  revalidatePath("/vendas");
+  revalidatePath("/vendas/rascunhos-nfe");
   revalidatePath("/clientes");
   if (operacaoId) {
     revalidatePath(`/fiscal/nfe/${operacaoId}/editar`);
@@ -1096,15 +1102,21 @@ export async function removerItemOperacaoFiscal(input: {
     const { supabase, empresaId } = await getContexto();
     const { data: operacao } = await supabase
       .from("fiscal_operacoes")
-      .select("id, empresa_id, status")
+      .select("id, empresa_id, status, emissao_fiscal_id")
       .eq("id", input.operacaoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
     if (!operacao || !registroPertenceAEmpresaAtiva(operacao, empresaId)) {
       return { ok: false, erro: "Operação não encontrada na empresa ativa." };
     }
-    if (!operacaoPodeEditar(operacao.status)) {
-      return { ok: false, erro: "Esta operação não pode mais remover itens." };
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueio = recusarEdicaoDocumentoFiscal(operacao, emissao);
+    if (bloqueio) {
+      return bloqueio;
     }
     const { error } = await supabase
       .from("fiscal_operacoes_itens")
@@ -1365,7 +1377,7 @@ export async function verificarOperacaoFiscalAction(input: {
         destinatario_tipo, destinatario_id, destino_empresa_id,
         vinculo_transferencia_id, dados_transporte,
         informacao_complementar_usuario, informacao_adicional_fisco,
-        snapshot_fiscal, venda_id
+        snapshot_fiscal, venda_id, emissao_fiscal_id
       `
       )
       .eq("id", input.operacaoId)
@@ -1373,6 +1385,18 @@ export async function verificarOperacaoFiscalAction(input: {
       .maybeSingle();
     if (!operacao || !registroPertenceAEmpresaAtiva(operacao, empresaId)) {
       return { ok: false, erro: "Operação não encontrada na empresa ativa." };
+    }
+    const emissaoVerificacao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueioVerificacao = recusarEdicaoDocumentoFiscal(
+      operacao,
+      emissaoVerificacao
+    );
+    if (bloqueioVerificacao) {
+      return bloqueioVerificacao;
     }
     if (operacao.tipo_operacao_interno === "transferencia" && operacao.destinatario_tipo === "cliente") {
       return { ok: false, erro: MENSAGEM_TRANSFERENCIA_DESTINO_CLIENTE };
@@ -2193,13 +2217,15 @@ export async function salvarCadastroDestinatarioOperacao(input: {
 export async function salvarPagamentosOperacaoVenda(input: {
   operacaoId: string;
   pagamentos: PagamentoRascunhoNfe[];
+  condicaoPagamento?: CondicaoPagamentoNfe;
+  fatura?: FaturaNfe | null;
   preservarStatusEmissao?: boolean;
 }): Promise<Resultado> {
   try {
     const { supabase, empresaId } = await getContexto();
     const { data: operacao } = await supabase
       .from("fiscal_operacoes")
-      .select("id, empresa_id, status, tipo_operacao_interno, snapshot_fiscal, venda_id")
+      .select("id, empresa_id, status, tipo_operacao_interno, snapshot_fiscal, venda_id, emissao_fiscal_id")
       .eq("id", input.operacaoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
@@ -2209,11 +2235,14 @@ export async function salvarPagamentosOperacaoVenda(input: {
     if (operacao.tipo_operacao_interno !== "venda") {
       return { ok: false, erro: "Pagamento comercial só se aplica à natureza de venda." };
     }
-    if (operacao.venda_id) {
-      return { ok: true, mensagem: "A venda comercial já foi finalizada." };
-    }
-    if (!operacaoPodeEditar(operacao.status) && operacao.status !== "pronta_para_emissao") {
-      return { ok: false, erro: "Esta operação não pode mais alterar o pagamento." };
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueio = recusarEdicaoDocumentoFiscal(operacao, emissao);
+    if (bloqueio) {
+      return bloqueio;
     }
     const pagamentos = input.pagamentos.filter(
       (pagamento) =>
@@ -2224,6 +2253,10 @@ export async function salvarPagamentosOperacaoVenda(input: {
       .update({
         snapshot_fiscal: mesclarSnapshotOperacao(operacao.snapshot_fiscal, {
           pagamentos_rascunho: pagamentos,
+          ...snapshotFaturaNfe({
+            condicao: input.condicaoPagamento ?? (input.fatura ? "prazo" : "vista"),
+            fatura: input.fatura ?? null,
+          }),
         }),
         status:
           operacao.status === "pronta_para_emissao" && !input.preservarStatusEmissao
@@ -2255,18 +2288,21 @@ export async function salvarTotaisOperacaoFiscal(input: {
     const { supabase, empresaId } = await getContexto();
     const { data: operacao } = await supabase
       .from("fiscal_operacoes")
-      .select("id, empresa_id, status, snapshot_fiscal, venda_id")
+      .select("id, empresa_id, status, snapshot_fiscal, venda_id, emissao_fiscal_id")
       .eq("id", input.operacaoId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
     if (!operacao || !registroPertenceAEmpresaAtiva(operacao, empresaId)) {
       return { ok: false, erro: "Operação não encontrada na empresa ativa." };
     }
-    if (operacao.venda_id) {
-      return { ok: true, mensagem: "A venda comercial já foi finalizada." };
-    }
-    if (!operacaoPodeEditar(operacao.status) && operacao.status !== "pronta_para_emissao") {
-      return { ok: false, erro: "Esta operação não pode mais alterar os totais da NF-e." };
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueio = recusarEdicaoDocumentoFiscal(operacao, emissao);
+    if (bloqueio) {
+      return bloqueio;
     }
     const totais = normalizarTotaisNota(input.totais);
     const erroTotais = validarTotaisNota({
@@ -2312,7 +2348,7 @@ export async function prepararVendaParaEmissaoNfe(input: {
       .select(
         `
         id, empresa_id, status, tipo_operacao_interno, natureza_id,
-        destinatario_id, snapshot_fiscal, venda_id,
+        destinatario_id, snapshot_fiscal, venda_id, emissao_fiscal_id,
         informacao_complementar_usuario, informacao_adicional_fisco
       `
       )
@@ -2331,6 +2367,15 @@ export async function prepararVendaParaEmissaoNfe(input: {
     if (!operacao.destinatario_id) {
       return { ok: false, erro: "Selecione o destinatário da venda." };
     }
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const bloqueio = recusarEdicaoDocumentoFiscal(operacao, emissao);
+    if (bloqueio) {
+      return bloqueio;
+    }
 
     let vendaId = vendaIdNfeMaterializada(operacao.venda_id)
       ? String(operacao.venda_id)
@@ -2347,7 +2392,8 @@ export async function prepararVendaParaEmissaoNfe(input: {
         .from("fiscal_operacoes_itens")
         .select("produto_id, quantidade, valor_unitario")
         .eq("empresa_id", empresaId)
-        .eq("operacao_id", operacao.id);
+        .eq("operacao_id", operacao.id)
+        .order("created_at", { ascending: true });
       const itensVenda = (itens ?? []).map((item) => ({
         produtoId: String(item.produto_id),
         quantidade: Number(item.quantidade),
@@ -2427,6 +2473,9 @@ export async function prepararVendaParaEmissaoNfe(input: {
           soma + Math.round(item.quantidade) * (precoCatalogoPorId.get(item.produtoId) ?? 0),
         0
       );
+      // Motor comercial da NF-e de venda nova: o PDV grava o preço cadastral.
+      // A diferença para o preço editado na NF-e fica só no livro comercial
+      // (desconto/acréscimo da venda) e NÃO vira vOutro no XML.
       const extrasComerciais = compensarDiferencaSubtotalCatalogo({
         subtotalCatalogoCentavos,
         subtotalAlvoCentavos,

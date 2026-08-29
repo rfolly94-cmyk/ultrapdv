@@ -230,6 +230,50 @@ test("rascunho, preparado e pronta permitem edição enquanto não há transmiss
   );
 });
 
+test("rejeição/erro confirmado permite reeditar; autorização e ambíguo não", () => {
+  assert.equal(
+    podeEditarDocumentoFiscal({
+      statusOperacao: "rejeitada",
+      emissao: {
+        modelo: "55",
+        status: "rejeitada",
+        cstat: "225",
+        motivo: "Rejeicao: Falha no Schema XML do lote de NFe",
+      },
+    }).permitido,
+    true
+  );
+  assert.equal(
+    podeEditarDocumentoFiscal({
+      statusOperacao: "pronta_para_emissao",
+      emissao: {
+        modelo: "55",
+        status: "erro_comunicacao",
+        classificacao: "erro_envio",
+        geranetHttpStatus: 422,
+      },
+    }).permitido,
+    true
+  );
+  assert.equal(
+    podeEditarDocumentoFiscal({
+      statusOperacao: "autorizada",
+      emissao: { modelo: "55", status: "autorizada", cstat: "100" },
+    }).permitido,
+    false
+  );
+  assert.equal(
+    podeEditarDocumentoFiscal({
+      statusOperacao: "pronta_para_emissao",
+      emissao: {
+        modelo: "55",
+        status: "aguardando_reconciliacao",
+      },
+    }).permitido,
+    false
+  );
+});
+
 test("payload Geranet usa data/hora manuais, intermediador do snapshot e não sobrescreve com now()", () => {
   const payload = resolverPayloadCabecalhoNfe({
     snapshot: {

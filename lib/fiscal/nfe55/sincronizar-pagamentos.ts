@@ -84,6 +84,9 @@ export function compensarDiferencaSubtotalCatalogo(input: {
   descontoCentavos: number;
   acrescimoCentavos: number;
 }) {
+  // Só para o motor comercial do PDV, que grava produtos.preco_venda.
+  // Não é vOutro fiscal. A emissão da NF-e usa o preço editado na operação
+  // e totais_nota.outro explícito — nunca esta diferença.
   const delta =
     Math.round(input.subtotalAlvoCentavos) - Math.round(input.subtotalCatalogoCentavos);
   if (delta > 0) {

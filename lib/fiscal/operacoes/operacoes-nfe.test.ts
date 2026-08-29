@@ -423,8 +423,8 @@ test("nota de crédito e débito não chegam em /nfe/emitir", () => {
   const wizard = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
   assert.doesNotMatch(wizard, /\/api\/v1\/nfe\/emitir/);
   assert.match(wizard, /nfe-emitir-operacao/);
-  assert.match(wizard, /Validar NF-e/);
-  assert.match(wizard, /Emitir NF-e/);
+  assert.doesNotMatch(wizard, /Validar NF-e/);
+  assert.match(wizard, /Emitir/);
   assert.doesNotMatch(wizard, /nfce-emitir-venda/);
   assert.doesNotMatch(wizard, /criarOperacaoFiscal\(\{ tipo: "remessa"/);
 

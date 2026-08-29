@@ -216,6 +216,19 @@ export type PagamentoNfeGeranet = {
     DetalhamentoPagamentoNfeGeranet[];
 };
 
+export type FaturaNfeGeranet = {
+  numero: string;
+  valor: number;
+  desconto: number;
+  valorLiquido: number;
+  duplicatas: Array<{
+    numero: string;
+    dataVencimento: string;
+    valor: number;
+    codigoPagamento?: string;
+  }>;
+};
+
 export type MontarPayloadNfeGeranetParams = {
   ambiente:
     AmbienteNfeGeranet;
@@ -233,6 +246,8 @@ export type MontarPayloadNfeGeranetParams = {
     ConfigNfeGeranet;
   pagamento:
     PagamentoNfeGeranet;
+  fatura?:
+    FaturaNfeGeranet | null;
   transporte?:
     TransporteNfeGeranet | null;
   autorizadosXml?:
@@ -669,6 +684,7 @@ export function montarPayloadNfeGeranet(
     destinatario,
     config,
     pagamento,
+    fatura,
     transporte,
     autorizadosXml,
     responsavelTecnico,
@@ -1109,6 +1125,53 @@ export function montarPayloadNfeGeranet(
               })
             ),
       },
+
+      ...(
+        fatura &&
+        fatura.duplicatas.length > 0
+          ? {
+              fatura: {
+                numero:
+                  texto(
+                    fatura.numero
+                  ),
+                valor:
+                  fatura.valor,
+                desconto:
+                  fatura.desconto,
+                valorLiquido:
+                  fatura.valorLiquido,
+                duplicatas:
+                  fatura.duplicatas.map(
+                    (duplicata) => ({
+                      numero:
+                        texto(
+                          duplicata.numero
+                        ),
+                      dataVencimento:
+                        texto(
+                          duplicata.dataVencimento
+                        ),
+                      valor:
+                        duplicata.valor,
+                      ...(
+                        texto(
+                          duplicata.codigoPagamento
+                        )
+                          ? {
+                              codigoPagamento:
+                                texto(
+                                  duplicata.codigoPagamento
+                                ),
+                            }
+                          : {}
+                      ),
+                    })
+                  ),
+              },
+            }
+          : {}
+      ),
 
       ...(
         responsavelTecnicoGeranet

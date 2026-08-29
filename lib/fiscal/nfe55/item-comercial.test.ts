@@ -166,6 +166,12 @@ test("14. documento autorizado não pode ser editado", () => {
   assert.equal(gate.permitido, false);
   assert.match(adicionar, /recusarEdicaoDocumentoFiscal/);
   assert.match(atualizar, /recusarEdicaoDocumentoFiscal/);
+  const remover = actions.slice(
+    actions.indexOf("export async function removerItemOperacaoFiscal"),
+    actions.indexOf("export async function salvarTransporteOperacaoFiscal")
+  );
+  assert.match(remover, /recusarEdicaoDocumentoFiscal/);
+  assert.doesNotMatch(remover, /operacaoPodeEditar/);
 });
 
 test("15. snapshot mantém quantidade e preço efetivamente utilizados", () => {

@@ -602,7 +602,7 @@ test("rascunho Editar NF-e: guard não depende da URL Nova NF-e", () => {
   assert.match(form, /operacao\.vendaId/);
   assert.match(form, /operacao\.tipo/);
   assert.match(form, /data-nfe-caixa-bloqueado=\{vendaNovaSemCaixa/);
-  assert.match(form, /disabled=\{pending \|\| !podeEmitir \|\| vendaNovaSemCaixa \|\| pagamentoImpedeEmissao\}/);
+  assert.match(form, /disabled=\{pending \|\| !podeEmitir \|\| vendaNovaSemCaixa\}/);
   assert.match(form, /if \(vendaNovaSemCaixa\)/);
   assert.match(form, /setCaixaLiberadoLocal\(true\)/);
   assert.match(form, /onAberto=/);
@@ -633,7 +633,7 @@ test("rascunho Editar NF-e: guard não depende da URL Nova NF-e", () => {
   assert.doesNotMatch(verificar, /rpc_finalizar_venda/);
   const persistir = form.slice(form.indexOf("async function persistirRascunho"));
   assert.doesNotMatch(
-    persistir.slice(0, persistir.indexOf("function acionarValidar")),
+    persistir.slice(0, persistir.indexOf("function emitir")),
     /prepararVendaParaEmissaoNfe/
   );
 });

@@ -51,8 +51,15 @@ import {
 } from "@/lib/fiscal/distribuir-desconto-itens";
 import {
   distribuirValorProporcional,
-  totaisNotaDoSnapshot,
 } from "@/lib/fiscal/nfe55/totais-nota";
+import {
+  aplicarPagamentosRascunhoNaEmissaoNfeVenda,
+  aplicarPrecosComerciaisOperacaoNosItensVenda,
+  precosComerciaisOperacaoCompativeis,
+  totaisFiscaisEmissaoNfeVenda,
+  totalFiscalEsperadoEmissaoNfeVenda,
+  trocoEmissaoNfeVenda,
+} from "@/lib/fiscal/nfe55/valores-comerciais-nfe";
 import {
   enderecoEntregaDoSnapshotParaGeranet,
   lerEnderecoEntregaDoSnapshot,
@@ -83,7 +90,17 @@ import {
   snapshotDestinatarioParaPersistir,
   lerSnapshotDestinatarioFiscal,
 } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
-import { mesclarSnapshotOperacao } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
+import { mesclarSnapshotOperacao, pagamentosRascunhoDoSnapshot } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
+import {
+  condicaoPagamentoDoSnapshot,
+  faturaDeTitulosCarteira,
+  faturaNfeDoSnapshot,
+  faturaParaPayloadGeranet,
+  indicadorPagamentoDetalheNfe,
+  totalAPrazoDePagamentosEmitidosCentavos,
+  totalAPrazoFaturaCentavos,
+  validarFaturaParaEmissaoNfe,
+} from "@/lib/fiscal/nfe55/fatura-nfe";
 import {
   argsNumeroManualReservaNfe,
   escolherNumeracaoNfe55,
@@ -140,6 +157,7 @@ import {
 import {
   conferenciaFinanceiraVenda,
   filtrarPagamentosFinanceiros,
+  somarValoresPagamento,
 } from "@/lib/vendas/pagamentos-financeiros";
 import {
   MENSAGEM_NATUREZA_VENDA_AUSENTE,
@@ -685,11 +703,11 @@ export async function POST(
     const venda =
       vendaResult.data;
 
-    const itensVenda =
+    let itensVenda =
       itensResult.data ??
       [];
 
-    const pagamentos =
+    let pagamentos =
       pagamentosResult.data ??
       [];
 
@@ -748,6 +766,21 @@ export async function POST(
         "NF-e exige cliente identificado na venda."
       );
     }
+
+    const { data: operacaoDestino } =
+      await supabase
+        .from("fiscal_operacoes")
+        .select("destinatario_id, empresa_id")
+        .eq("empresa_id", empresaId)
+        .eq("venda_id", venda.id)
+        .maybeSingle();
+    const clienteIdEmissao =
+      operacaoDestino &&
+      String(operacaoDestino.empresa_id) ===
+        String(empresaId) &&
+      operacaoDestino.destinatario_id
+        ? String(operacaoDestino.destinatario_id)
+        : String(venda.cliente_id);
 
     const transporteResolvido = await carregarTransporteNfe55({
       db: supabase,
@@ -817,7 +850,7 @@ export async function POST(
         )
         .eq(
           "id",
-          venda.cliente_id
+          clienteIdEmissao
         )
         .maybeSingle();
 
@@ -922,12 +955,81 @@ export async function POST(
           venda.id
         )
         .maybeSingle();
-    const snapshotOperacao =
-      operacaoVenda &&
+    const origemOperacaoFiscal =
+      operacaoVenda != null &&
       String(operacaoVenda.empresa_id) ===
-        String(empresaId)
+        String(empresaId);
+    if (origemOperacaoFiscal && operacaoVenda) {
+      const { data: itensOperacaoFiscal, error: itensOperacaoErro } =
+        await supabase
+          .from("fiscal_operacoes_itens")
+          .select("produto_id, quantidade, valor_unitario")
+          .eq("empresa_id", empresaId)
+          .eq("operacao_id", operacaoVenda.id)
+          .order("created_at", { ascending: true });
+      if (itensOperacaoErro) {
+        return erro(itensOperacaoErro.message, 500);
+      }
+      const itensOperacao = itensOperacaoFiscal ?? [];
+      if (!precosComerciaisOperacaoCompativeis(itensVenda, itensOperacao)) {
+        return erro(
+          "Itens da operação fiscal divergem da venda. Quantidade e preço editados não puderam ser aplicados."
+        );
+      }
+      itensVenda = aplicarPrecosComerciaisOperacaoNosItensVenda(
+        itensVenda,
+        itensOperacao
+      );
+    }
+    const snapshotOperacao =
+      origemOperacaoFiscal && operacaoVenda
         ? operacaoVenda.snapshot_fiscal
         : null;
+    let overlayPagamentos = false;
+    let formasOverlay: Array<{
+      id: string;
+      codigo?: string | null;
+      nome?: string | null;
+      codigo_fiscal?: string | null;
+      permite_parcelamento?: boolean | null;
+      permite_fiado?: boolean | null;
+    }> = [];
+    if (origemOperacaoFiscal && operacaoVenda) {
+      const pagamentosRascunho = pagamentosRascunhoDoSnapshot(
+        operacaoVenda.snapshot_fiscal
+      );
+      if (pagamentosRascunho.length > 0) {
+        const formaIds = [
+          ...new Set(
+            pagamentosRascunho.map((pagamento) => pagamento.formaPagamentoId)
+          ),
+        ];
+        const { data: formasRascunho, error: formasErro } = await supabase
+          .from("formas_pagamento")
+          .select(
+            "id, empresa_id, codigo, nome, codigo_fiscal, permite_parcelamento, permite_fiado"
+          )
+          .eq("empresa_id", empresaId)
+          .in("id", formaIds);
+        if (formasErro) {
+          return erro(formasErro.message, 500);
+        }
+        formasOverlay = (formasRascunho ?? []).filter(
+          (forma) => String(forma.empresa_id) === String(empresaId)
+        );
+        const overlayPagamento = aplicarPagamentosRascunhoNaEmissaoNfeVenda({
+          origemOperacaoFiscal: true,
+          pagamentosVenda: pagamentos,
+          pagamentosRascunho,
+          formas: formasOverlay,
+        });
+        if (!overlayPagamento.ok) {
+          return erro(overlayPagamento.erro);
+        }
+        pagamentos = overlayPagamento.pagamentos;
+        overlayPagamentos = overlayPagamento.overlay;
+      }
+    }
     const snapshotDestinatario =
       lerSnapshotDestinatarioFiscal(
         snapshotOperacao
@@ -1028,7 +1130,7 @@ export async function POST(
       }
     }
 
-    const pagamentosConfirmados =
+    let pagamentosConfirmados =
       filtrarPagamentosFinanceiros(
         pagamentos
       );
@@ -1039,6 +1141,21 @@ export async function POST(
     ) {
       return erro(
         "A venda não possui pagamento confirmado."
+      );
+    }
+
+    if (formasOverlay.length === 0) {
+      const { data: formasEmpresa, error: formasEmpresaErro } = await supabase
+        .from("formas_pagamento")
+        .select(
+          "id, empresa_id, codigo, nome, codigo_fiscal, permite_parcelamento, permite_fiado"
+        )
+        .eq("empresa_id", empresaId);
+      if (formasEmpresaErro) {
+        return erro(formasEmpresaErro.message, 500);
+      }
+      formasOverlay = (formasEmpresa ?? []).filter(
+        (forma) => String(forma.empresa_id) === String(empresaId)
       );
     }
 
@@ -1088,18 +1205,42 @@ export async function POST(
       return erro(bloqueioEletronico);
     }
 
-    const trocoVenda =
-      numero(
-        venda.troco
-      );
+    const totaisParaConferencia = totaisFiscaisEmissaoNfeVenda({
+      origemOperacaoFiscal,
+      snapshotOperacao,
+      venda: {
+        acrescimo: venda.acrescimo,
+        desconto: venda.desconto,
+        frete: venda.frete,
+      },
+    });
+    const totalParaConferencia = totalFiscalEsperadoEmissaoNfeVenda({
+      origemOperacaoFiscal,
+      itens: itensVenda.map((item) => ({
+        quantidade: numero(item.quantidade),
+        valorUnitario: numero(item.valor_unitario),
+      })),
+      totais: totaisParaConferencia,
+      valorTotalVenda: numero(venda.valor_total),
+    });
+    const somaPagamentosConfirmados = somarValoresPagamento(
+      filtrarPagamentosFinanceiros(pagamentos)
+    );
+    const trocoVenda = trocoEmissaoNfeVenda({
+      origemOperacaoFiscal,
+      overlayPagamentos,
+      somaPagamentos: somaPagamentosConfirmados,
+      totalFiscal: totalParaConferencia,
+      trocoVenda: numero(venda.troco),
+    });
 
     const conferencia =
       conferenciaFinanceiraVenda({
         valorTotal:
-          venda.valor_total,
+          totalParaConferencia,
         pagamentos,
         troco:
-          venda.troco,
+          trocoVenda,
       });
 
     if (
@@ -1109,6 +1250,80 @@ export async function POST(
         "Pagamentos líquidos não conferem com o total da venda."
       );
     }
+
+    let faturaEmissao = faturaNfeDoSnapshot(snapshotOperacao);
+    const totalFiadoCentavos = totalAPrazoDePagamentosEmitidosCentavos({
+      pagamentos: pagamentosConfirmados,
+      formas: formasOverlay,
+    });
+    if (!faturaEmissao && totalFiadoCentavos > 0) {
+      const { data: titulosCarteira, error: titulosErro } = await supabase
+        .from("carteira_cliente_titulos")
+        .select(
+          "empresa_id, venda_id, numero_venda, valor_original, vencimento, status"
+        )
+        .eq("empresa_id", empresaId)
+        .eq("venda_id", venda.id);
+      if (titulosErro) {
+        return erro(titulosErro.message, 500);
+      }
+      faturaEmissao = faturaDeTitulosCarteira({
+        titulos: titulosCarteira ?? [],
+        empresaId,
+        vendaId: String(venda.id),
+        numeroFatura: venda.numero != null ? String(venda.numero) : null,
+        codigoPagamento: formasOverlay.find((forma) => forma.permite_fiado)
+          ?.codigo_fiscal,
+      });
+    }
+    const condicaoFatura = condicaoPagamentoDoSnapshot(
+      snapshotOperacao,
+      faturaEmissao
+    );
+    const totalAPrazoCentavos = totalAPrazoFaturaCentavos({
+      condicao: condicaoFatura === "prazo" || totalFiadoCentavos > 0 ? "prazo" : "vista",
+      totalNfeCentavos: Math.round(totalParaConferencia * 100),
+      totalFiadoCentavos,
+    });
+    const erroFatura = validarFaturaParaEmissaoNfe({
+      condicao: totalAPrazoCentavos > 0 ? "prazo" : "vista",
+      fatura: faturaEmissao,
+      totalAPrazoCentavos,
+      totalVistaCentavos: Math.max(
+        0,
+        Math.round(totalParaConferencia * 100) - totalAPrazoCentavos
+      ),
+    });
+    if (erroFatura) {
+      return erro(erroFatura);
+    }
+    const faturaGeranet = faturaParaPayloadGeranet(
+      totalAPrazoCentavos > 0 ? faturaEmissao : null
+    );
+    const vendaInteiraAPrazo =
+      Boolean(faturaGeranet) && totalFiadoCentavos === 0;
+    pagamentosConfirmados = pagamentosConfirmados.map((pagamento) => {
+      const forma = formasOverlay.find(
+        (item) =>
+          String(item.id) === String(pagamento.id ?? "") ||
+          (item.codigo &&
+            String(item.codigo) ===
+              String(pagamento.forma_pagamento_codigo ?? "")) ||
+          (item.codigo_fiscal &&
+            String(item.codigo_fiscal) ===
+              String(pagamento.codigo_fiscal ?? ""))
+      );
+      return {
+        ...pagamento,
+        indicador_pagamento: indicadorPagamentoDetalheNfe({
+          temFatura: Boolean(faturaGeranet),
+          vendaInteiraAPrazo,
+          permiteFiado: forma?.permite_fiado,
+          permiteParcelamento: forma?.permite_parcelamento,
+          indicadorAtual: pagamento.indicador_pagamento,
+        }),
+      };
+    });
 
     if (
       !empresa ||
@@ -1703,10 +1918,19 @@ export async function POST(
 
     let descontosFiscais: Map<string, number>;
 
+    const totaisNota = totaisFiscaisEmissaoNfeVenda({
+      origemOperacaoFiscal,
+      snapshotOperacao,
+      venda,
+    });
+    const valorFrete = totaisNota.frete;
+    const valorSeguro = totaisNota.seguro;
+    const valorOutro = totaisNota.outro;
+
     try {
       descontosFiscais = mapaDescontoFiscalPorItem(
         distribuirDescontoItens({
-          descontoVenda: numero(venda.desconto),
+          descontoVenda: totaisNota.desconto,
           itens: itensVenda.map((item) => ({
             id: item.id,
             quantidade: numero(item.quantidade),
@@ -1722,25 +1946,6 @@ export async function POST(
           : "Não foi possível ratear o desconto fiscal da venda. Nenhum número foi reservado."
       );
     }
-
-    const totaisNota = totaisNotaDoSnapshot(
-      operacaoVenda &&
-        String(operacaoVenda.empresa_id) === String(empresaId)
-        ? operacaoVenda.snapshot_fiscal
-        : null
-    );
-    const temTotaisSnapshot =
-      totaisNota.frete > 0 ||
-      totaisNota.seguro > 0 ||
-      totaisNota.outro > 0 ||
-      totaisNota.desconto > 0;
-    const valorFrete = temTotaisSnapshot
-      ? totaisNota.frete
-      : numero(venda.frete);
-    const valorSeguro = temTotaisSnapshot ? totaisNota.seguro : 0;
-    const valorOutro = temTotaisSnapshot
-      ? totaisNota.outro
-      : numero(venda.acrescimo);
     const itensBaseVenda = itensVenda.map((item) => ({
       id: item.id,
       baseCentavos: valorBrutoItemEmCentavos({
@@ -2055,9 +2260,15 @@ export async function POST(
           seguro?: unknown;
           outro?: unknown;
         }>,
-        valorTotalVenda: numero(
-          venda.valor_total
-        ),
+        valorTotalVenda: totalFiscalEsperadoEmissaoNfeVenda({
+          origemOperacaoFiscal,
+          itens: itensVenda.map((item) => ({
+            quantidade: numero(item.quantidade),
+            valorUnitario: numero(item.valor_unitario),
+          })),
+          totais: totaisNota,
+          valorTotalVenda: numero(venda.valor_total),
+        }),
       });
 
     if (divergenciaTotais) {
@@ -2712,6 +2923,7 @@ export async function POST(
               })
             ),
         },
+        fatura: faturaGeranet,
 
         itens:
           itensFiscais,

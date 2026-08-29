@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { PedidosOnlineWorkspace } from "@/components/vendas/pedidos-online-workspace";
+import { STATUS_RASCUNHO_NFE55 } from "@/lib/fiscal/nfe55/rascunhos-nfe";
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { createClient } from "@/lib/supabase/server";
@@ -147,10 +148,19 @@ export default async function PedidosOnlinePage() {
     })),
   }));
 
+  const rascunhosNfeResult = await supabase
+    .from("fiscal_operacoes")
+    .select("id", { count: "exact", head: true })
+    .eq("empresa_id", vinculo.empresa_id)
+    .in("status", [...STATUS_RASCUNHO_NFE55]);
+
   return (
     <PedidosOnlineWorkspace
       pedidos={itens}
       pedidosNovos={itens.filter((pedido) => pedido.status === "NOVO").length}
+      rascunhosNfe={
+        rascunhosNfeResult.error ? 0 : (rascunhosNfeResult.count ?? 0)
+      }
     />
   );
 }

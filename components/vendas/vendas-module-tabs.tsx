@@ -7,11 +7,14 @@ import { temPermissao } from "@/lib/permissoes/tem-permissao";
 
 export function VendasModuleTabs({
   pedidosNovos = 0,
+  rascunhosNfe = 0,
 }: {
   pedidosNovos?: number;
+  rascunhosNfe?: number;
 }) {
   const permissoes = usePermissoesUi();
   const catalogoNoPlano = useRecursoLiberado("catalogo");
+  const nfeNoPlano = useRecursoLiberado("nfe");
   const pedidosPermitidos =
     catalogoNoPlano && temPermissao(permissoes, "catalogo", "pedidos");
 
@@ -25,6 +28,17 @@ export function VendasModuleTabs({
                 ? `Pedidos Online · ${pedidosNovos}`
                 : "Pedidos Online",
             href: "/vendas/pedidos",
+          },
+        ]
+      : []),
+    ...(nfeNoPlano
+      ? [
+          {
+            label:
+              rascunhosNfe > 0
+                ? `Rascunhos NF-e · ${rascunhosNfe}`
+                : "Rascunhos NF-e",
+            href: "/vendas/rascunhos-nfe",
           },
         ]
       : []),

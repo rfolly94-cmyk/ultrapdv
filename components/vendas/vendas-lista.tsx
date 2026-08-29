@@ -92,6 +92,7 @@ export type VendaListaItem = {
 type Props = {
   vendas: VendaListaItem[];
   pedidosNovos?: number;
+  rascunhosNfe?: number;
   filtros: FiltrosListaVendas;
   dataHojeIso: string;
 };
@@ -220,6 +221,7 @@ function fiscalResumo(
 export function VendasLista({
   vendas,
   pedidosNovos = 0,
+  rascunhosNfe = 0,
   filtros,
   dataHojeIso,
 }: Props) {
@@ -402,7 +404,10 @@ export function VendasLista({
           {impressaoLista}
         </p>
       ) : null}
-      <VendasModuleTabs pedidosNovos={pedidosNovos} />
+      <VendasModuleTabs
+        pedidosNovos={pedidosNovos}
+        rascunhosNfe={rascunhosNfe}
+      />
 
       <ListToolbar
         searchPlaceholder="Buscar por número, cliente, operador ou pagamento"

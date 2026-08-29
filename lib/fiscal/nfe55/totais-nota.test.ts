@@ -80,7 +80,9 @@ test("Nova NF-e persiste e emite totais editáveis", () => {
   assert.match(form, /totalLiquidoNota/);
   assert.match(actions, /totais_nota/);
   assert.match(emitirOperacao, /totaisNotaDoSnapshot/);
-  assert.match(emitirVenda, /totaisNotaDoSnapshot/);
+  assert.match(emitirVenda, /totaisFiscaisEmissaoNfeVenda/);
+  assert.match(emitirVenda, /aplicarPrecosComerciaisOperacaoNosItensVenda/);
+  assert.doesNotMatch(emitirVenda, /temTotaisSnapshot/);
   assert.doesNotMatch(
     emitirVenda,
     /ainda não transmite NF-e com acréscimo global/

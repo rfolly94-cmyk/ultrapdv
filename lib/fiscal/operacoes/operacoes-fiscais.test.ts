@@ -114,7 +114,7 @@ test("A. criar bonificação não cria venda, financeiro nem estoque", () => {
   assert.doesNotMatch(criar, /estoque_atual|estoque_movimentacoes|rpc_confirmar_saida/);
   assert.match(wizard, /NfeEmissaoForm/);
   assert.match(editor, /criarOperacaoFiscal/);
-  assert.match(editor, /Salvar rascunho/);
+  assert.match(editor, /Salvar como rascunho/);
   assert.match(editor, /Natureza sem financeiro/);
 });
 
@@ -552,7 +552,7 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.doesNotMatch(editor, /nfce-emitir-venda/);
   assert.doesNotMatch(editor, /Esta venda será emitida como NFC-e/);
   assert.doesNotMatch(editor, /Marcado: a nota será NFC-e/);
-  assert.match(editor, /Emitir NF-e/);
+  assert.match(editor, />\s*Emitir\s*</);
   assert.match(editor, /55 — NF-e/);
   assert.match(editor, /NfePagamentoVenda/);
   assert.match(editor, /tipoPessoaEdit/);
@@ -561,8 +561,8 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.match(editor, /preservarStatusEmissao/);
   assert.match(editor, /resolverDestinoAposEmissaoVenda/);
   assert.match(editor, /router\.push\(destino\.href\)/);
-  assert.match(editor, /validadaLocalmente/);
-  assert.match(editor, /Valide a NF-e antes de emitir/);
+  assert.match(editor, /setValidadaLocalmente/);
+  assert.match(editor, /validarNfe\(\)/);
   assert.match(actions, /preservarStatusEmissao/);
   assert.match(actions, /revalidatePath\("\/vendas"\)/);
   const listaVendas = fonte("components/vendas/vendas-lista.tsx");
@@ -580,10 +580,13 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.match(actions, /Estoque da venda já foi baixado pelo PDV/);
   assert.match(emitirVendaOp, /if \(!vendaId\)/);
   assert.match(emitirVendaOp, /executarFinalizacaoVendaPdv/);
-  assert.match(
+  assert.match(emitirVendaOp, /recusarEdicaoDocumentoFiscal/);
+  assert.doesNotMatch(
     editor,
     /Cabeçalho fiscal salvo\. A venda comercial, o estoque e o pagamento não foram alterados/
   );
+  assert.match(editor, /salvarPagamentosOperacaoVenda/);
+  assert.match(editor, /NF-e não autorizada/);
   assert.match(editor, /origemConsumidorFinal/);
   assert.match(editor, /consumidorFinalOrigem/);
   assert.match(editor, /resolverDestinatarioFiscalNfe/);
@@ -697,7 +700,10 @@ test("Cabeçalho fiscal: rascunho edita série/número/datas; transmissão conge
   assert.doesNotMatch(cabecalhoFn, /from\("estoque_atual"\)/);
   assert.doesNotMatch(cabecalhoFn, /from\("pagamentos_venda"\)/);
   assert.doesNotMatch(cabecalhoFn, /from\("contas_receber"\)/);
-  assert.match(editor, /!operacao\.vendaId/);
+  assert.match(editor, /operacao\.vendaId/);
+  assert.match(editor, /const podeEditar = edicaoDocumento\.permitido && emitivel/);
+  assert.doesNotMatch(editor, /podeEditar && !operacao\.vendaId/);
+  assert.match(editor, /NF-e não autorizada/);
   assert.match(emitirVenda, /resolverPayloadCabecalhoNfe/);
   assert.match(emitir, /resolverPayloadCabecalhoNfe/);
   assert.match(emitirVenda, /escolherNumeracaoNfe55/);

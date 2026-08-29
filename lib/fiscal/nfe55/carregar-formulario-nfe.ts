@@ -8,6 +8,11 @@ import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-emp
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { temPermissao } from "@/lib/permissoes/tem-permissao";
 import { pagamentosRascunhoDoSnapshot } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
+import {
+  condicaoPagamentoDoSnapshot,
+  faturaDeTitulosCarteira,
+  faturaNfeDoSnapshot,
+} from "@/lib/fiscal/nfe55/fatura-nfe";
 import { lerCabecalhoFiscalDoSnapshot } from "@/lib/fiscal/nfe55/cabecalho-fiscal";
 import {
   textoUsuarioInfAdFiscoNfe,
@@ -457,6 +462,34 @@ export async function carregarFormularioNfeEmissao({
   ]);
 
   const snapDestinatario = lerSnapshotDestinatarioFiscal(operacao?.snapshot_fiscal);
+  let fatura = faturaNfeDoSnapshot(operacao?.snapshot_fiscal);
+  let numeroVenda: string | null = null;
+  if (operacao?.venda_id) {
+    const { data: venda } = await supabase
+      .from("vendas")
+      .select("id, empresa_id, numero")
+      .eq("id", operacao.venda_id)
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
+    if (venda && registroPertenceAEmpresaAtiva(venda, empresaId)) {
+      numeroVenda = venda.numero != null ? String(venda.numero) : null;
+    }
+    if (!fatura) {
+      const { data: titulos } = await supabase
+        .from("carteira_cliente_titulos")
+        .select(
+          "empresa_id, venda_id, numero_venda, valor_original, vencimento, status"
+        )
+        .eq("empresa_id", empresaId)
+        .eq("venda_id", operacao.venda_id);
+      fatura = faturaDeTitulosCarteira({
+        titulos: titulos ?? [],
+        empresaId,
+        vendaId: String(operacao.venda_id),
+        numeroFatura: numeroVenda,
+      });
+    }
+  }
 
   return {
     operacao: {
@@ -493,7 +526,13 @@ export async function carregarFormularioNfeEmissao({
           ? String(cabecalho.numero)
           : null,
       vendaId: operacao?.venda_id ? String(operacao.venda_id) : null,
+      numeroVenda,
       pagamentosRascunho: pagamentosRascunhoDoSnapshot(operacao?.snapshot_fiscal),
+      fatura,
+      condicaoPagamento: condicaoPagamentoDoSnapshot(
+        operacao?.snapshot_fiscal,
+        fatura
+      ),
       totaisNota: totaisNotaDoSnapshot(operacao?.snapshot_fiscal),
       enderecoEntrega: lerEnderecoEntregaDoSnapshot(operacao?.snapshot_fiscal),
       autorizadosXml: lerAutorizadosXmlDoSnapshot(operacao?.snapshot_fiscal),

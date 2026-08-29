@@ -109,6 +109,13 @@ export function statusAposEdicaoDocumentoFiscal(status: string) {
   return status === "pronta_para_emissao" ? "pronta_para_verificacao" : status;
 }
 
+/**
+ * Fonte única de edição do documento NF-e (itens, pagamento, totais,
+ * destinatário e demais campos comerciais/fiscais da operação).
+ *
+ * `venda_id` materializado NÃO congela a nota: só autorização confirmada
+ * ou estado ambíguo / aguardando reconciliação.
+ */
 export function podeEditarDocumentoFiscal(input: {
   statusOperacao?: string | null;
   emissao?: Parameters<typeof resolverEstadoOperacionalDeEmissaoPersistida>[0] | null;

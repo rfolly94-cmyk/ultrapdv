@@ -39,9 +39,11 @@ function pendente(pedido: CatalogoPedido) {
 export function PedidosOnlineWorkspace({
   pedidos,
   pedidosNovos,
+  rascunhosNfe = 0,
 }: {
   pedidos: CatalogoPedido[];
   pedidosNovos: number;
+  rascunhosNfe?: number;
 }) {
   const router = useRouter();
   const [busca, setBusca] = useState("");
@@ -119,7 +121,10 @@ export function PedidosOnlineWorkspace({
           { label: "Pedidos Online" },
         ]}
       />
-      <VendasModuleTabs pedidosNovos={pedidosNovos} />
+      <VendasModuleTabs
+        pedidosNovos={pedidosNovos}
+        rascunhosNfe={rascunhosNfe}
+      />
       <ListToolbar
         searchPlaceholder="Buscar pedido, cliente ou WhatsApp"
         searchValue={busca}

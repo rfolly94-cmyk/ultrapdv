@@ -43,6 +43,7 @@ import {
   pagamentosNfeParaRascunho,
   type PagamentoDigitadoNfe,
 } from "@/components/fiscal/nfe55/nfe-pagamento-venda";
+import { NfeFaturaCobranca } from "@/components/fiscal/nfe55/nfe-fatura-cobranca";
 import type { PixGeranetCheckoutState } from "@/components/pdv/pix-geranet-checkout";
 import type { PixLocalCheckoutState } from "@/components/pdv/pix-local-checkout";
 import type { PixConfigPdv } from "@/lib/pagamentos/pix/modo-ativo";
@@ -54,6 +55,10 @@ import {
   type TransporteVendaFormHandle,
 } from "@/components/vendas/transporte-venda-form";
 import { hrefEdicaoOperacaoFiscal, resolverAcoesEmissaoFiscal } from "@/lib/fiscal/acoes-emissao";
+import {
+  HREF_RASCUNHOS_NFE,
+  MENSAGEM_SAIR_NFE_COM_ALTERACOES,
+} from "@/lib/fiscal/nfe55/rascunhos-nfe";
 import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
 import { CaixaAvisoReabertoFaixa } from "@/components/caixa/caixa-aviso-reaberto";
 import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
@@ -82,6 +87,14 @@ import {
   mensagemPagamentoNfeIncompleto,
 } from "@/lib/fiscal/nfe55/sincronizar-pagamentos";
 import {
+  faturaNfePadrao,
+  totalAPrazoFaturaCentavos,
+  totalAPrazoPagamentosCentavos,
+  validarFaturaParaEmissaoNfe,
+  type CondicaoPagamentoNfe,
+  type FaturaNfe,
+} from "@/lib/fiscal/nfe55/fatura-nfe";
+import {
   normalizarIndicadorIeDestinatario,
   resolverDestinatarioFiscalDaOrigem,
   resolverDestinatarioFiscalNfe,
@@ -109,14 +122,15 @@ import {
   tipoOperacaoEmitivelNestaTela,
 } from "@/lib/fiscal/nfe55/defaults-natureza";
 import {
+  MENSAGEM_AGUARDANDO_RECONCILIACAO_BLOQUEIA_EDICAO,
   operacaoPodeConfirmarRecebimento,
   operacaoPodeConfirmarSaida,
-  operacaoPodeEditar,
   operacaoPodeEmitir,
   podeEditarDocumentoFiscal,
   podeEditarNumeracaoFiscal,
   rotuloStatusOperacaoFiscal,
 } from "@/lib/fiscal/operacoes/status-operacao";
+import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
 import {
   normalizarTotaisNota,
   totalLiquidoNota,
@@ -348,11 +362,14 @@ export function NfeEmissaoForm({
     serieEmissao: string | null;
     numeroEmissao: string | null;
     vendaId?: string | null;
+    numeroVenda?: string | null;
     pagamentosRascunho?: Array<{
       formaPagamentoId: string;
       valorCentavos: number;
       pixLocalRecebimentoId?: string | null;
     }>;
+    fatura?: FaturaNfe | null;
+    condicaoPagamento?: CondicaoPagamentoNfe;
     totaisNota?: TotaisNotaNfe;
     enderecoEntrega?: EnderecoEntregaSnapshot;
     autorizadosXml?: AutorizadoXmlNfe[];
@@ -485,6 +502,10 @@ export function NfeEmissaoForm({
   );
   const [pixLocal, setPixLocal] = useState<PixLocalCheckoutState | null>(null);
   const [pixGeranet, setPixGeranet] = useState<PixGeranetCheckoutState | null>(null);
+  const [condicaoPagamento, setCondicaoPagamento] = useState<CondicaoPagamentoNfe>(
+    operacao.condicaoPagamento ?? (operacao.fatura ? "prazo" : "vista")
+  );
+  const [fatura, setFatura] = useState<FaturaNfe | null>(operacao.fatura ?? null);
   const [tipoPessoaEdit, setTipoPessoaEdit] = useState("");
   const [consumidorFinalOrigem, setConsumidorFinalOrigem] = useState<
     "cadastro" | "manual" | "operacao" | "origem_pdv"
@@ -551,9 +572,16 @@ export function NfeEmissaoForm({
       codigoMunicipio: endereco.codigoMunicipioIbge,
     }));
   });
-  const [validadaLocalmente, setValidadaLocalmente] = useState(
+  const [, setValidadaLocalmenteState] = useState(
     operacaoPodeEmitir(operacao.status)
   );
+  const [rascunhoSujo, setRascunhoSujo] = useState(false);
+  function setValidadaLocalmente(valor: boolean) {
+    setValidadaLocalmenteState(valor);
+    if (!valor) {
+      setRascunhoSujo(true);
+    }
+  }
   const [caixaLiberadoLocal, setCaixaLiberadoLocal] = useState(false);
   const emitindo = useRef(false);
   const saindo = useRef(false);
@@ -600,13 +628,24 @@ export function NfeEmissaoForm({
     statusOperacao: operacao.status,
     emissao,
   });
+  const estadoEmissao = emissao
+    ? resolverEstadoOperacionalDeEmissaoPersistida(emissao)
+    : null;
+  const documentoAmbiguo =
+    estadoEmissao?.documentoFiscalAmbiguo === true ||
+    estadoEmissao?.caso === "aguardando_reconciliacao" ||
+    operacao.status === "aguardando_reconciliacao";
+  const nfeNaoAutorizadaConfirmada =
+    Boolean(emissao) &&
+    edicaoDocumento.permitido &&
+    (estadoEmissao?.caso === "rejeitada" ||
+      estadoEmissao?.estado === "erro_envio" ||
+      estadoEmissao?.estado === "rejeitada_sefaz" ||
+      operacao.status === "rejeitada");
   const podeEditarCabecalho = edicaoDocumento.permitido;
   const podeEditarNumeracao = edicaoDocumento.permitido && edicaoNumeracao.permitido;
   const podeTrocarNatureza = podeEditarCabecalho;
-  const podeEditar =
-    (!operacao.id || (operacaoPodeEditar(operacao.status) && !nfeAutorizada)) &&
-    emitivel &&
-    !operacao.vendaId;
+  const podeEditar = edicaoDocumento.permitido && emitivel;
   const podeEditarIdentidadeDestinatario =
     Boolean(destinatarioId) &&
     podeEditarCabecalho;
@@ -633,13 +672,12 @@ export function NfeEmissaoForm({
     ? emissaoBloqueiaRetransmissao(evidencias)
     : false;
   const podeEmitir =
-    Boolean(operacao.id) &&
     emitivel &&
     !bloqueiaRetransmissao &&
-    !cabecalhoSujo &&
     !vendaNovaSemCaixa &&
-    (acoesFiscais?.podeRetransmitir === true ||
-      (validadaLocalmente && operacaoPodeEmitir(operacao.status)));
+    !nfeAutorizada &&
+    edicaoDocumento.permitido &&
+    (acoesFiscais?.podeRetransmitir === true || Boolean(naturezaId));
   const destinatario = useMemo(() => {
     const lista = [...clientes, ...clientesBusca];
     return lista.find((item) => item.id === destinatarioId) ?? null;
@@ -717,10 +755,58 @@ export function NfeEmissaoForm({
       }),
     [pagamentos, permiteTrocoPorFormaId, totalVendaCentavos]
   );
+  const totalFiadoCentavos = useMemo(
+    () =>
+      totalAPrazoPagamentosCentavos({
+        pagamentos: pagamentos.map((pagamento) => ({
+          formaPagamentoId: pagamento.formaPagamentoId,
+          valorCentavos: centavosDeTextoPagamento(pagamento.valorTexto),
+        })),
+        formas: formasPagamento,
+      }),
+    [formasPagamento, pagamentos]
+  );
+  const totalAPrazoCentavos = totalAPrazoFaturaCentavos({
+    condicao: condicaoPagamento,
+    totalNfeCentavos: totalVendaCentavos,
+    totalFiadoCentavos,
+  });
+  const codigoPagamentoFatura =
+    formasPagamento.find((forma) => forma.permite_fiado)?.codigo_fiscal ?? null;
+
+  function aplicarCondicaoPagamento(proxima: CondicaoPagamentoNfe) {
+    setCondicaoPagamento(proxima);
+    setValidadaLocalmente(false);
+    if (proxima === "vista") {
+      setFatura(null);
+      return;
+    }
+    const valorCentavos = totalAPrazoFaturaCentavos({
+      condicao: "prazo",
+      totalNfeCentavos: totalVendaCentavos,
+      totalFiadoCentavos,
+    });
+    setFatura(
+      fatura
+        ? {
+            ...fatura,
+            valorCentavos: fatura.parcelasPersonalizadas ? fatura.valorCentavos : valorCentavos,
+            valorLiquidoCentavos: fatura.parcelasPersonalizadas
+              ? fatura.valorLiquidoCentavos
+              : Math.max(0, valorCentavos - fatura.descontoCentavos),
+          }
+        : faturaNfePadrao({
+            numero: operacao.numeroVenda || "1",
+            valorCentavos: valorCentavos || totalVendaCentavos,
+            codigoPagamento: codigoPagamentoFatura,
+          })
+    );
+  }
+
   const totalPagamentoAnteriorRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!podeEditar || operacao.vendaId) {
+    if (!podeEditar) {
       totalPagamentoAnteriorRef.current = totalVendaCentavos;
       return;
     }
@@ -761,14 +847,22 @@ export function NfeEmissaoForm({
       setPixGeranet(null);
     }
     setPagamentos(proximo);
+    setValidadaLocalmente(false);
   }, [
     formasPagamento,
-    operacao.vendaId,
     pagamentos,
     podeEditar,
     permiteTrocoPorFormaId,
     totalVendaCentavos,
   ]);
+
+  useEffect(() => {
+    if (!podeEditar || totalFiadoCentavos <= 0 || condicaoPagamento === "prazo") {
+      return;
+    }
+    aplicarCondicaoPagamento("prazo");
+  }, [condicaoPagamento, podeEditar, totalFiadoCentavos]);
+
   const agora = useMemo(() => {
     const data = new Date();
     const iso = new Date(data.getTime() - data.getTimezoneOffset() * 60000)
@@ -781,7 +875,8 @@ export function NfeEmissaoForm({
     acao: () => Promise<
       | { ok: true; mensagem?: string; operacaoId?: string }
       | { ok: false; erro: string; pendencias?: string[] }
-    >
+    >,
+    destino: "edicao" | "rascunhos" = "edicao"
   ) {
     setErro(null);
     setSucesso(null);
@@ -804,10 +899,15 @@ export function NfeEmissaoForm({
         recebendo.current = false;
         return;
       }
+      setRascunhoSujo(false);
       setSucesso(resultado.mensagem ?? "Rascunho salvo. O estoque não foi movimentado.");
       emitindo.current = false;
       saindo.current = false;
       recebendo.current = false;
+      if (destino === "rascunhos") {
+        router.push(HREF_RASCUNHOS_NFE);
+        return;
+      }
       if (resultado.operacaoId && resultado.operacaoId !== operacao.id) {
         router.replace(hrefEdicaoOperacaoFiscal(resultado.operacaoId));
         return;
@@ -939,13 +1039,11 @@ export function NfeEmissaoForm({
       return { ok: false as const, erro: "Não foi possível salvar o rascunho." };
     }
     if (destTipo === "cliente" && destinatarioId) {
-      if (!operacao.vendaId) {
-        const dest = await salvarDestinatarioBonificacao({
-          operacaoId: id,
-          clienteId: destinatarioId,
-        });
-        if (!dest.ok) return dest;
-      }
+      const dest = await salvarDestinatarioBonificacao({
+        operacaoId: id,
+        clienteId: destinatarioId,
+      });
+      if (!dest.ok) return dest;
       if (tipoPessoaEdit === "F" || tipoPessoaEdit === "J") {
         const identidade = await atualizarIdentidadeDestinatarioOperacao({
           operacaoId: id,
@@ -989,13 +1087,6 @@ export function NfeEmissaoForm({
         return autorizadosSalvos;
       }
     }
-    if (operacao.vendaId) {
-      return {
-        ok: true as const,
-        mensagem: "Cabeçalho fiscal salvo. A venda comercial, o estoque e o pagamento não foram alterados.",
-        operacaoId: id,
-      };
-    }
     if (destTipo === "estabelecimento" && vinculoId) {
       const dest = await salvarDestinoTransferencia({
         operacaoId: id,
@@ -1014,6 +1105,8 @@ export function NfeEmissaoForm({
       const pago = await salvarPagamentosOperacaoVenda({
         operacaoId: id,
         pagamentos: pagamentosRascunho,
+        condicaoPagamento,
+        fatura: condicaoPagamento === "prazo" ? fatura : null,
         preservarStatusEmissao: opcoes?.preservarStatusEmissao,
       });
       if (!pago.ok) return pago;
@@ -1025,6 +1118,7 @@ export function NfeEmissaoForm({
       preservarStatusEmissao: opcoes?.preservarStatusEmissao,
     });
     if (!totais.ok) return totais;
+    setRascunhoSujo(false);
     return {
       ok: true as const,
       mensagem: "Rascunho salvo. O estoque não foi movimentado.",
@@ -1049,51 +1143,84 @@ export function NfeEmissaoForm({
             : pagamentoAvaliacao.mensagem ?? "Pagamentos não conferem com o total da venda.",
       };
     }
+    if (financeiro) {
+      const erroFatura = validarFaturaParaEmissaoNfe({
+        condicao: condicaoPagamento,
+        fatura,
+        totalAPrazoCentavos,
+        totalVistaCentavos: Math.max(0, totalVendaCentavos - totalAPrazoCentavos),
+      });
+      if (erroFatura) {
+        return { ok: false as const, erro: erroFatura };
+      }
+    }
     if (destTipo === "cliente" && !destinatarioId) {
       return { ok: false as const, erro: "Selecione o destinatário." };
     }
     if (destTipo === "estabelecimento" && !vinculoId) {
       return { ok: false as const, erro: "Selecione o estabelecimento de destino." };
     }
-    return verificarOperacaoFiscalAction({ operacaoId: persistido.operacaoId });
+    const verificada = await verificarOperacaoFiscalAction({
+      operacaoId: persistido.operacaoId,
+    });
+    if (!verificada.ok) {
+      return verificada;
+    }
+    return { ...verificada, operacaoId: persistido.operacaoId };
   }
 
-  function acionarValidar() {
-    executar(async () => {
-      const resultado = await validarNfe();
-      setValidadaLocalmente(Boolean(resultado.ok));
-      return resultado;
+  function focarPendencias() {
+    requestAnimationFrame(() => {
+      document.getElementById("nfe-pendencias")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     });
+  }
+
+  function cancelarEdicao() {
+    if (
+      (cabecalhoSujo || rascunhoSujo) &&
+      !window.confirm(MENSAGEM_SAIR_NFE_COM_ALTERACOES)
+    ) {
+      return;
+    }
+    router.push(HREF_RASCUNHOS_NFE);
   }
 
   function emitir() {
     if (emitindo.current || pending) return;
-    if (!operacao.id) {
-      setErro("Salve o rascunho ou valide a NF-e antes de emitir.");
-      return;
-    }
     if (bloqueiaRetransmissao) {
       setErro(
         "Esta emissão não pode ser reenviada. Abra a venda e reconcilie o documento fiscal."
       );
+      focarPendencias();
       return;
     }
     if (vendaNovaSemCaixa) {
       setErro(MENSAGEM_CAIXA_FECHADO_NFE_VENDA);
+      focarPendencias();
       return;
     }
     if (pagamentoImpedeEmissao) {
       setErro(
         mensagemPagamentoDesalinhado ?? "Pagamentos não conferem com o total da venda."
       );
+      focarPendencias();
+      return;
+    }
+    if (nfeAutorizada || !edicaoDocumento.permitido) {
+      setErro("Esta NF-e não pode mais ser alterada nem reemitida por esta tela.");
+      focarPendencias();
       return;
     }
     if (!podeEmitir) {
       setErro(
         exigeCaixaVendaNova && !caixaAbertoEfetivo
           ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA
-          : "Valide a NF-e antes de emitir. A validação não transmite o documento."
+          : "Informe a natureza da operação antes de emitir."
       );
+      focarPendencias();
       return;
     }
     emitindo.current = true;
@@ -1101,27 +1228,23 @@ export function NfeEmissaoForm({
     setSucesso(null);
     setPendencias([]);
     startTransition(async () => {
-      const persistido = await persistirRascunho({ preservarStatusEmissao: true });
-      if (!persistido.ok || !persistido.operacaoId) {
-        setErro(persistido.ok ? "Rascunho sem identificador." : persistido.erro);
+      const validada = await validarNfe();
+      if (!validada.ok || !validada.operacaoId) {
+        setErro(
+          validada.ok ? "Rascunho sem identificador." : validada.erro
+        );
+        setPendencias(validada.ok ? [] : validada.pendencias ?? []);
+        setValidadaLocalmenteState(false);
         emitindo.current = false;
+        focarPendencias();
+        router.refresh();
         return;
       }
+      setValidadaLocalmenteState(true);
+      setRascunhoSujo(false);
       if (tipoAtual === "venda") {
-        const validada = await verificarOperacaoFiscalAction({
-          operacaoId: persistido.operacaoId,
-        });
-        if (!validada.ok) {
-          setErro(validada.erro);
-          setPendencias(validada.pendencias ?? []);
-          setValidadaLocalmente(false);
-          emitindo.current = false;
-          router.refresh();
-          return;
-        }
-        setValidadaLocalmente(true);
         const preparada = await prepararVendaParaEmissaoNfe({
-          operacaoId: persistido.operacaoId,
+          operacaoId: validada.operacaoId,
         });
         if (!preparada.ok || !preparada.vendaId) {
           setErro(preparada.ok ? "Venda comercial sem identificador." : preparada.erro);
@@ -1175,6 +1298,7 @@ export function NfeEmissaoForm({
         );
         setPendencias(Array.isArray(dados.pendencias) ? dados.pendencias : []);
         emitindo.current = false;
+        focarPendencias();
         router.refresh();
         return;
       }
@@ -1182,15 +1306,16 @@ export function NfeEmissaoForm({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": persistido.operacaoId,
+          "Idempotency-Key": validada.operacaoId,
         },
-        body: JSON.stringify({ operacao_id: persistido.operacaoId }),
+        body: JSON.stringify({ operacao_id: validada.operacaoId }),
       });
       const dados = await resposta.json().catch(() => ({}));
       if (!resposta.ok || dados.ok === false) {
         setErro(String(dados.erro ?? "Falha ao emitir a NF-e."));
         setPendencias(Array.isArray(dados.pendencias) ? dados.pendencias : []);
         emitindo.current = false;
+        focarPendencias();
         router.refresh();
         return;
       }
@@ -1345,17 +1470,13 @@ export function NfeEmissaoForm({
   }, [buscaCliente]);
 
   const avisoNatureza = natureza ? avisoNaturezaNestaTela(tipoAtual) : null;
-  const temDestinatario =
-    destTipo === "estabelecimento" ? Boolean(vinculoId) : Boolean(destinatarioId);
   const podeSalvarRascunho = emitivel && Boolean(naturezaId) && !vendaNovaSemCaixa;
-  const podeValidar = podeSalvarRascunho && temDestinatario && itens.length > 0;
   const financeiro = naturezaExigeFinanceiro({
     codigo: tipoAtual,
     vincula_venda: tipoCatalogo?.vinculaVenda,
   });
   const pagamentoImpedeEmissao =
     financeiro &&
-    !operacao.vendaId &&
     Boolean(podeEditar) &&
     !pagamentosNfeFechamTotal(pagamentoAvaliacao);
   const mensagemPagamentoDesalinhado = pagamentoImpedeEmissao
@@ -1370,8 +1491,93 @@ export function NfeEmissaoForm({
       data-nfe-exige-caixa={exigeCaixaVendaNova ? "true" : "false"}
       data-nfe-caixa-bloqueado={vendaNovaSemCaixa ? "true" : "false"}
     >
-      {erro ? (
-        <div className="nfe-alerta">
+      <div className="sticky top-14 z-[15] -mx-4 mb-2 border-b border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur-sm lg:top-12">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          {exigeCaixaVendaNova && caixaAbertoEfetivo ? (
+            <span
+              className="self-start text-xs font-medium text-emerald-700 sm:mr-auto sm:self-center"
+              data-nfe-caixa-aberto="true"
+            >
+              Caixa aberto
+            </span>
+          ) : (
+            <span className="hidden sm:mr-auto sm:block" />
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            <button
+              type="button"
+              className="updv-btn updv-btn-ghost"
+              disabled={pending}
+              onClick={cancelarEdicao}
+            >
+              Cancelar
+            </button>
+            {nfeAutorizada || !edicaoDocumento.permitido ? null : (
+              <>
+                <button
+                  type="button"
+                  className="updv-btn updv-btn-ghost"
+                  disabled={pending || !podeSalvarRascunho}
+                  onClick={() => executar(persistirRascunho, "rascunhos")}
+                >
+                  Salvar como rascunho
+                </button>
+                <button
+                  type="button"
+                  className={
+                    vendaNovaSemCaixa || !podeEmitir
+                      ? "updv-btn updv-btn-primary opacity-50 cursor-not-allowed"
+                      : "updv-btn updv-btn-primary"
+                  }
+                  disabled={pending || !podeEmitir || vendaNovaSemCaixa}
+                  title={
+                    vendaNovaSemCaixa
+                      ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA
+                      : pagamentoImpedeEmissao
+                        ? mensagemPagamentoDesalinhado ?? undefined
+                        : undefined
+                  }
+                  onClick={emitir}
+                >
+                  Emitir
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      {documentoAmbiguo ? (
+        <div id="nfe-pendencias" className="nfe-alerta">
+          <p className="font-semibold">NF-e aguardando reconciliação</p>
+          <p>
+            {edicaoDocumento.motivo ?? MENSAGEM_AGUARDANDO_RECONCILIACAO_BLOQUEIA_EDICAO}
+          </p>
+        </div>
+      ) : nfeNaoAutorizadaConfirmada ? (
+        <div id="nfe-pendencias" className="nfe-alerta">
+          <p className="font-semibold">NF-e não autorizada</p>
+          <p>
+            {emissao?.motivo ||
+              estadoEmissao?.descricao ||
+              "A SEFAZ ou a Geranet recusou esta tentativa. Corrija os dados e emita novamente."}
+          </p>
+          {edicaoDocumento.permitido ? (
+            <p className="mt-1">
+              Os campos voltaram a ficar editáveis. Corrija os dados e clique em
+              Emitir para tentar novamente.
+            </p>
+          ) : null}
+          {erro && erro !== emissao?.motivo ? <p className="mt-1">{erro}</p> : null}
+          {pendencias.length > 0 ? (
+            <ul className="mt-1 list-disc pl-4">
+              {pendencias.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : erro ? (
+        <div id="nfe-pendencias" className="nfe-alerta">
           {erro}
           {pendencias.length > 0 ? (
             <ul className="mt-1 list-disc pl-4">
@@ -1419,57 +1625,6 @@ export function NfeEmissaoForm({
       {caixaAbertoEfetivo && caixaReabertoAviso ? (
         <CaixaAvisoReabertoFaixa aviso={caixaReabertoAviso} />
       ) : null}
-
-      <div className="sticky top-[var(--header)] z-[15] -mx-4 mb-2 flex flex-wrap justify-end gap-2 border-b border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur-sm lg:top-0">
-        {exigeCaixaVendaNova && caixaAbertoEfetivo ? (
-          <span
-            className="mr-auto self-center text-xs font-medium text-emerald-700"
-            data-nfe-caixa-aberto="true"
-          >
-            Caixa aberto
-          </span>
-        ) : (
-          <span className="mr-auto" />
-        )}
-        <a href="/fiscal" className="updv-btn updv-btn-ghost">
-          Cancelar
-        </a>
-        <button
-          type="button"
-          className="updv-btn updv-btn-ghost"
-          disabled={pending || !podeSalvarRascunho}
-          onClick={() => executar(persistirRascunho)}
-        >
-          Salvar rascunho
-        </button>
-        <button
-          type="button"
-          className="updv-btn updv-btn-ghost"
-          disabled={pending || !podeValidar || pagamentoImpedeEmissao}
-          onClick={acionarValidar}
-        >
-          Validar NF-e
-        </button>
-        <button
-          type="button"
-          className={
-            vendaNovaSemCaixa || !podeEmitir || pagamentoImpedeEmissao
-              ? "updv-btn updv-btn-primary opacity-50 cursor-not-allowed"
-              : "updv-btn updv-btn-primary"
-          }
-          disabled={pending || !podeEmitir || vendaNovaSemCaixa || pagamentoImpedeEmissao}
-          title={
-            vendaNovaSemCaixa
-              ? MENSAGEM_CAIXA_FECHADO_NFE_VENDA
-              : pagamentoImpedeEmissao
-                ? mensagemPagamentoDesalinhado ?? undefined
-                : undefined
-          }
-          onClick={emitir}
-        >
-          Emitir NF-e
-        </button>
-      </div>
 
       <NfeSecao titulo="Dados da nota">
         <div className="nfe-grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6">
@@ -2936,21 +3091,39 @@ export function NfeEmissaoForm({
 
       <NfeRecolhivel titulo="Pagamento / Cobrança">
         {financeiro ? (
+          <>
+          <div className="space-y-4">
           <NfePagamentoVenda
             formasPagamento={formasPagamento}
             pixConfig={pixConfig}
             pagamentos={pagamentos}
-            onPagamentos={setPagamentos}
+            onPagamentos={(proximo) => {
+              setPagamentos(proximo);
+              setValidadaLocalmente(false);
+            }}
             pixLocal={pixLocal}
             onPixLocal={setPixLocal}
             pixGeranet={pixGeranet}
             onPixGeranet={setPixGeranet}
             totalCatalogoCentavos={paraCentavos(totalNfe)}
             clienteId={destinatarioId || null}
-            podeEditar={podeEditar && !operacao.vendaId}
+            podeEditar={Boolean(podeEditar)}
             ocupado={pending}
             onErro={setErro}
           />
+          <NfeFaturaCobranca
+            condicao={condicaoPagamento}
+            onCondicao={aplicarCondicaoPagamento}
+            fatura={fatura}
+            onFatura={(proxima) => {
+              setFatura(proxima);
+              setValidadaLocalmente(false);
+            }}
+            totalAPrazoCentavos={totalAPrazoCentavos}
+            podeEditar={Boolean(podeEditar)}
+          />
+          </div>
+          </>
         ) : (
           <p className="text-[12.5px] text-zinc-500">
             Natureza sem financeiro. A emissão usa forma 90 (sem pagamento). Não

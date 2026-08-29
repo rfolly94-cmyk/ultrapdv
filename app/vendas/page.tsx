@@ -8,6 +8,11 @@ import {
   filtrarRegistrosDaEmpresaAtiva,
 } from "@/lib/empresa/assert-registro-empresa-ativa";
 import { carregarFusoHorarioFiscal } from "@/lib/fiscal/fuso-horario-empresa";
+import {
+  ABA_RASCUNHOS_NFE,
+  HREF_RASCUNHOS_NFE,
+  STATUS_RASCUNHO_NFE55,
+} from "@/lib/fiscal/nfe55/rascunhos-nfe";
 import { createClient } from "@/lib/supabase/server";
 import { pagamentoFinanceiramenteValido } from "@/lib/vendas/pagamentos-financeiros";
 import {
@@ -32,6 +37,7 @@ type PageProps = {
     status?: string;
     modelo?: string;
     q?: string;
+    aba?: string;
   }>;
 };
 
@@ -53,6 +59,9 @@ export default async function VendasPage({
   searchParams,
 }: PageProps) {
   const params = await searchParams;
+  if (params.aba === ABA_RASCUNHOS_NFE) {
+    redirect(HREF_RASCUNHOS_NFE);
+  }
   const filtros = parseFiltrosListaVendas(params);
   const supabase = await createClient();
 
@@ -135,6 +144,16 @@ export default async function VendasPage({
   const pedidosNovos = pedidosNovosResult.error
     ? 0
     : (pedidosNovosResult.count ?? 0);
+
+  const rascunhosNfeResult = await supabase
+    .from("fiscal_operacoes")
+    .select("id", { count: "exact", head: true })
+    .eq("empresa_id", vinculo.empresa_id)
+    .in("status", [...STATUS_RASCUNHO_NFE55]);
+
+  const rascunhosNfe = rascunhosNfeResult.error
+    ? 0
+    : (rascunhosNfeResult.count ?? 0);
 
   const {
     data: vendas,
@@ -656,6 +675,7 @@ export default async function VendasPage({
       ].join("|")}
       vendas={itens}
       pedidosNovos={pedidosNovos ?? 0}
+      rascunhosNfe={rascunhosNfe}
       filtros={filtros}
       dataHojeIso={janela.hojeIso}
     />
