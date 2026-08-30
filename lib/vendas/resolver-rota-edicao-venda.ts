@@ -62,6 +62,19 @@ export function escolherStatusFiscalVenda(
   return escolhida;
 }
 
+export function escolherEmissaoFiscalVenda<T extends { status?: string | null }>(
+  emissoes: T[]
+): T | null {
+  if (emissoes.length === 0) {
+    return null;
+  }
+  const status = escolherStatusFiscalVenda(emissoes);
+  if (!status) {
+    return emissoes[0] ?? null;
+  }
+  return emissoes.find((emissao) => String(emissao.status ?? "") === status) ?? emissoes[0] ?? null;
+}
+
 export function resolverRotaEdicaoVenda(input: {
   vendaId: string;
   origem: OrigemVendaComercial;
@@ -78,6 +91,14 @@ export function resolverRotaEdicaoVenda(input: {
       href: `/pdv/editar/${vendaId}`,
       label: "Editar no PDV",
       modo: "pdv",
+    };
+  }
+
+  if (estado.estado === "cancelada") {
+    return {
+      href: operacaoId ? hrefEdicaoOperacaoFiscal(operacaoId) : `/vendas/${vendaId}`,
+      label: "Abrir documento",
+      modo: operacaoId ? "nfe_formulario" : "venda_detalhe",
     };
   }
 

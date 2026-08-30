@@ -10,7 +10,7 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
-import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import { emissaoBloqueiaTransporteVenda } from "@/lib/fiscal/estado-operacional-fiscal";
 import {
   MENSAGEM_FRETE_9_COM_DADOS,
   transporteConflitaComFrete9,
@@ -398,8 +398,7 @@ export async function PATCH(
     }
 
     const emissaoBloqueante = (emissoesBloqueantes ?? []).find(
-      (emissao) =>
-        !resolverEstadoOperacionalDeEmissaoPersistida(emissao).podeEditarFiscal
+      (emissao) => emissaoBloqueiaTransporteVenda(emissao)
     );
 
     if (emissaoBloqueante) {

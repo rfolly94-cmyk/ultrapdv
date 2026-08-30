@@ -14,7 +14,9 @@ import {
   consolidarPagamentosCheckoutPdv,
   filtrarFormasPagamentoCheckoutPdv,
 } from "@/lib/pdv/formas-pagamento-checkout";
-import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import {
+  vendaPossuiDocumentoFiscalBloqueante,
+} from "@/lib/fiscal/estado-operacional-fiscal";
 import { filtrarRegistrosDaEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 
 function centavos(valor: unknown) {
@@ -263,13 +265,7 @@ export default async function EditarVendaNoPdvPage({
     );
   }
 
-  if (
-    (fiscalResult.data ?? []).some(
-      (emissao) =>
-        resolverEstadoOperacionalDeEmissaoPersistida(emissao)
-          .documentoFiscalSensivel
-    )
-  ) {
+  if (vendaPossuiDocumentoFiscalBloqueante(fiscalResult.data ?? [])) {
     return (
       <Bloqueio
         vendaId={id}

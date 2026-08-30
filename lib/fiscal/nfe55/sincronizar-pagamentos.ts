@@ -111,21 +111,31 @@ export function avaliarPagamentosDigitadosNfe(input: {
   totalVendaCentavos: number;
   pagamentos: Array<{ formaPagamentoId: string; valorTexto: string }>;
   permiteTrocoPorFormaId: Readonly<Record<string, boolean>>;
+  coberturaDuplicataCentavos?: number;
+  formaIdsDuplicata?: ReadonlyArray<string>;
 }) {
+  const idsDuplicata = new Set(input.formaIdsDuplicata ?? []);
+  const cobertura = Math.max(0, Math.round(input.coberturaDuplicataCentavos ?? 0));
   return avaliarPagamentosPdv({
     totalVendaCentavos: input.totalVendaCentavos,
-    pagamentos: input.pagamentos.flatMap((pagamento) => {
-      const valorCentavos = centavosDeTextoPagamento(pagamento.valorTexto);
-      if (valorCentavos <= 0) {
-        return [];
-      }
-      return [
-        {
-          valorCentavos,
-          permiteTroco:
-            input.permiteTrocoPorFormaId[pagamento.formaPagamentoId] === true,
-        },
-      ];
-    }),
+    pagamentos: [
+      ...input.pagamentos.flatMap((pagamento) => {
+        if (idsDuplicata.has(pagamento.formaPagamentoId)) {
+          return [];
+        }
+        const valorCentavos = centavosDeTextoPagamento(pagamento.valorTexto);
+        if (valorCentavos <= 0) {
+          return [];
+        }
+        return [
+          {
+            valorCentavos,
+            permiteTroco:
+              input.permiteTrocoPorFormaId[pagamento.formaPagamentoId] === true,
+          },
+        ];
+      }),
+      ...(cobertura > 0 ? [{ valorCentavos: cobertura, permiteTroco: false }] : []),
+    ],
   });
 }

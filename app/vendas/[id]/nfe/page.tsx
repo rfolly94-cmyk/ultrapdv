@@ -27,7 +27,10 @@ import {
   classificacaoResumoDaEmissao,
   resolverApresentacaoEmissaoFiscal,
 } from "@/lib/fiscal/apresentacao-emissao";
-import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import {
+  resolverEstadoOperacionalDeEmissaoPersistida,
+  vendaPossuiTransporteFiscalBloqueante,
+} from "@/lib/fiscal/estado-operacional-fiscal";
 import {
   MENSAGEM_NATUREZA_VENDA_AUSENTE,
   type NaturezaOperacaoFiscal,
@@ -667,10 +670,8 @@ export default async function VendaNfePage({
     })
   );
 
-  const possuiFiscalTransporteBloqueante = emissoes.some(
-    (emissao) =>
-      !resolverEstadoOperacionalDeEmissaoPersistida(emissao).podeEditarFiscal
-  );
+  const possuiFiscalTransporteBloqueante =
+    vendaPossuiTransporteFiscalBloqueante(emissoes);
 
   let cliente:
     | {

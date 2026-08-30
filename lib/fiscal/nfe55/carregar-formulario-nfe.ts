@@ -10,9 +10,9 @@ import { temPermissao } from "@/lib/permissoes/tem-permissao";
 import { pagamentosRascunhoDoSnapshot } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 import {
   condicaoPagamentoDoSnapshot,
-  faturaDeTitulosCarteira,
   faturaNfeDoSnapshot,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
+import { pagamentoFinanceiramenteValido } from "@/lib/vendas/pagamentos-financeiros";
 import { lerCabecalhoFiscalDoSnapshot } from "@/lib/fiscal/nfe55/cabecalho-fiscal";
 import {
   textoUsuarioInfAdFiscoNfe,
@@ -462,8 +462,9 @@ export async function carregarFormularioNfeEmissao({
   ]);
 
   const snapDestinatario = lerSnapshotDestinatarioFiscal(operacao?.snapshot_fiscal);
-  let fatura = faturaNfeDoSnapshot(operacao?.snapshot_fiscal);
+  const fatura = faturaNfeDoSnapshot(operacao?.snapshot_fiscal);
   let numeroVenda: string | null = null;
+  let pagamentosRascunho = pagamentosRascunhoDoSnapshot(operacao?.snapshot_fiscal);
   if (operacao?.venda_id) {
     const { data: venda } = await supabase
       .from("vendas")
@@ -474,19 +475,43 @@ export async function carregarFormularioNfeEmissao({
     if (venda && registroPertenceAEmpresaAtiva(venda, empresaId)) {
       numeroVenda = venda.numero != null ? String(venda.numero) : null;
     }
-    if (!fatura) {
-      const { data: titulos } = await supabase
-        .from("carteira_cliente_titulos")
-        .select(
-          "empresa_id, venda_id, numero_venda, valor_original, vencimento, status"
-        )
-        .eq("empresa_id", empresaId)
-        .eq("venda_id", operacao.venda_id);
-      fatura = faturaDeTitulosCarteira({
-        titulos: titulos ?? [],
-        empresaId,
-        vendaId: String(operacao.venda_id),
-        numeroFatura: numeroVenda,
+    if (pagamentosRascunho.length === 0) {
+      const [{ data: pagamentosVenda }, { data: formasVenda }] = await Promise.all([
+        supabase
+          .from("vendas_pagamentos")
+          .select(
+            "empresa_id, forma_pagamento_codigo, codigo_fiscal, valor, status"
+          )
+          .eq("empresa_id", empresaId)
+          .eq("venda_id", operacao.venda_id),
+        supabase
+          .from("formas_pagamento")
+          .select("id, empresa_id, codigo, codigo_fiscal, permite_fiado")
+          .eq("empresa_id", empresaId)
+          .eq("ativo", true),
+      ]);
+      const formas = (formasVenda ?? []).filter((forma) =>
+        registroPertenceAEmpresaAtiva(forma, empresaId)
+      );
+      pagamentosRascunho = (pagamentosVenda ?? []).flatMap((pagamento) => {
+        if (!pagamentoFinanceiramenteValido(pagamento.status)) {
+          return [];
+        }
+        if (!registroPertenceAEmpresaAtiva(pagamento, empresaId)) {
+          return [];
+        }
+        const forma = formas.find(
+          (item) =>
+            (item.codigo &&
+              String(item.codigo) === String(pagamento.forma_pagamento_codigo ?? "")) ||
+            (item.codigo_fiscal &&
+              String(item.codigo_fiscal) === String(pagamento.codigo_fiscal ?? ""))
+        );
+        const valorCentavos = Math.round(Number(pagamento.valor ?? 0) * 100);
+        if (!forma || !Number.isInteger(valorCentavos) || valorCentavos <= 0) {
+          return [];
+        }
+        return [{ formaPagamentoId: String(forma.id), valorCentavos }];
       });
     }
   }
@@ -527,12 +552,19 @@ export async function carregarFormularioNfeEmissao({
           : null,
       vendaId: operacao?.venda_id ? String(operacao.venda_id) : null,
       numeroVenda,
-      pagamentosRascunho: pagamentosRascunhoDoSnapshot(operacao?.snapshot_fiscal),
+      pagamentosRascunho,
       fatura,
-      condicaoPagamento: condicaoPagamentoDoSnapshot(
-        operacao?.snapshot_fiscal,
-        fatura
-      ),
+      condicaoPagamento: ((): "vista" | "prazo" =>
+        condicaoPagamentoDoSnapshot(operacao?.snapshot_fiscal, fatura) === "prazo" ||
+        (formasPagamento ?? []).some(
+          (forma) =>
+            Boolean(forma.permite_fiado) &&
+            pagamentosRascunho.some(
+              (pagamento) => pagamento.formaPagamentoId === String(forma.id)
+            )
+        )
+          ? "prazo"
+          : "vista")(),
       totaisNota: totaisNotaDoSnapshot(operacao?.snapshot_fiscal),
       enderecoEntrega: lerEnderecoEntregaDoSnapshot(operacao?.snapshot_fiscal),
       autorizadosXml: lerAutorizadosXmlDoSnapshot(operacao?.snapshot_fiscal),

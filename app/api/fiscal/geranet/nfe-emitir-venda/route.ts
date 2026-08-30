@@ -92,15 +92,19 @@ import {
 } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
 import { mesclarSnapshotOperacao, pagamentosRascunhoDoSnapshot } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 import {
-  condicaoPagamentoDoSnapshot,
-  faturaDeTitulosCarteira,
   faturaNfeDoSnapshot,
   faturaParaPayloadGeranet,
-  indicadorPagamentoDetalheNfe,
-  totalAPrazoDePagamentosEmitidosCentavos,
-  totalAPrazoFaturaCentavos,
   validarFaturaParaEmissaoNfe,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
+import {
+  TPAG_DUPLICATA_MERCANTIL,
+  conferenciaComercialNfeComDuplicata,
+  faturaPermitidaNoPayloadNfe,
+  formaEhPagamentoPosterior,
+  mapearDetalhamentoFiscalNfe55,
+  pagamentoEhDuplicataMercantil,
+  validarPagamentoFiscalNfe55,
+} from "@/lib/fiscal/nfe55/pagamento-fiscal-nfe";
 import {
   argsNumeroManualReservaNfe,
   escolherNumeracaoNfe55,
@@ -155,7 +159,6 @@ import {
   validarPagamentosEletronicosParaEmissao,
 } from "@/lib/fiscal/validar-pagamentos-eletronicos";
 import {
-  conferenciaFinanceiraVenda,
   filtrarPagamentosFinanceiros,
   somarValoresPagamento,
 } from "@/lib/vendas/pagamentos-financeiros";
@@ -1134,10 +1137,13 @@ export async function POST(
       filtrarPagamentosFinanceiros(
         pagamentos
       );
+    const faturaSnapshot = faturaNfeDoSnapshot(snapshotOperacao);
+    const coberturaFaturaCentavos = faturaSnapshot?.valorLiquidoCentavos ?? 0;
 
     if (
       pagamentosConfirmados.length ===
-        0
+        0 &&
+      coberturaFaturaCentavos <= 0
     ) {
       return erro(
         "A venda não possui pagamento confirmado."
@@ -1163,6 +1169,19 @@ export async function POST(
       const pagamento
       of pagamentosConfirmados
     ) {
+      const forma = formasOverlay.find(
+        (item) =>
+          String(item.id) === String(pagamento.id ?? "") ||
+          (item.codigo &&
+            String(item.codigo) ===
+              String(pagamento.forma_pagamento_codigo ?? "")) ||
+          (item.codigo_fiscal &&
+            String(item.codigo_fiscal) ===
+              String(pagamento.codigo_fiscal ?? ""))
+      );
+      if (formaEhPagamentoPosterior(forma)) {
+        continue;
+      }
       if (
         !/^\d{2}$/.test(
           texto(
@@ -1234,13 +1253,20 @@ export async function POST(
       trocoVenda: numero(venda.troco),
     });
 
+    const jaTemDuplicataNoPagamento = pagamentosConfirmados.some((pagamento) =>
+      pagamentoEhDuplicataMercantil(pagamento, formasOverlay)
+    );
+    const coberturaDuplicataCentavos = jaTemDuplicataNoPagamento
+      ? 0
+      : coberturaFaturaCentavos;
     const conferencia =
-      conferenciaFinanceiraVenda({
+      conferenciaComercialNfeComDuplicata({
         valorTotal:
           totalParaConferencia,
         pagamentos,
         troco:
           trocoVenda,
+        coberturaDuplicataCentavos,
       });
 
     if (
@@ -1251,79 +1277,39 @@ export async function POST(
       );
     }
 
-    let faturaEmissao = faturaNfeDoSnapshot(snapshotOperacao);
-    const totalFiadoCentavos = totalAPrazoDePagamentosEmitidosCentavos({
+    const detalhamentoFiscal = mapearDetalhamentoFiscalNfe55({
       pagamentos: pagamentosConfirmados,
       formas: formasOverlay,
+      duplicataMercantilCentavos: coberturaDuplicataCentavos,
     });
-    if (!faturaEmissao && totalFiadoCentavos > 0) {
-      const { data: titulosCarteira, error: titulosErro } = await supabase
-        .from("carteira_cliente_titulos")
-        .select(
-          "empresa_id, venda_id, numero_venda, valor_original, vencimento, status"
-        )
-        .eq("empresa_id", empresaId)
-        .eq("venda_id", venda.id);
-      if (titulosErro) {
-        return erro(titulosErro.message, 500);
-      }
-      faturaEmissao = faturaDeTitulosCarteira({
-        titulos: titulosCarteira ?? [],
-        empresaId,
-        vendaId: String(venda.id),
-        numeroFatura: venda.numero != null ? String(venda.numero) : null,
-        codigoPagamento: formasOverlay.find((forma) => forma.permite_fiado)
-          ?.codigo_fiscal,
-      });
-    }
-    const condicaoFatura = condicaoPagamentoDoSnapshot(
-      snapshotOperacao,
-      faturaEmissao
+    const temDuplicataMercantil = detalhamentoFiscal.some(
+      (item) => item.tipo === TPAG_DUPLICATA_MERCANTIL
     );
-    const totalAPrazoCentavos = totalAPrazoFaturaCentavos({
-      condicao: condicaoFatura === "prazo" || totalFiadoCentavos > 0 ? "prazo" : "vista",
-      totalNfeCentavos: Math.round(totalParaConferencia * 100),
-      totalFiadoCentavos,
-    });
     const erroFatura = validarFaturaParaEmissaoNfe({
-      condicao: totalAPrazoCentavos > 0 ? "prazo" : "vista",
-      fatura: faturaEmissao,
-      totalAPrazoCentavos,
-      totalVistaCentavos: Math.max(
-        0,
-        Math.round(totalParaConferencia * 100) - totalAPrazoCentavos
+      temDuplicataMercantil,
+      fatura: faturaSnapshot,
+      totalAPrazoCentavos: Math.round(
+        detalhamentoFiscal
+          .filter((item) => item.tipo === TPAG_DUPLICATA_MERCANTIL)
+          .reduce((soma, item) => soma + Number(item.valor), 0) * 100
       ),
     });
     if (erroFatura) {
       return erro(erroFatura);
     }
-    const faturaGeranet = faturaParaPayloadGeranet(
-      totalAPrazoCentavos > 0 ? faturaEmissao : null
+    const faturaGeranet = faturaPermitidaNoPayloadNfe(
+      detalhamentoFiscal,
+      faturaParaPayloadGeranet(faturaSnapshot)
     );
-    const vendaInteiraAPrazo =
-      Boolean(faturaGeranet) && totalFiadoCentavos === 0;
-    pagamentosConfirmados = pagamentosConfirmados.map((pagamento) => {
-      const forma = formasOverlay.find(
-        (item) =>
-          String(item.id) === String(pagamento.id ?? "") ||
-          (item.codigo &&
-            String(item.codigo) ===
-              String(pagamento.forma_pagamento_codigo ?? "")) ||
-          (item.codigo_fiscal &&
-            String(item.codigo_fiscal) ===
-              String(pagamento.codigo_fiscal ?? ""))
-      );
-      return {
-        ...pagamento,
-        indicador_pagamento: indicadorPagamentoDetalheNfe({
-          temFatura: Boolean(faturaGeranet),
-          vendaInteiraAPrazo,
-          permiteFiado: forma?.permite_fiado,
-          permiteParcelamento: forma?.permite_parcelamento,
-          indicadorAtual: pagamento.indicador_pagamento,
-        }),
-      };
+    const erroPagamentoFiscal = validarPagamentoFiscalNfe55({
+      detalhamento: detalhamentoFiscal,
+      totalNfe: totalParaConferencia,
+      troco: trocoVenda,
+      fatura: faturaGeranet,
     });
+    if (erroPagamentoFiscal) {
+      return erro(erroPagamentoFiscal);
+    }
 
     if (
       !empresa ||
@@ -2898,30 +2884,7 @@ export async function POST(
         pagamento: {
           troco:
             trocoVenda,
-          detalhamento:
-            pagamentosConfirmados.map(
-              (
-                pagamento
-              ) => ({
-                tipo:
-                  texto(
-                    pagamento
-                      .codigo_fiscal
-                  ),
-                valor:
-                  numero(
-                    pagamento
-                      .valor
-                  ),
-                indicadorPagamento:
-                  texto(
-                    pagamento
-                      .indicador_pagamento
-                  ) as
-                    | "0"
-                    | "1",
-              })
-            ),
+          detalhamento: detalhamentoFiscal,
         },
         fatura: faturaGeranet,
 

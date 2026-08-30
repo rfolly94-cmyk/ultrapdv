@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  escolherEmissaoFiscalVenda,
   escolherStatusFiscalVenda,
   interpretarRespostaEmissaoVenda,
   mensagemFeedbackEmissaoVenda,
@@ -11,6 +12,8 @@ import {
   resolverRotaEmissaoListaVenda,
   rotuloOrigemVendaComercial,
 } from "./resolver-rota-edicao-venda";
+import { resolverAcoesEmissaoFiscal } from "@/lib/fiscal/acoes-emissao";
+import { documentoPodeSerAberto } from "@/lib/fiscal/documento-fiscal";
 
 test("origem da venda é NF-e só quando existe fiscal_operacoes.venda_id", () => {
   assert.equal(resolverOrigemVendaComercial(null), "pdv");
@@ -165,4 +168,53 @@ test("status fiscal da venda prefere autorização a rejeição", () => {
     ]),
     "autorizada"
   );
+});
+
+test("cancelada não esconde outra NF-e autorizada ou em transmissão", () => {
+  assert.equal(
+    escolherStatusFiscalVenda([
+      { status: "cancelada" },
+      { status: "autorizada" },
+    ]),
+    "autorizada"
+  );
+  assert.equal(
+    escolherEmissaoFiscalVenda([
+      { id: "c", status: "cancelada" },
+      { id: "a", status: "autorizada" },
+    ])?.id,
+    "a"
+  );
+  assert.equal(
+    escolherStatusFiscalVenda([
+      { status: "cancelada" },
+      { status: "enviando" },
+    ]),
+    "enviando"
+  );
+  assert.equal(
+    escolherStatusFiscalVenda([{ status: "cancelada" }, { status: "cancelada" }]),
+    "cancelada"
+  );
+});
+
+test("Abrir documento permanece habilitado para NF-e cancelada", () => {
+  const rota = resolverRotaEdicaoVenda({
+    vendaId: "v1",
+    origem: "nfe_manual",
+    operacaoFiscalId: "op-9",
+    statusFiscal: "cancelada",
+  });
+  assert.equal(rota.label, "Abrir documento");
+  assert.equal(rota.href, "/fiscal/nfe/op-9/editar");
+  assert.equal(rota.modo, "nfe_formulario");
+  assert.equal(documentoPodeSerAberto("cancelada"), true);
+
+  const acoes = resolverAcoesEmissaoFiscal({
+    emissao: { modelo: "55", status: "cancelada" },
+  });
+  assert.equal(acoes.podeBaixarXml, true);
+  assert.equal(acoes.podeBaixarPdf, true);
+  assert.equal(acoes.podeRetransmitir, false);
+  assert.equal(acoes.podeCancelar, false);
 });

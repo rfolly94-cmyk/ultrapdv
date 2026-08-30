@@ -343,6 +343,6 @@ test("F) Empresa A processando e Empresa B erro_envio permanecem independentes; 
   assert.match(reconciliar, /\.eq\("empresa_id", empresaId\)/);
   assert.match(reconciliar, /obter_segredos_fiscais/);
   assert.match(reconciliar, /p_empresa_id: empresaId/);
-  assert.match(transporte, /podeEditarFiscal/);
+  assert.match(transporte, /emissaoBloqueiaTransporteVenda/);
   assert.match(transporte, /empresa_id/);
 });

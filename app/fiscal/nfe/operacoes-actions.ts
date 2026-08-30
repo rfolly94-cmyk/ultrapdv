@@ -60,10 +60,12 @@ import {
   type PagamentoRascunhoNfe,
 } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
 import {
+  faturaNfeDoSnapshot,
   snapshotFaturaNfe,
   type CondicaoPagamentoNfe,
   type FaturaNfe,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
+import { mesclarPagamentoDuplicataMercantil } from "@/lib/fiscal/nfe55/pagamento-fiscal-nfe";
 import {
   normalizarTotaisNota,
   totaisNotaCentavos,
@@ -1605,7 +1607,9 @@ export async function verificarOperacaoFiscalAction(input: {
 
     if (operacao.tipo_operacao_interno === "venda") {
       const pagamentos = pagamentosRascunhoDoSnapshot(operacao.snapshot_fiscal);
-      if (pagamentos.length === 0) {
+      const coberturaDuplicataCentavos =
+        faturaNfeDoSnapshot(operacao.snapshot_fiscal)?.valorLiquidoCentavos ?? 0;
+      if (pagamentos.length === 0 && coberturaDuplicataCentavos <= 0) {
         return {
           ok: false,
           erro: "Informe o pagamento da venda antes de validar.",
@@ -1633,6 +1637,7 @@ export async function verificarOperacaoFiscalAction(input: {
         acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
         pagamentos,
         rejeitarPagamentoIncompleto: true,
+        coberturaDuplicataCentavos,
       });
       if (!teto.ok) {
         return { ok: false, erro: teto.erro };
@@ -2408,8 +2413,10 @@ export async function prepararVendaParaEmissaoNfe(input: {
           erro: "Venda usa o motor do PDV: a quantidade precisa ser um número inteiro.",
         };
       }
-      const pagamentos = pagamentosRascunhoDoSnapshot(operacao.snapshot_fiscal);
-      if (pagamentos.length === 0) {
+      const coberturaDuplicataCentavos =
+        faturaNfeDoSnapshot(operacao.snapshot_fiscal)?.valorLiquidoCentavos ?? 0;
+      let pagamentos = pagamentosRascunhoDoSnapshot(operacao.snapshot_fiscal);
+      if (pagamentos.length === 0 && coberturaDuplicataCentavos <= 0) {
         return { ok: false, erro: "Informe o pagamento da venda." };
       }
 
@@ -2424,9 +2431,32 @@ export async function prepararVendaParaEmissaoNfe(input: {
         acrescimoCentavos: totaisCentavos.seguro + totaisCentavos.outro,
         pagamentos,
         rejeitarPagamentoIncompleto: true,
+        coberturaDuplicataCentavos,
       });
       if (!tetoFiscal.ok) {
         return { ok: false, erro: tetoFiscal.erro };
+      }
+      if (coberturaDuplicataCentavos > 0) {
+        const { data: formasEmpresa, error: formasErro } = await supabase
+          .from("formas_pagamento")
+          .select("id, empresa_id, codigo, nome, codigo_fiscal, permite_fiado")
+          .eq("empresa_id", empresaId);
+        if (formasErro) {
+          return { ok: false, erro: formasErro.message };
+        }
+        pagamentos = mesclarPagamentoDuplicataMercantil({
+          pagamentos,
+          formas: (formasEmpresa ?? []).filter((forma) =>
+            registroPertenceAEmpresaAtiva(forma, empresaId)
+          ),
+          coberturaDuplicataCentavos,
+        });
+        if (pagamentos.length === 0) {
+          return {
+            ok: false,
+            erro: "Cadastre uma forma de pagamento Duplicata Mercantil (tPag 14) na empresa para finalizar a venda.",
+          };
+        }
       }
       const pixModo = await validarPixNaFinalizacaoComercial({
         supabase,

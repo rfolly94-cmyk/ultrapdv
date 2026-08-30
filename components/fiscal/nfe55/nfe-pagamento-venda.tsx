@@ -24,6 +24,7 @@ import {
   formatarCentavosBr,
   saldoRestanteParaParcela,
 } from "@/lib/pdv/pagamentos-teto";
+import { formaEhDuplicataMercantil } from "@/lib/fiscal/nfe55/pagamento-fiscal-nfe";
 import type { PixConfigPdv } from "@/lib/pagamentos/pix/modo-ativo";
 
 export type PagamentoDigitadoNfe = {
@@ -58,6 +59,7 @@ export function NfePagamentoVenda({
   podeEditar,
   ocupado,
   onErro,
+  coberturaDuplicataCentavos = 0,
 }: {
   formasPagamento: FormaPagamentoCheckout[];
   pixConfig: PixConfigPdv | null;
@@ -72,12 +74,15 @@ export function NfePagamentoVenda({
   podeEditar: boolean;
   ocupado: boolean;
   onErro: (mensagem: string | null) => void;
+  coberturaDuplicataCentavos?: number;
 }) {
   const pixCheckoutKeyRef = useRef<string | null>(null);
   const pixLocalAtivo = pixConfig?.modo === "local_manual";
   const pixGeranetAtivo = pixConfig?.modo === "geranet";
   const pixHabilitado = pixLocalAtivo || pixGeranetAtivo;
-  const formasPagas = formasPagamento.filter((forma) => !forma.permite_fiado);
+  const formasPagas = formasPagamento.filter(
+    (forma) => !forma.permite_fiado && !formaEhDuplicataMercantil(forma)
+  );
   const formaFiado = formasPagamento.find((forma) => forma.permite_fiado) ?? null;
   const formaPix = formasPagamento.find((forma) => ehFormaPix(forma) && !forma.permite_fiado) ?? null;
 
@@ -92,20 +97,27 @@ export function NfePagamentoVenda({
 
   const avaliacao = avaliarPagamentosPdv({
     totalVendaCentavos: totalCatalogoCentavos,
-    pagamentos: pagamentosCentavos.map((pagamento) => ({
-      valorCentavos: pagamento.valorCentavos,
-      permiteTroco: pagamento.forma.permite_troco === true,
-    })),
+    pagamentos: [
+      ...pagamentosCentavos
+        .filter((pagamento) => !formaEhDuplicataMercantil(pagamento.forma))
+        .map((pagamento) => ({
+          valorCentavos: pagamento.valorCentavos,
+          permiteTroco: pagamento.forma.permite_troco === true,
+        })),
+      ...(coberturaDuplicataCentavos > 0
+        ? [{ valorCentavos: coberturaDuplicataCentavos, permiteTroco: false }]
+        : []),
+    ],
   });
 
   const pixValor =
     pagamentosCentavos.find((pagamento) => ehFormaPix(pagamento.forma))?.valorCentavos ?? 0;
   const outrosSemPix = pagamentosCentavos
-    .filter((pagamento) => !ehFormaPix(pagamento.forma))
+    .filter((pagamento) => !ehFormaPix(pagamento.forma) && !formaEhDuplicataMercantil(pagamento.forma))
     .reduce((acc, pagamento) => acc + pagamento.valorCentavos, 0);
   const saldoPix = saldoRestanteParaParcela({
     totalVendaCentavos: totalCatalogoCentavos,
-    outrosPagamentosCentavos: outrosSemPix,
+    outrosPagamentosCentavos: outrosSemPix + Math.max(0, coberturaDuplicataCentavos),
   });
   const usarFiado = Boolean(
     formaFiado && pagamentos.some((pagamento) => pagamento.formaPagamentoId === formaFiado.id)
@@ -134,10 +146,13 @@ export function NfePagamentoVenda({
   }
 
   function preencherRestante(formaPagamentoId: string) {
+    const forma = formasPagamento.find((item) => item.id === formaPagamentoId);
+    const cobertura =
+      forma?.permite_fiado === true ? 0 : Math.max(0, coberturaDuplicataCentavos);
     const outros = pagamentos
       .filter((item) => item.formaPagamentoId !== formaPagamentoId)
       .reduce((acc, item) => acc + textoParaCentavos(item.valorTexto), 0);
-    const restante = Math.max(0, totalCatalogoCentavos - outros);
+    const restante = Math.max(0, totalCatalogoCentavos - outros - cobertura);
     atualizar(formaPagamentoId, (restante / 100).toFixed(2).replace(".", ","));
   }
 
@@ -204,8 +219,15 @@ export function NfePagamentoVenda({
               atualizar(formaFiado.id, "");
             }}
           />
-          Fiado (pagar depois){!clienteId ? " — selecione o cliente" : ""}
+          Fiado / Carteira (Pagamento Posterior)
+          {!clienteId ? " — selecione o cliente" : ""}
         </label>
+      ) : null}
+      {usarFiado ? (
+        <p className="text-[12.5px] text-zinc-600">
+          Na NF-e este saldo entra como Pagamento Posterior (tPag 91) com vPag
+          0,00. O valor permanece na Carteira e não vira Duplicata Mercantil.
+        </p>
       ) : null}
       {formaPix && !pixHabilitado ? (
         <p className="text-[12.5px] text-amber-800">{MENSAGEM_CONFIGURE_PIX}</p>

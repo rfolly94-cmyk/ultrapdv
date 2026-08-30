@@ -74,6 +74,7 @@ export type EstadoOperacionalFiscalResolvido = {
   podeEditarFiscal: boolean;
   documentoFiscalAmbiguo: boolean;
   documentoFiscalSensivel: boolean;
+  bloqueiaVendaComercial: boolean;
   requerDiagnostico: boolean;
   bloqueiaRetransmissao: boolean;
   consultaGeranetSecundaria: boolean;
@@ -231,11 +232,15 @@ function montarEstado(params: {
   podeEditarFiscal: boolean;
   documentoFiscalAmbiguo: boolean;
   documentoFiscalSensivel: boolean;
+  bloqueiaVendaComercial?: boolean;
   requerDiagnostico?: boolean;
   acaoPrincipal: AcaoPrincipalEmissaoFiscal;
   consultaGeranetSecundaria?: boolean;
 }): EstadoOperacionalFiscalResolvido {
   const requerDiagnostico = Boolean(params.requerDiagnostico);
+  const bloqueiaVendaComercial =
+    params.bloqueiaVendaComercial ??
+    (params.documentoFiscalSensivel && params.estado !== "cancelada");
   return {
     estado: params.estado,
     caso: params.caso,
@@ -245,6 +250,7 @@ function montarEstado(params: {
     podeEditarFiscal: params.podeEditarFiscal,
     documentoFiscalAmbiguo: params.documentoFiscalAmbiguo,
     documentoFiscalSensivel: params.documentoFiscalSensivel,
+    bloqueiaVendaComercial,
     requerDiagnostico,
     bloqueiaRetransmissao:
       params.documentoFiscalAmbiguo ||
@@ -327,12 +333,31 @@ export function resolverEstadoOperacionalFiscal(
       podeConsultar,
       podeEditarFiscal: false,
       documentoFiscalAmbiguo: false,
-      documentoFiscalSensivel: true,
+      documentoFiscalSensivel: false,
+      bloqueiaVendaComercial: false,
       acaoPrincipal: "nenhuma",
     });
   }
 
-  if (status === "aguardando_inutilizacao" || status === "inutilizada") {
+  if (status === "inutilizada") {
+    return montarEstado({
+      estado: "inutilizacao",
+      caso: "outro",
+      documento,
+      titulo: documento,
+      descricao: "",
+      podeRetry: false,
+      podeReconciliar: false,
+      podeConsultar,
+      podeEditarFiscal: false,
+      documentoFiscalAmbiguo: false,
+      documentoFiscalSensivel: false,
+      bloqueiaVendaComercial: false,
+      acaoPrincipal: "nenhuma",
+    });
+  }
+
+  if (status === "aguardando_inutilizacao") {
     return montarEstado({
       estado: "inutilizacao",
       caso: "outro",
@@ -613,4 +638,37 @@ export function resolverEstadoOperacionalDeEmissaoPersistida(
     entradaEstadoOperacionalDeEmissao(emissao),
     ultimaTentativa
   );
+}
+
+export function emissaoBloqueiaVendaComercial(
+  emissao: Parameters<typeof resolverEstadoOperacionalDeEmissaoPersistida>[0]
+) {
+  return resolverEstadoOperacionalDeEmissaoPersistida(emissao)
+    .bloqueiaVendaComercial;
+}
+
+export function vendaPossuiDocumentoFiscalBloqueante(
+  emissoes: Array<
+    Parameters<typeof resolverEstadoOperacionalDeEmissaoPersistida>[0]
+  >
+) {
+  return emissoes.some((emissao) => emissaoBloqueiaVendaComercial(emissao));
+}
+
+export function emissaoBloqueiaTransporteVenda(
+  emissao: Parameters<typeof resolverEstadoOperacionalDeEmissaoPersistida>[0]
+) {
+  const estado = resolverEstadoOperacionalDeEmissaoPersistida(emissao);
+  if (estado.podeEditarFiscal) {
+    return false;
+  }
+  return estado.bloqueiaVendaComercial || estado.estado === "reservada";
+}
+
+export function vendaPossuiTransporteFiscalBloqueante(
+  emissoes: Array<
+    Parameters<typeof resolverEstadoOperacionalDeEmissaoPersistida>[0]
+  >
+) {
+  return emissoes.some((emissao) => emissaoBloqueiaTransporteVenda(emissao));
 }

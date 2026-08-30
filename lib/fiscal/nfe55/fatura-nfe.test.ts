@@ -11,10 +11,10 @@ import {
   faturaNfePadrao,
   faturaParaPayloadGeranet,
   gerarParcelasFaturaNfe,
-  indicadorPagamentoDetalheNfe,
   numeroParcelaNfe,
   snapshotFaturaNfe,
   somaDuplicatasCentavos,
+  tipoCobrancaPrazoNfe,
   totalAPrazoFaturaCentavos,
   validarFaturaParaEmissaoNfe,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
@@ -163,6 +163,28 @@ test("E) rascunho persiste e relê fatura no snapshot JSONB", () => {
   assert.equal(faturaNfeDoSnapshot(vista), null);
 });
 
+test("a prazo sem fatura permanece a prazo e não vira duplicata", () => {
+  const snap = snapshotFaturaNfe({ condicao: "prazo", fatura: null });
+  assert.equal(snap.condicao_pagamento, "prazo");
+  assert.equal(snap.fatura, null);
+  assert.equal(tipoCobrancaPrazoNfe({ fatura: null, temPagamentoPosterior: true }), "posterior");
+  assert.equal(
+    tipoCobrancaPrazoNfe({
+      fatura: faturaNfePadrao({ numero: "1", valorCentavos: 1000 }),
+      temDuplicataMercantil: true,
+    }),
+    "duplicata"
+  );
+  assert.equal(tipoCobrancaPrazoNfe({ fatura: null }), "posterior");
+  const cobranca = fonte("components/fiscal/nfe55/nfe-fatura-cobranca.tsx");
+  const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
+  assert.match(cobranca, /Tipo de cobrança/);
+  assert.match(cobranca, /Duplicata Mercantil/);
+  assert.match(cobranca, /condicao === "prazo"/);
+  assert.match(form, /tipoCobrancaPrazo/);
+  assert.match(form, /aplicarTipoCobrancaPrazo/);
+});
+
 test("F) Carteira existente vira fatura fiscal sem criar título novo", () => {
   const fatura = faturaDeTitulosCarteira({
     empresaId: "emp-a",
@@ -201,7 +223,7 @@ test("F) Carteira existente vira fatura fiscal sem criar título novo", () => {
   assert.doesNotMatch(fonte("lib/fiscal/nfe55/fatura-nfe.ts"), /from\("carteira_cliente_titulos"\)/);
 });
 
-test("venda mista: fatura cobre só o fiado", () => {
+test("venda mista: Carteira/fiado não exige fatura fiscal", () => {
   assert.equal(
     totalAPrazoFaturaCentavos({
       condicao: "prazo",
@@ -210,35 +232,15 @@ test("venda mista: fatura cobre só o fiado", () => {
     }),
     24000
   );
-  const fatura = faturaNfePadrao({
-    numero: "83",
-    valorCentavos: 24000,
-    primeiroVencimento: "2026-09-28",
-  });
   assert.equal(
     validarFaturaParaEmissaoNfe({
+      temDuplicataMercantil: false,
       condicao: "prazo",
-      fatura,
+      fatura: null,
       totalAPrazoCentavos: 24000,
       totalVistaCentavos: 10000,
     }),
     null
-  );
-  assert.equal(
-    indicadorPagamentoDetalheNfe({
-      temFatura: true,
-      vendaInteiraAPrazo: false,
-      permiteFiado: false,
-    }),
-    "0"
-  );
-  assert.equal(
-    indicadorPagamentoDetalheNfe({
-      temFatura: true,
-      vendaInteiraAPrazo: false,
-      permiteFiado: true,
-    }),
-    "1"
   );
 });
 
@@ -301,12 +303,15 @@ test("builder e emissão da venda usam nfe.fatura do snapshot", () => {
   assert.match(builder, /valorLiquido/);
   assert.match(emitir, /faturaParaPayloadGeranet/);
   assert.match(emitir, /faturaNfeDoSnapshot/);
+  assert.match(emitir, /mapearDetalhamentoFiscalNfe55/);
   assert.match(form, /NfeFaturaCobranca/);
   assert.match(cobranca, /Fatura e parcelas/);
   assert.match(cobranca, /Gerar parcelas/);
   assert.match(cobranca, /Recalcular parcelas/);
+  assert.match(cobranca, /Pago\/outras formas/);
+  assert.match(cobranca, /Restante/);
   assert.match(actions, /snapshotFaturaNfe/);
   assert.match(carregar, /faturaNfeDoSnapshot/);
-  assert.match(carregar, /carteira_cliente_titulos/);
+  assert.doesNotMatch(carregar, /carteira_cliente_titulos/);
   assert.match(carregar, /eq\("empresa_id", empresaId\)/);
 });

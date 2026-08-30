@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { nfeInput } from "@/components/fiscal/nfe55/nfe-form-primitives";
 import { CampoValor } from "@/components/ui/campo-valor";
@@ -13,6 +13,7 @@ import {
   valorLiquidoFaturaCentavos,
   type CondicaoPagamentoNfe,
   type FaturaNfe,
+  type TipoCobrancaPrazoNfe,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
 import { hojeIso } from "@/lib/produtos/lotes";
 import { formatarCentavosBr } from "@/lib/pdv/pagamentos-teto";
@@ -37,17 +38,35 @@ function textoParaCentavos(valor: string) {
 export function NfeFaturaCobranca({
   condicao,
   onCondicao,
+  tipoCobranca,
+  onTipoCobranca,
   fatura,
   onFatura,
+  totalNfeCentavos,
+  totalPagoAgoraCentavos,
   totalAPrazoCentavos,
   podeEditar,
+  temPagamentoPosterior = false,
+  temDuplicataMercantil = false,
+  bloquearDuplicata = false,
+  valorDuplicataCentavos = 0,
+  restanteConferenciaCentavos = 0,
 }: {
   condicao: CondicaoPagamentoNfe;
   onCondicao: (condicao: CondicaoPagamentoNfe) => void;
+  tipoCobranca: TipoCobrancaPrazoNfe;
+  onTipoCobranca: (tipo: TipoCobrancaPrazoNfe) => void;
   fatura: FaturaNfe | null;
   onFatura: (fatura: FaturaNfe | null) => void;
+  totalNfeCentavos: number;
+  totalPagoAgoraCentavos: number;
   totalAPrazoCentavos: number;
   podeEditar: boolean;
+  temPagamentoPosterior?: boolean;
+  temDuplicataMercantil?: boolean;
+  bloquearDuplicata?: boolean;
+  valorDuplicataCentavos?: number;
+  restanteConferenciaCentavos?: number;
 }) {
   const [quantidade, setQuantidade] = useState(
     Math.max(1, fatura?.duplicatas.length || 1)
@@ -61,6 +80,16 @@ export function NfeFaturaCobranca({
   const divergente =
     condicao === "prazo" &&
     faturaDivergenteDoTotal({ fatura, totalAPrazoCentavos });
+
+  useEffect(() => {
+    if (!fatura) {
+      return;
+    }
+    setQuantidade(Math.max(1, fatura.duplicatas.length || 1));
+    if (fatura.duplicatas[0]?.dataVencimento) {
+      setPrimeiroVencimento(fatura.duplicatas[0].dataVencimento);
+    }
+  }, [fatura]);
 
   function atualizar(parcial: Partial<FaturaNfe>) {
     if (!fatura) return;
@@ -143,7 +172,129 @@ export function NfeFaturaCobranca({
         </label>
       </fieldset>
 
-      {condicao === "prazo" && fatura ? (
+      {condicao === "prazo" ? (
+        <fieldset className="space-y-2">
+          <legend className="text-[12.5px] font-medium text-zinc-600">
+            Tipo de cobrança
+          </legend>
+          <div className="nfe-tipo-cobranca">
+            <label
+              className="nfe-tipo-cobranca-opcao"
+              data-ativo={tipoCobranca === "posterior" ? "true" : "false"}
+            >
+              <input
+                type="radio"
+                name="nfe-tipo-cobranca"
+                disabled={!podeEditar}
+                checked={tipoCobranca === "posterior"}
+                onChange={() => onTipoCobranca("posterior")}
+              />
+              <span>
+                <span className="block text-[13px] font-medium text-zinc-800">
+                  Pagamento Posterior
+                </span>
+                <span className="mt-0.5 block text-[11.5px] text-zinc-500">
+                  tPag 91 · padrão para a prazo, Carteira e fiado
+                </span>
+              </span>
+            </label>
+            <label
+              className="nfe-tipo-cobranca-opcao"
+              data-ativo={tipoCobranca === "duplicata" ? "true" : "false"}
+            >
+              <input
+                type="radio"
+                name="nfe-tipo-cobranca"
+                disabled={!podeEditar || bloquearDuplicata || temPagamentoPosterior}
+                checked={tipoCobranca === "duplicata"}
+                onChange={() => onTipoCobranca("duplicata")}
+              />
+              <span>
+                <span className="block text-[13px] font-medium text-zinc-800">
+                  Duplicata Mercantil
+                </span>
+                <span className="mt-0.5 block text-[11.5px] text-zinc-500">
+                  tPag 14 · exige fatura e parcelas
+                </span>
+              </span>
+            </label>
+          </div>
+          {bloquearDuplicata ? (
+            <p className="text-[12px] text-zinc-500">
+              Há saldo em Carteira/fiado. A NF-e usa Pagamento Posterior (tPag 91)
+              e não gera Duplicata Mercantil.
+            </p>
+          ) : null}
+        </fieldset>
+      ) : null}
+
+      {condicao === "prazo" && tipoCobranca === "duplicata" ? (
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-[12.5px] text-zinc-700">
+          <p className="font-medium text-zinc-800">Conferência</p>
+          <p className="mt-1">tPag 14 · Duplicata Mercantil</p>
+          <dl className="mt-2 grid gap-1">
+            <div className="flex justify-between gap-4">
+              <dt>Total da NF-e</dt>
+              <dd className="font-medium text-zinc-800">
+                {formatarCentavosBr(totalNfeCentavos)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>Pago/outras formas</dt>
+              <dd>{formatarCentavosBr(totalPagoAgoraCentavos)}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>Duplicata Mercantil</dt>
+              <dd className="font-medium text-zinc-800">
+                {formatarCentavosBr(valorDuplicataCentavos)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>Restante</dt>
+              <dd
+                className={
+                  restanteConferenciaCentavos === 0
+                    ? "font-medium text-zinc-800"
+                    : "font-medium text-red-700"
+                }
+              >
+                {formatarCentavosBr(restanteConferenciaCentavos)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+
+      {condicao === "prazo" && tipoCobranca === "posterior" ? (
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-[12.5px] text-zinc-700">
+          <p className="font-medium text-zinc-800">Pagamento Posterior</p>
+          <p className="mt-1">tPag 91 · vPag {formatarCentavosBr(0)}</p>
+          <dl className="mt-2 grid gap-1">
+            <div className="flex justify-between gap-4">
+              <dt>Total da NF-e</dt>
+              <dd className="font-medium text-zinc-800">
+                {formatarCentavosBr(totalNfeCentavos)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>Pago agora</dt>
+              <dd>{formatarCentavosBr(totalPagoAgoraCentavos)}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>Pagamento posterior</dt>
+              <dd className="font-medium text-zinc-800">
+                {formatarCentavosBr(totalAPrazoCentavos)}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2">
+            A NF-e mantém o valor total. vPag 0,00 indica que o recebimento
+            será posterior. Isso não é Duplicata Mercantil.
+          </p>
+        </div>
+      ) : null}
+
+      {condicao === "prazo" && tipoCobranca === "duplicata" && fatura ? (
         <div className="space-y-3 rounded-md border border-zinc-200 p-3">
           <p className="text-[13px] font-medium text-zinc-800">Fatura e parcelas</p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -198,7 +349,13 @@ export function NfeFaturaCobranca({
                 max={999}
                 disabled={!podeEditar}
                 value={quantidade}
-                onChange={(event) => setQuantidade(Number(event.target.value) || 1)}
+                onChange={(event) => {
+                  const qtd = Number(event.target.value) || 1;
+                  setQuantidade(qtd);
+                  if (fatura && podeEditar) {
+                    gerar(qtd, primeiroVencimento, intervalo, "automatica");
+                  }
+                }}
               />
             </label>
             <label className="text-[12px] text-zinc-600">

@@ -3,6 +3,8 @@ import { hojeIso } from "@/lib/produtos/lotes";
 
 export type CondicaoPagamentoNfe = "vista" | "prazo";
 
+export type TipoCobrancaPrazoNfe = "posterior" | "duplicata";
+
 export type OrigemFaturaNfe = "manual" | "automatica" | "carteira";
 
 export type DuplicataFaturaNfe = {
@@ -60,7 +62,7 @@ export const MENSAGEM_FATURA_TOTAL_ALTERADO =
   "O total da NF-e mudou. Revise as parcelas da fatura.";
 
 export const MENSAGEM_MISTA_SEM_FATURA =
-  "Há pagamento a prazo. Selecione a condição A prazo e informe as parcelas da fatura.";
+  "Há Duplicata Mercantil (tPag 14). Informe a fatura e as parcelas.";
 
 function inteiroNaoNegativo(valor: unknown) {
   const n = Math.round(Number(valor ?? 0));
@@ -387,13 +389,33 @@ export function condicaoPagamentoDoSnapshot(
   return fatura ? "prazo" : "vista";
 }
 
+export function tipoCobrancaPrazoNfe(input: {
+  fatura?: FaturaNfe | null;
+  temPagamentoPosterior?: boolean;
+  temDuplicataMercantil?: boolean;
+}): TipoCobrancaPrazoNfe {
+  if (input.temPagamentoPosterior) {
+    return "posterior";
+  }
+  if (input.temDuplicataMercantil || input.fatura) {
+    return "duplicata";
+  }
+  return "posterior";
+}
+
 export function snapshotFaturaNfe(input: {
   condicao: CondicaoPagamentoNfe;
   fatura: FaturaNfe | null;
 }) {
-  if (input.condicao !== "prazo" || !input.fatura) {
+  if (input.condicao !== "prazo") {
     return {
       condicao_pagamento: "vista" as const,
+      fatura: null,
+    };
+  }
+  if (!input.fatura) {
+    return {
+      condicao_pagamento: "prazo" as const,
       fatura: null,
     };
   }
@@ -427,20 +449,18 @@ export function faturaDivergenteDoTotal(input: {
 }
 
 export function validarFaturaParaEmissaoNfe(input: {
-  condicao: CondicaoPagamentoNfe;
+  temDuplicataMercantil?: boolean;
+  condicao?: CondicaoPagamentoNfe;
   fatura: FaturaNfe | null;
   totalAPrazoCentavos: number;
-  totalVistaCentavos: number;
+  totalVistaCentavos?: number;
 }): string | null {
-  if (input.condicao !== "prazo") {
-    if (input.totalAPrazoCentavos > 0) {
-      return MENSAGEM_MISTA_SEM_FATURA;
-    }
+  if (input.temDuplicataMercantil !== true) {
     return null;
   }
   const fatura = input.fatura;
   if (!fatura) {
-    return "Informe a fatura e as parcelas da cobrança a prazo.";
+    return "Informe a fatura e as parcelas da Duplicata Mercantil.";
   }
   if (!texto(fatura.numero)) {
     return "Informe o número da fatura.";

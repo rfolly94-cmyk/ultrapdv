@@ -17,6 +17,7 @@ import { EmissaoFiscalAcoes } from "@/components/fiscal/emissao-fiscal-acoes";
 import { EmissaoFiscalHistorico } from "@/components/fiscal/emissao-fiscal-historico";
 import { PageAlert } from "@/components/ui/page-alert";
 import {
+  escolherEmissaoFiscalVenda,
   escolherStatusFiscalVenda,
   mensagemFeedbackEmissaoVenda,
   resolverOrigemVendaComercial,
@@ -31,7 +32,10 @@ import {
   classificacaoResumoDaEmissao,
   resolverApresentacaoEmissaoFiscal,
 } from "@/lib/fiscal/apresentacao-emissao";
-import { resolverEstadoOperacionalDeEmissaoPersistida } from "@/lib/fiscal/estado-operacional-fiscal";
+import {
+  vendaPossuiDocumentoFiscalBloqueante,
+  vendaPossuiTransporteFiscalBloqueante,
+} from "@/lib/fiscal/estado-operacional-fiscal";
 import { consolidarEvidencia539 } from "@/lib/fiscal/geranet/cstat";
 import { ultimaTentativaFiscal } from "@/lib/fiscal/emissao-tentativas";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
@@ -725,31 +729,7 @@ export default async function VendaDetalhePage({
     ) ?? null;
 
   const emissaoFiscalPrincipal =
-    (emissoesFiscais ?? []).find(
-      (emissao) =>
-        emissao.status ===
-        "cancelada"
-    ) ??
-    (emissoesFiscais ?? []).find(
-      (emissao) =>
-        emissao.status ===
-        "autorizada"
-    ) ??
-    (emissoesFiscais ?? []).find(
-      (emissao) =>
-        emissao.status ===
-        "rejeitada"
-    ) ??
-    (emissoesFiscais ?? []).find(
-      (emissao) =>
-        [
-          "erro_comunicacao",
-          "aguardando_reconciliacao",
-          "enviando",
-        ].includes(emissao.status)
-    ) ??
-    (emissoesFiscais ?? [])[0] ??
-    null;
+    escolherEmissaoFiscalVenda(emissoesFiscais ?? []);
 
   const {
     data: eventosFiscais,
@@ -924,18 +904,13 @@ export default async function VendaDetalhePage({
         !emissao.protocolo
     );
 
-  const possuiFiscalBloqueante =
-    (emissoesFiscais ?? []).some(
-      (emissao) =>
-        resolverEstadoOperacionalDeEmissaoPersistida(emissao)
-          .documentoFiscalSensivel
-    );
+  const possuiFiscalBloqueante = vendaPossuiDocumentoFiscalBloqueante(
+    emissoesFiscais ?? []
+  );
 
-  const possuiFiscalTransporteBloqueante =
-    (emissoesFiscais ?? []).some(
-      (emissao) =>
-        !resolverEstadoOperacionalDeEmissaoPersistida(emissao).podeEditarFiscal
-    );
+  const possuiFiscalTransporteBloqueante = vendaPossuiTransporteFiscalBloqueante(
+    emissoesFiscais ?? []
+  );
 
   const origemVenda =
     resolverOrigemVendaComercial(

@@ -87,13 +87,24 @@ import {
   mensagemPagamentoNfeIncompleto,
 } from "@/lib/fiscal/nfe55/sincronizar-pagamentos";
 import {
+  adicionarDiasIsoLocal,
   faturaNfePadrao,
+  gerarParcelasFaturaNfe,
+  somaDuplicatasCentavos,
+  tipoCobrancaPrazoNfe,
   totalAPrazoFaturaCentavos,
   totalAPrazoPagamentosCentavos,
   validarFaturaParaEmissaoNfe,
   type CondicaoPagamentoNfe,
   type FaturaNfe,
+  type TipoCobrancaPrazoNfe,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
+import {
+  formaEhDuplicataMercantil,
+  pagamentosImediatosNfeCentavos,
+  saldoDuplicataMercantilCentavos,
+} from "@/lib/fiscal/nfe55/pagamento-fiscal-nfe";
+import { hojeIso } from "@/lib/produtos/lotes";
 import {
   normalizarIndicadorIeDestinatario,
   resolverDestinatarioFiscalDaOrigem,
@@ -505,6 +516,9 @@ export function NfeEmissaoForm({
   const [condicaoPagamento, setCondicaoPagamento] = useState<CondicaoPagamentoNfe>(
     operacao.condicaoPagamento ?? (operacao.fatura ? "prazo" : "vista")
   );
+  const [tipoCobrancaPrazo, setTipoCobrancaPrazo] = useState<TipoCobrancaPrazoNfe>(() =>
+    tipoCobrancaPrazoNfe({ fatura: operacao.fatura })
+  );
   const [fatura, setFatura] = useState<FaturaNfe | null>(operacao.fatura ?? null);
   const [tipoPessoaEdit, setTipoPessoaEdit] = useState("");
   const [consumidorFinalOrigem, setConsumidorFinalOrigem] = useState<
@@ -746,14 +760,12 @@ export function NfeEmissaoForm({
       ) as Record<string, boolean>,
     [formasPagamento]
   );
-  const pagamentoAvaliacao = useMemo(
+  const formaIdsDuplicata = useMemo(
     () =>
-      avaliarPagamentosDigitadosNfe({
-        totalVendaCentavos,
-        pagamentos,
-        permiteTrocoPorFormaId,
-      }),
-    [pagamentos, permiteTrocoPorFormaId, totalVendaCentavos]
+      formasPagamento
+        .filter((forma) => formaEhDuplicataMercantil(forma))
+        .map((forma) => forma.id),
+    [formasPagamento]
   );
   const totalFiadoCentavos = useMemo(
     () =>
@@ -767,12 +779,105 @@ export function NfeEmissaoForm({
     [formasPagamento, pagamentos]
   );
   const totalAPrazoCentavos = totalAPrazoFaturaCentavos({
-    condicao: condicaoPagamento,
+    condicao: condicaoPagamento === "prazo" || totalFiadoCentavos > 0 ? "prazo" : "vista",
     totalNfeCentavos: totalVendaCentavos,
     totalFiadoCentavos,
   });
+  const temPagamentoPosterior = totalFiadoCentavos > 0;
+  const totalDuplicataCentavos = pagamentos.reduce((soma, pagamento) => {
+    const forma = formasPagamento.find((item) => item.id === pagamento.formaPagamentoId);
+    if (!formaEhDuplicataMercantil(forma)) {
+      return soma;
+    }
+    return soma + centavosDeTextoPagamento(pagamento.valorTexto);
+  }, 0);
+  const temDuplicataMercantil =
+    condicaoPagamento === "prazo" &&
+    tipoCobrancaPrazo === "duplicata" &&
+    !temPagamentoPosterior;
+  const pagamentosImediatosCentavos = pagamentosImediatosNfeCentavos({
+    pagamentos: pagamentos.map((pagamento) => ({
+      formaPagamentoId: pagamento.formaPagamentoId,
+      valorCentavos: centavosDeTextoPagamento(pagamento.valorTexto),
+    })),
+    formas: formasPagamento,
+  });
+  const saldoDuplicataDisponivelCentavos = saldoDuplicataMercantilCentavos({
+    totalNfeCentavos: totalVendaCentavos,
+    pagamentosImediatosCentavos,
+  });
+  const saldoDuplicataCentavos = temDuplicataMercantil
+    ? saldoDuplicataDisponivelCentavos
+    : 0;
+  const coberturaDuplicataCentavos = temDuplicataMercantil
+    ? fatura?.parcelasPersonalizadas
+      ? fatura.valorLiquidoCentavos
+      : saldoDuplicataCentavos
+    : 0;
+  const pagamentoAvaliacao = useMemo(
+    () =>
+      avaliarPagamentosDigitadosNfe({
+        totalVendaCentavos,
+        pagamentos,
+        permiteTrocoPorFormaId,
+        coberturaDuplicataCentavos,
+        formaIdsDuplicata,
+      }),
+    [
+      coberturaDuplicataCentavos,
+      formaIdsDuplicata,
+      pagamentos,
+      permiteTrocoPorFormaId,
+      totalVendaCentavos,
+    ]
+  );
+  const totalPagoAgoraCentavos = temPagamentoPosterior
+    ? Math.max(0, totalVendaCentavos - totalFiadoCentavos)
+    : pagamentosImediatosCentavos;
   const codigoPagamentoFatura =
-    formasPagamento.find((forma) => forma.permite_fiado)?.codigo_fiscal ?? null;
+    formasPagamento.find((forma) => formaEhDuplicataMercantil(forma))?.codigo_fiscal ??
+    "14";
+
+  function garantirFaturaDuplicata(valorCentavos = saldoDuplicataCentavos) {
+    const coberto = Math.max(0, Math.round(valorCentavos));
+    if (coberto <= 0) {
+      return;
+    }
+    setFatura((atual) => {
+      if (atual?.parcelasPersonalizadas) {
+        return atual;
+      }
+      if (!atual) {
+        return faturaNfePadrao({
+          numero: operacao.numeroVenda || "1",
+          valorCentavos: coberto,
+          codigoPagamento: codigoPagamentoFatura,
+        });
+      }
+      const liquido = Math.max(0, coberto - atual.descontoCentavos);
+      if (
+        atual.valorCentavos === coberto &&
+        atual.valorLiquidoCentavos === liquido &&
+        somaDuplicatasCentavos(atual.duplicatas) === liquido
+      ) {
+        return atual;
+      }
+      return {
+        ...atual,
+        valorCentavos: coberto,
+        valorLiquidoCentavos: liquido,
+        origem: atual.origem === "carteira" ? "carteira" : "automatica",
+        duplicatas: gerarParcelasFaturaNfe({
+          valorLiquidoCentavos: liquido,
+          quantidade: Math.max(1, atual.duplicatas.length || 1),
+          primeiroVencimento:
+            atual.duplicatas[0]?.dataVencimento || adicionarDiasIsoLocal(hojeIso(), 30),
+          intervaloDias: 30,
+          codigoPagamento: atual.duplicatas[0]?.codigoPagamento ?? codigoPagamentoFatura,
+        }),
+      };
+    });
+  }
 
   function aplicarCondicaoPagamento(proxima: CondicaoPagamentoNfe) {
     setCondicaoPagamento(proxima);
@@ -781,26 +886,26 @@ export function NfeEmissaoForm({
       setFatura(null);
       return;
     }
-    const valorCentavos = totalAPrazoFaturaCentavos({
-      condicao: "prazo",
-      totalNfeCentavos: totalVendaCentavos,
-      totalFiadoCentavos,
-    });
-    setFatura(
-      fatura
-        ? {
-            ...fatura,
-            valorCentavos: fatura.parcelasPersonalizadas ? fatura.valorCentavos : valorCentavos,
-            valorLiquidoCentavos: fatura.parcelasPersonalizadas
-              ? fatura.valorLiquidoCentavos
-              : Math.max(0, valorCentavos - fatura.descontoCentavos),
-          }
-        : faturaNfePadrao({
-            numero: operacao.numeroVenda || "1",
-            valorCentavos: valorCentavos || totalVendaCentavos,
-            codigoPagamento: codigoPagamentoFatura,
-          })
-    );
+    if (temPagamentoPosterior || tipoCobrancaPrazo === "posterior") {
+      setTipoCobrancaPrazo("posterior");
+      setFatura(null);
+      return;
+    }
+    setTipoCobrancaPrazo("duplicata");
+    garantirFaturaDuplicata(saldoDuplicataDisponivelCentavos);
+  }
+
+  function aplicarTipoCobrancaPrazo(tipo: TipoCobrancaPrazoNfe) {
+    if (temPagamentoPosterior && tipo === "duplicata") {
+      return;
+    }
+    setTipoCobrancaPrazo(tipo);
+    setValidadaLocalmente(false);
+    if (tipo === "posterior") {
+      setFatura(null);
+      return;
+    }
+    garantirFaturaDuplicata(saldoDuplicataDisponivelCentavos);
   }
 
   const totalPagamentoAnteriorRef = useRef<number | null>(null);
@@ -857,11 +962,49 @@ export function NfeEmissaoForm({
   ]);
 
   useEffect(() => {
-    if (!podeEditar || totalFiadoCentavos <= 0 || condicaoPagamento === "prazo") {
+    if (!podeEditar || totalFiadoCentavos <= 0) {
       return;
     }
-    aplicarCondicaoPagamento("prazo");
-  }, [condicaoPagamento, podeEditar, totalFiadoCentavos]);
+    if (condicaoPagamento !== "prazo") {
+      setCondicaoPagamento("prazo");
+    }
+    if (tipoCobrancaPrazo !== "posterior") {
+      setTipoCobrancaPrazo("posterior");
+    }
+    if (fatura) {
+      setFatura(null);
+    }
+  }, [condicaoPagamento, fatura, podeEditar, tipoCobrancaPrazo, totalFiadoCentavos]);
+
+  useEffect(() => {
+    if (!podeEditar || totalFiadoCentavos > 0 || totalDuplicataCentavos <= 0) {
+      return;
+    }
+    if (condicaoPagamento !== "prazo") {
+      setCondicaoPagamento("prazo");
+    }
+    if (tipoCobrancaPrazo !== "duplicata") {
+      setTipoCobrancaPrazo("duplicata");
+    }
+  }, [
+    condicaoPagamento,
+    podeEditar,
+    tipoCobrancaPrazo,
+    totalDuplicataCentavos,
+    totalFiadoCentavos,
+  ]);
+
+  useEffect(() => {
+    if (!podeEditar || totalFiadoCentavos > 0 || !temDuplicataMercantil) {
+      return;
+    }
+    garantirFaturaDuplicata(saldoDuplicataDisponivelCentavos);
+  }, [
+    podeEditar,
+    saldoDuplicataCentavos,
+    temDuplicataMercantil,
+    totalFiadoCentavos,
+  ]);
 
   const agora = useMemo(() => {
     const data = new Date();
@@ -1106,7 +1249,7 @@ export function NfeEmissaoForm({
         operacaoId: id,
         pagamentos: pagamentosRascunho,
         condicaoPagamento,
-        fatura: condicaoPagamento === "prazo" ? fatura : null,
+        fatura: temDuplicataMercantil ? fatura : null,
         preservarStatusEmissao: opcoes?.preservarStatusEmissao,
       });
       if (!pago.ok) return pago;
@@ -1145,10 +1288,9 @@ export function NfeEmissaoForm({
     }
     if (financeiro) {
       const erroFatura = validarFaturaParaEmissaoNfe({
-        condicao: condicaoPagamento,
+        temDuplicataMercantil,
         fatura,
-        totalAPrazoCentavos,
-        totalVistaCentavos: Math.max(0, totalVendaCentavos - totalAPrazoCentavos),
+        totalAPrazoCentavos: coberturaDuplicataCentavos,
       });
       if (erroFatura) {
         return { ok: false as const, erro: erroFatura };
@@ -2450,6 +2592,7 @@ export function NfeEmissaoForm({
         </NfeSecao>
       ) : null}
 
+      <div className="nfe-bloco-card">
       <NfeSecao
         titulo="Itens da nota fiscal"
         extra={
@@ -2465,7 +2608,8 @@ export function NfeEmissaoForm({
         }
       >
         {podeEditar ? (
-          <div className="nfe-busca-item">
+          <div className="nfe-itens-toolbar">
+            <div className="nfe-busca-item">
             <input
               id="nfe-busca-produto"
               className={nfeInput}
@@ -2532,6 +2676,7 @@ export function NfeEmissaoForm({
                   : ""}
               </p>
             )}
+            </div>
           </div>
         ) : null}
         <div className="nfe-itens-wrap">
@@ -2680,6 +2825,7 @@ export function NfeEmissaoForm({
           </p>
         ) : null}
       </NfeSecao>
+      </div>
 
       <NfeRecolhivel titulo="Transporte" manterMontado>
         {operacao.id ? (
@@ -3089,10 +3235,10 @@ export function NfeEmissaoForm({
         )}
       </NfeRecolhivel>
 
-      <NfeRecolhivel titulo="Pagamento / Cobrança">
+      <NfeRecolhivel titulo="Pagamento / Cobrança" className="nfe-secao-card">
         {financeiro ? (
           <>
-          <div className="space-y-4">
+          <div className="nfe-pagamento-corpo space-y-4">
           <NfePagamentoVenda
             formasPagamento={formasPagamento}
             pixConfig={pixConfig}
@@ -3110,17 +3256,32 @@ export function NfeEmissaoForm({
             podeEditar={Boolean(podeEditar)}
             ocupado={pending}
             onErro={setErro}
+            coberturaDuplicataCentavos={coberturaDuplicataCentavos}
           />
           <NfeFaturaCobranca
             condicao={condicaoPagamento}
             onCondicao={aplicarCondicaoPagamento}
+            tipoCobranca={tipoCobrancaPrazo}
+            onTipoCobranca={aplicarTipoCobrancaPrazo}
             fatura={fatura}
             onFatura={(proxima) => {
               setFatura(proxima);
               setValidadaLocalmente(false);
             }}
-            totalAPrazoCentavos={totalAPrazoCentavos}
+            totalNfeCentavos={totalVendaCentavos}
+            totalPagoAgoraCentavos={totalPagoAgoraCentavos}
+            totalAPrazoCentavos={
+              temDuplicataMercantil ? coberturaDuplicataCentavos : totalAPrazoCentavos
+            }
             podeEditar={Boolean(podeEditar)}
+            temPagamentoPosterior={temPagamentoPosterior}
+            temDuplicataMercantil={temDuplicataMercantil}
+            bloquearDuplicata={temPagamentoPosterior}
+            valorDuplicataCentavos={coberturaDuplicataCentavos}
+            restanteConferenciaCentavos={Math.max(
+              0,
+              totalVendaCentavos - totalPagoAgoraCentavos - coberturaDuplicataCentavos
+            )}
           />
           </div>
           </>

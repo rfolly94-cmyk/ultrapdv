@@ -5,7 +5,11 @@ import { test } from "node:test";
 
 import { resolverApresentacaoEmissaoFiscal } from "./apresentacao-emissao";
 import { resolverAcoesEmissaoFiscal } from "./acoes-emissao";
-import { resolverEstadoOperacionalFiscal } from "./estado-operacional-fiscal";
+import {
+  resolverEstadoOperacionalFiscal,
+  vendaPossuiDocumentoFiscalBloqueante,
+  vendaPossuiTransporteFiscalBloqueante,
+} from "./estado-operacional-fiscal";
 
 function fonte(relativo: string) {
   return readFileSync(path.join(process.cwd(), relativo), "utf8");
@@ -141,6 +145,24 @@ test("E) autorizada: retry NÃO, reconciliação NÃO, edição fiscal bloqueada
   assert.equal(estado.podeReconciliar, false);
   assert.equal(estado.podeEditarFiscal, false);
   assert.equal(estado.documentoFiscalSensivel, true);
+  assert.equal(estado.bloqueiaVendaComercial, true);
+});
+
+test("cancelada é terminal: consulta permitida, sem bloquear a venda comercial", () => {
+  const estado = resolverEstadoOperacionalFiscal({
+    modelo: "55",
+    status: "cancelada",
+    cstat: "101",
+    protocolo: "1",
+    chaveAcesso: "35240111222333000155550010000000291000000001",
+  });
+
+  assert.equal(estado.estado, "cancelada");
+  assert.equal(estado.podeRetry, false);
+  assert.equal(estado.podeEditarFiscal, false);
+  assert.equal(estado.podeConsultar, true);
+  assert.equal(estado.documentoFiscalSensivel, false);
+  assert.equal(estado.bloqueiaVendaComercial, false);
 });
 
 test("F) erro_comunicacao sem classificação: retry NÃO, diagnóstico, sem inventar reconciliação", () => {
@@ -204,7 +226,7 @@ test("G) Empresa A erro_envio e Empresa B ambígua permanecem independentes; cla
   assert.match(reconciliar, /usuarios_empresas/);
   assert.match(reconciliar, /principal/);
   assert.match(reconciliar, /vinculo\.empresa_id/);
-  assert.match(transporte, /resolverEstadoOperacionalDeEmissaoPersistida/);
+  assert.match(transporte, /emissaoBloqueiaTransporteVenda/);
   assert.match(transporte, /empresa_id/);
 });
 
@@ -285,4 +307,56 @@ test("HTTP 422 + cStat 539 não aparece como processando e só reconcilia", () =
   assert.equal(confirmada.podeRetry, false);
   assert.equal(confirmada.podeReconciliar, true);
   assert.equal(confirmada.bloqueiaRetransmissao, false);
+});
+
+test("venda comercial: autorizada, transmissão e reconciliação bloqueiam; cancelada não", () => {
+  assert.equal(
+    vendaPossuiDocumentoFiscalBloqueante([{ modelo: "55", status: "autorizada" }]),
+    true
+  );
+  assert.equal(
+    vendaPossuiDocumentoFiscalBloqueante([{ modelo: "55", status: "enviando" }]),
+    true
+  );
+  assert.equal(
+    vendaPossuiDocumentoFiscalBloqueante([
+      { modelo: "55", status: "aguardando_reconciliacao" },
+    ]),
+    true
+  );
+  assert.equal(
+    vendaPossuiDocumentoFiscalBloqueante([{ modelo: "55", status: "cancelada" }]),
+    false
+  );
+  assert.equal(
+    vendaPossuiDocumentoFiscalBloqueante([
+      { modelo: "55", status: "cancelada" },
+      { modelo: "55", status: "autorizada" },
+    ]),
+    true
+  );
+  assert.equal(
+    vendaPossuiDocumentoFiscalBloqueante([
+      { modelo: "55", status: "cancelada" },
+      { modelo: "65", status: "cancelada" },
+    ]),
+    false
+  );
+  assert.equal(
+    vendaPossuiTransporteFiscalBloqueante([{ modelo: "55", status: "cancelada" }]),
+    false
+  );
+  assert.equal(
+    vendaPossuiTransporteFiscalBloqueante([{ modelo: "55", status: "autorizada" }]),
+    true
+  );
+
+  const detalhe = fonte("app/vendas/[id]/page.tsx");
+  assert.match(detalhe, /vendaPossuiDocumentoFiscalBloqueante/);
+  assert.match(detalhe, /vendaPossuiTransporteFiscalBloqueante/);
+  assert.match(detalhe, /escolherEmissaoFiscalVenda/);
+  assert.doesNotMatch(
+    detalhe,
+    /find\(\s*\(emissao\)\s*=>\s*emissao\.status ===\s*"cancelada"/
+  );
 });

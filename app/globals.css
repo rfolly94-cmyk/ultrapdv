@@ -328,6 +328,46 @@ body {
   border-top: 1px solid #e4e4e7;
 }
 
+.nfe-bloco-card,
+.nfe-secao-card {
+  margin-top: 16px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.nfe-bloco-card .nfe-secao {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.nfe-bloco-card .nfe-secao + .nfe-secao {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.nfe-bloco-card > .nfe-secao:first-child > .nfe-secao-cab,
+.nfe-secao-card > .nfe-secao-cab {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.nfe-bloco-card > .nfe-secao:first-child .nfe-secao-titulo,
+.nfe-secao-card > .nfe-secao-cab .nfe-secao-titulo {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.nfe-bloco-card + .nfe-secao {
+  margin-top: 18px;
+}
+
 .nfe-secao-cab {
   display: flex;
   align-items: center;
@@ -449,6 +489,24 @@ body {
   gap: 8px 10px;
 }
 
+.nfe-totais .nfe-campo {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fafafa;
+}
+
+.nfe-totais .nfe-campo:last-child {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.nfe-totais .nfe-campo:last-child .nfe-label {
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
 @media (max-width: 1280px) {
   .nfe-totais {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -516,12 +574,78 @@ body {
   max-width: 720px;
 }
 
+.nfe-itens-toolbar {
+  position: relative;
+  z-index: 40;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+
+.nfe-itens-toolbar .nfe-busca-item {
+  margin-bottom: 0;
+}
+
 .nfe-sugestoes-produtos {
   max-height: min(360px, 50vh);
 }
 
 .nfe-itens-wrap {
   overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.nfe-itens-wrap .nfe-itens th {
+  background: #f8fafc;
+}
+
+.nfe-itens-wrap .nfe-itens thead th:first-child {
+  border-top-left-radius: calc(var(--radius-sm) - 1px);
+}
+
+.nfe-itens-wrap .nfe-itens thead th:last-child {
+  border-top-right-radius: calc(var(--radius-sm) - 1px);
+}
+
+.nfe-itens-wrap .nfe-itens tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.nfe-pagamento-corpo {
+  padding-top: 2px;
+}
+
+.nfe-tipo-cobranca {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .nfe-tipo-cobranca {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.nfe-tipo-cobranca-opcao {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.nfe-tipo-cobranca-opcao[data-ativo="true"] {
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
 .pdv-shell {

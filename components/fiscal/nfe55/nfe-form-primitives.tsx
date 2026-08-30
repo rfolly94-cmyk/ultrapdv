@@ -27,13 +27,15 @@ export function NfeSecao({
   titulo,
   extra,
   children,
+  className = "",
 }: {
   titulo: string;
   extra?: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="nfe-secao">
+    <section className={`nfe-secao ${className}`.trim()}>
       <div className="nfe-secao-cab">
         <h2 className="nfe-secao-titulo">{titulo}</h2>
         {extra}
@@ -49,16 +51,18 @@ export function NfeRecolhivel({
   extra,
   children,
   manterMontado = false,
+  className = "",
 }: {
   titulo: string;
   abertoInicial?: boolean;
   extra?: ReactNode;
   children: ReactNode;
   manterMontado?: boolean;
+  className?: string;
 }) {
   const [aberto, setAberto] = useState(abertoInicial);
   return (
-    <section className="nfe-secao">
+    <section className={`nfe-secao ${className}`.trim()}>
       <div className="nfe-secao-cab">
         <button
           type="button"

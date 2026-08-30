@@ -29,6 +29,7 @@ export async function avaliarTetoPagamentosNoServidor(params: {
     valorCentavos: number;
   }>;
   rejeitarPagamentoIncompleto?: boolean;
+  coberturaDuplicataCentavos?: number;
 }): Promise<
   | {
       ok: true;
@@ -88,41 +89,61 @@ export async function avaliarTetoPagamentosNoServidor(params: {
   const formaIds = [
     ...new Set(params.pagamentos.map((pagamento) => pagamento.formaPagamentoId)),
   ];
-  const { data: formas, error: erroFormas } = await params.supabase
-    .from("formas_pagamento")
-    .select("id, permite_troco")
-    .eq("empresa_id", params.empresaId)
-    .in("id", formaIds);
-
-  if (erroFormas || !formas) {
-    return {
-      ok: false,
-      erro: "Não foi possível validar as formas de pagamento.",
-    };
-  }
-
-  const permiteTrocoPorId = new Map<string, boolean>(
-    formas.map((forma: { id: string; permite_troco: boolean | null }) => [
-      forma.id,
-      forma.permite_troco === true,
-    ])
+  const coberturaDuplicataCentavos = Math.max(
+    0,
+    Math.round(params.coberturaDuplicataCentavos ?? 0)
   );
+  const permiteTrocoPorId = new Map<string, boolean>();
+  if (formaIds.length > 0) {
+    const { data: formas, error: erroFormas } = await params.supabase
+      .from("formas_pagamento")
+      .select("id, permite_troco")
+      .eq("empresa_id", params.empresaId)
+      .in("id", formaIds);
 
-  if (formaIds.some((id) => !permiteTrocoPorId.has(id))) {
-    return {
-      ok: false,
-      erro: "Forma de pagamento inválida.",
-    };
+    if (erroFormas || !formas) {
+      return {
+        ok: false,
+        erro: "Não foi possível validar as formas de pagamento.",
+      };
+    }
+
+    for (const forma of formas as Array<{ id: string; permite_troco: boolean | null }>) {
+      permiteTrocoPorId.set(forma.id, forma.permite_troco === true);
+    }
+
+    if (formaIds.some((id) => !permiteTrocoPorId.has(id))) {
+      return {
+        ok: false,
+        erro: "Forma de pagamento inválida.",
+      };
+    }
   }
 
-  const avaliacao = avaliarPagamentosPdv({
+  const avaliacaoBase = avaliarPagamentosPdv({
     totalVendaCentavos,
     pagamentos: params.pagamentos.map((pagamento) => ({
       valorCentavos: pagamento.valorCentavos,
-      permiteTroco:
-        permiteTrocoPorId.get(pagamento.formaPagamentoId) === true,
+      permiteTroco: permiteTrocoPorId.get(pagamento.formaPagamentoId) === true,
     })),
   });
+  const coberturaUsada = Math.min(
+    coberturaDuplicataCentavos,
+    avaliacaoBase.restanteCentavos
+  );
+  const avaliacao =
+    coberturaUsada > 0
+      ? avaliarPagamentosPdv({
+          totalVendaCentavos,
+          pagamentos: [
+            ...params.pagamentos.map((pagamento) => ({
+              valorCentavos: pagamento.valorCentavos,
+              permiteTroco: permiteTrocoPorId.get(pagamento.formaPagamentoId) === true,
+            })),
+            { valorCentavos: coberturaUsada, permiteTroco: false },
+          ],
+        })
+      : avaliacaoBase;
 
   if (avaliacao.bloqueado) {
     return {
