@@ -1,5 +1,6 @@
 "use client";
 
+import { FileDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { buscarConfiguracoesImpressaoAction } from "@/app/configuracoes/impressao/actions";
@@ -91,8 +92,8 @@ export function CaixaRelatorioAcoes({
   }
 
   return (
-    <div className="flex flex-col items-stretch gap-1">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
         <BotaoImprimirConector
           pdfUrl={pdfUrl}
           tipoDocumento="danfe_nfe"
@@ -110,6 +111,7 @@ export function CaixaRelatorioAcoes({
           disabled={baixando}
           onClick={() => void baixarPdf()}
         >
+          <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
           {baixando ? "Gerando..." : "Baixar PDF"}
         </button>
       </div>

@@ -1,0 +1,15 @@
+# Use this workspace to collaborate
+workspace:
+  id: 398c7edc-0d3e-4f83-8c93-67ec18b2a9ff
+
+# Each entry here maps a local resource to one or more corresponding objects in Postman Cloud
+
+cloudResources:
+  collections:
+    ../postman/collections/UltraPDV - C6 PIX Homologação - Ordem Oficial do Word: 02e34a3e-c95e-4fa3-8fb3-17ad6c0141fe
+
+# All resources in the `postman/` folder are automatically registered in Local View.
+# Point to additional files outside the `postman/` folder to register them individually. Example:
+#localResources:
+#  collections:
+#    - ../tests/E2E Test Collection/

@@ -371,6 +371,117 @@ test("formulario vazio não coleta segredo para apagar", async () => {
   assert.equal(coletado.erro, undefined);
 });
 
+test("C6 sandbox declara certificado e chave no mesmo conjunto do formulário", () => {
+  const campos = formularioCredenciaisProvedor("c6bank", "2").campos.map(
+    (campo) => campo.chave
+  );
+  assert.ok(campos.includes("certificadoPemHexadecimal"));
+  assert.ok(campos.includes("chavePrivadaPemHexadecimal"));
+});
+
+test("File C6 com .crt e .key entra em coletados.novos", async () => {
+  const cert = new File(["-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----\n"], "c6.crt", {
+    type: "application/x-x509-ca-cert",
+  });
+  const chave = new File(["-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----\n"], "c6.key", {
+    type: "application/pkcs8",
+  });
+  const form = new FormData();
+  form.set("certificadoPemHexadecimal", cert);
+  form.set("chavePrivadaPemHexadecimal", chave);
+
+  const coletado = await coletarNovosSegredosDoFormulario(form, "c6bank", "2");
+  assert.equal(coletado.erro, undefined);
+  assert.ok((coletado.novos.certificadoPemHexadecimal ?? "").length > 0);
+  assert.ok((coletado.novos.chavePrivadaPemHexadecimal ?? "").length > 0);
+
+  const certDiag = coletado.diagnosticoArquivos.find(
+    (item) => item.campo === "certificadoPemHexadecimal"
+  );
+  const chaveDiag = coletado.diagnosticoArquivos.find(
+    (item) => item.campo === "chavePrivadaPemHexadecimal"
+  );
+  assert.equal(certDiag?.incluidoEmNovos, true);
+  assert.equal(certDiag?.arrayBufferExecutou, true);
+  assert.ok((certDiag?.bytes ?? 0) > 0);
+  assert.ok((certDiag?.hexLength ?? 0) > 0);
+  assert.equal(chaveDiag?.incluidoEmNovos, true);
+});
+
+test("upload duck-typed que não é File entra no coletor C6", async () => {
+  const certBytes = Buffer.from(
+    "-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----\n"
+  );
+  const chaveBytes = Buffer.from(
+    "-----BEGIN PRIVATE KEY-----\nY\n-----END PRIVATE KEY-----\n"
+  );
+  const form = new FormData();
+  const originalGet = form.get.bind(form);
+  form.get = ((nome: string) => {
+    if (nome === "certificadoPemHexadecimal") {
+      return {
+        name: "c6.crt",
+        size: certBytes.byteLength,
+        type: "application/x-x509-ca-cert",
+        arrayBuffer: async () =>
+          certBytes.buffer.slice(
+            certBytes.byteOffset,
+            certBytes.byteOffset + certBytes.byteLength
+          ),
+      };
+    }
+    if (nome === "chavePrivadaPemHexadecimal") {
+      return {
+        name: "c6.key",
+        size: chaveBytes.byteLength,
+        type: "application/pkcs8",
+        arrayBuffer: async () =>
+          chaveBytes.buffer.slice(
+            chaveBytes.byteOffset,
+            chaveBytes.byteOffset + chaveBytes.byteLength
+          ),
+      };
+    }
+    return originalGet(nome);
+  }) as FormData["get"];
+
+  const bruto = form.get("certificadoPemHexadecimal");
+  assert.equal(bruto instanceof File, false);
+
+  const coletado = await coletarNovosSegredosDoFormulario(form, "c6bank", "2");
+  assert.equal(coletado.erro, undefined);
+  assert.equal(
+    coletado.diagnosticoArquivos.find(
+      (item) => item.campo === "certificadoPemHexadecimal"
+    )?.incluidoEmNovos,
+    true
+  );
+  assert.equal(
+    coletado.diagnosticoArquivos.find(
+      (item) => item.campo === "chavePrivadaPemHexadecimal"
+    )?.incluidoEmNovos,
+    true
+  );
+  assert.ok((coletado.novos.certificadoPemHexadecimal ?? "").length > 0);
+  assert.ok((coletado.novos.chavePrivadaPemHexadecimal ?? "").length > 0);
+});
+
+test("File vazio (size 0) não entra em coletados.novos", async () => {
+  const form = new FormData();
+  form.set(
+    "certificadoPemHexadecimal",
+    new File([], "c6.crt", { type: "application/x-x509-ca-cert" })
+  );
+  const coletado = await coletarNovosSegredosDoFormulario(form, "c6bank", "2");
+  assert.equal(coletado.novos.certificadoPemHexadecimal, undefined);
+  assert.equal(
+    coletado.diagnosticoArquivos.find(
+      (item) => item.campo === "certificadoPemHexadecimal"
+    )?.incluidoEmNovos,
+    false
+  );
+});
+
 test("legado Efí não é aplicado a outro provedor", () => {
   const mesclado = mesclarSegredosProvedor({
     provedor: "sicredi",
@@ -409,17 +520,19 @@ test("TODOS_OS_PROVEDORES_DO_SELECT_DEVEM_ESTAR_MAPEADOS", () => {
   );
 });
 
-test("somente Efí, Sicredi, Inter e Mercado Pago entram no select", () => {
+test("C6 Bank entra no select de PIX Integrado sem substituir os provedores Geranet", () => {
   assert.deepEqual(
     PROVEDORES_PIX_SELECIONAVEIS.map((item) => item.codigo).sort(),
-    ["efibank", "inter", "mercadopago", "sicredi"]
+    ["c6bank", "efibank", "inter", "mercadopago", "sicredi"]
   );
+  assert.equal(ehProvedorPixSelecionavel("c6bank"), true);
   assert.equal(ehProvedorPixSelecionavel("gerencianet"), false);
   assert.equal(ehProvedorPixSelecionavel("cielo"), false);
   assert.equal(ehProvedorPixSelecionavel("bancodobrasil"), false);
   assert.equal(codigoProvedorPixParaTela("gerencianet"), "efibank");
   assert.equal(codigoProvedorPixParaTela("cielo"), "efibank");
   assert.equal(codigoProvedorPixParaTela("sicredi"), "sicredi");
+  assert.equal(codigoProvedorPixParaTela("c6bank"), "c6bank");
 });
 
 test("provedores prontos usam só campos oficiais da Geranet", () => {

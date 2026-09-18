@@ -189,6 +189,10 @@ test("digitar rota diretamente sem permissão é bloqueado", () => {
     tipo: "autenticado",
   });
 
+  assert.deepEqual(resolverExigenciaRota("/api/cadastro/cnpj"), {
+    tipo: "autenticado",
+  });
+
   assert.deepEqual(
     resolverExigenciaRota(
       "/api/impressao/recibo/11111111-1111-4111-8111-111111111111"
@@ -314,4 +318,36 @@ test("migration de permissões isola por usuario e empresa", () => {
   assert.match(incremento, /usuarios_permissoes_empresas_modulo_check/);
   assert.match(incremento, /'relatorios'/);
   assert.doesNotMatch(incremento, /INSERT INTO public\.usuarios_permissoes_empresas/);
+});
+
+test("caixa emite PIX no PDV sem configurar_pix e não acessa a configuração", () => {
+  const caixa = presetDoPerfil("caixa");
+  assert.equal(temPermissao(caixa, "pdv", "acessar"), true);
+  assert.equal(temPermissao(caixa, "financeiro", "configurar_pix"), false);
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/api/pagamentos/pix/geranet/pdv/emitir",
+      permissoes: caixa,
+    }).ok,
+    true
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/api/pagamentos/pix/geranet/consultar",
+      permissoes: caixa,
+    }).ok,
+    true
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro/pix",
+      permissoes: caixa,
+    }).ok,
+    false
+  );
+  assert.deepEqual(resolverExigenciaRota("/api/pagamentos/pix/geranet/emitir"), {
+    tipo: "permissao",
+    modulo: "financeiro",
+    acao: "configurar_pix",
+  });
 });

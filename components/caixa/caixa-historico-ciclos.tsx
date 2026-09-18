@@ -16,7 +16,7 @@ export function CaixaHistoricoCiclos({
 
   return (
     <div data-caixa-historico-ciclos="true">
-      <h3 className="mb-2 text-[13px] font-semibold text-zinc-950">
+      <h3 className="mb-3 text-[15px] font-semibold tracking-tight text-zinc-950">
         Histórico de fechamentos e reaberturas
       </h3>
       <ul className="space-y-2 text-[13px] text-zinc-700">

@@ -38,11 +38,21 @@ test("cron fiscal: cada registro usa o próprio empresa_id, não a sessão", () 
   assert.match(contingencia, /item\.empresa_id/);
 });
 
-test("webhooks: não há rota de webhook PIX/Geranet no app", () => {
+test("webhooks: rota PIX C6 resolve empresa pela cobrança interna", () => {
   const rotas = arquivosTs(join(raiz, "app", "api")).filter((arquivo) =>
     arquivo.replaceAll("\\", "/").includes("webhook")
   );
-  assert.deepEqual(rotas, []);
+  assert.deepEqual(
+    rotas.map((arquivo) =>
+      arquivo.slice(raiz.length + 1).replaceAll("\\", "/")
+    ),
+    ["app/api/webhooks/pix/c6/route.ts"]
+  );
+  const rota = fonte("app/api/webhooks/pix/c6/route.ts");
+  assert.doesNotMatch(rota, /buscarVinculoEmpresaAtiva/);
+  assert.doesNotMatch(rota, /resolverEmpresaPix/);
+  assert.match(rota, /processarWebhookPixC6/);
+  assert.match(rota, /LIMITE_BODY_WEBHOOK_C6_BYTES/);
 });
 
 test("cache Next: app/ não usa unstable_cache nem revalidateTag de tenant", () => {

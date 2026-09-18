@@ -55,6 +55,7 @@ export const CODIGOS_PIX_SELECIONAVEIS = [
   "sicredi",
   "inter",
   "mercadopago",
+  "c6bank",
 ] as const;
 
 const MOTIVO_NAO_LIBERADO =
@@ -473,12 +474,13 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       return campo;
     }),
     {
-      configuracaoDisponivel: false,
-      motivoBloqueio: MOTIVO_NAO_LIBERADO,
-      suportaHomologacao: false,
+      selecionavel: true,
+      configuracaoDisponivel: true,
+      suportaHomologacao: true,
+      suportaProducao: true,
       documentacaoInstituicao: "https://www.c6bank.com.br/apis-integracao/",
       observacoes:
-        "Credenciais saem de Meu Perfil → Integrações via API no Web Banking PJ. Sandbox público não está documentado.",
+        "Autenticação direta no C6 (mTLS + client_credentials). Sandbox e produção usam pares distintos de certificado, Client ID, Client Secret e chave PIX no cofre da empresa.",
     }
   ),
   cielo: perfilMapeado(

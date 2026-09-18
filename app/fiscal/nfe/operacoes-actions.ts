@@ -66,6 +66,7 @@ import {
   type FaturaNfe,
 } from "@/lib/fiscal/nfe55/fatura-nfe";
 import { mesclarPagamentoDuplicataMercantil } from "@/lib/fiscal/nfe55/pagamento-fiscal-nfe";
+import { motivoImpedeExcluirRascunhoNfe55 } from "@/lib/fiscal/nfe55/rascunhos-nfe";
 import {
   normalizarTotaisNota,
   totaisNotaCentavos,
@@ -2439,7 +2440,7 @@ export async function prepararVendaParaEmissaoNfe(input: {
       if (coberturaDuplicataCentavos > 0) {
         const { data: formasEmpresa, error: formasErro } = await supabase
           .from("formas_pagamento")
-          .select("id, empresa_id, codigo, nome, codigo_fiscal, permite_fiado")
+          .select("id, empresa_id, codigo, nome, codigo_fiscal, permite_fiado, ativo")
           .eq("empresa_id", empresaId);
         if (formasErro) {
           return { ok: false, erro: formasErro.message };
@@ -2607,6 +2608,82 @@ export async function prepararVendaParaEmissaoNfe(input: {
     return {
       ok: false,
       erro: mensagemErro(error, "Não foi possível preparar a venda para emissão."),
+    };
+  }
+}
+
+export async function excluirRascunhoOperacaoFiscal(input: {
+  operacaoId: string;
+}): Promise<Resultado> {
+  try {
+    const { supabase, empresaId } = await getContexto();
+    const operacaoId = String(input.operacaoId ?? "").trim();
+    if (!operacaoId) {
+      return { ok: false, erro: "Informe o rascunho de NF-e." };
+    }
+
+    const { data: operacao } = await supabase
+      .from("fiscal_operacoes")
+      .select(
+        "id, empresa_id, status, venda_id, emissao_fiscal_id, saida_estoque_processada_at, recebimento_processado_at"
+      )
+      .eq("id", operacaoId)
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
+    if (!operacao || !registroPertenceAEmpresaAtiva(operacao, empresaId)) {
+      return { ok: false, erro: "Rascunho não encontrado na empresa ativa." };
+    }
+
+    const emissao = await carregarEmissaoParaEdicaoDocumento(
+      supabase,
+      empresaId,
+      operacao.emissao_fiscal_id
+    );
+    const impedimento = motivoImpedeExcluirRascunhoNfe55({
+      status: String(operacao.status),
+      saidaEstoqueProcessadaAt: operacao.saida_estoque_processada_at,
+      recebimentoProcessadoAt: operacao.recebimento_processado_at,
+      emissao,
+    });
+    if (impedimento) {
+      return { ok: false, erro: impedimento };
+    }
+
+    const { error: itensErro } = await supabase
+      .from("fiscal_operacoes_itens")
+      .delete()
+      .eq("operacao_id", operacao.id)
+      .eq("empresa_id", empresaId);
+    if (itensErro) {
+      return { ok: false, erro: itensErro.message };
+    }
+
+    const { data: excluida, error: operacaoErro } = await supabase
+      .from("fiscal_operacoes")
+      .delete()
+      .eq("id", operacao.id)
+      .eq("empresa_id", empresaId)
+      .in("status", ["rascunho", "pronta_para_verificacao", "pronta_para_emissao"])
+      .is("saida_estoque_processada_at", null)
+      .is("recebimento_processado_at", null)
+      .select("id")
+      .maybeSingle();
+    if (operacaoErro) {
+      return { ok: false, erro: operacaoErro.message };
+    }
+    if (!excluida) {
+      return { ok: false, erro: "Rascunho não encontrado na empresa ativa." };
+    }
+
+    revalidar(
+      operacao.id,
+      operacao.venda_id ? String(operacao.venda_id) : undefined
+    );
+    return { ok: true, mensagem: "Rascunho de NF-e excluído." };
+  } catch (error) {
+    return {
+      ok: false,
+      erro: mensagemErro(error, "Não foi possível excluir o rascunho de NF-e."),
     };
   }
 }

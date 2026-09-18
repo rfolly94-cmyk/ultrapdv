@@ -1,0 +1,39 @@
+$kind: http-request
+url: "{{pix_base}}/cobv/{{txid_cobv}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "calendario": {
+        "dataDeVencimento": "{{data_vencimento}}",
+        "validadeAposVencimento": 30
+      },
+      "devedor": {
+        "cnpj": "{{cnpj}}",
+        "nome": "{{nome_devedor}}",
+        "logradouro": "Rua de Teste",
+        "cidade": "Cuiaba",
+        "uf": "MT",
+        "cep": "78000000"
+      },
+      "valor": {
+        "original": "1.00"
+      },
+      "chave": "{{chave_pix}}",
+      "solicitacaoPagador": "Teste de homologacao UltraPDV cobranca com vencimento"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 201', function () {
+          pm.response.to.have.status(201);
+      });
+    language: text/javascript
+order: 7000

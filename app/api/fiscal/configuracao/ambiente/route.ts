@@ -10,6 +10,7 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
 import {
   MENSAGEM_FUSO_NAO_CONFIGURADO,
@@ -318,12 +319,9 @@ export async function POST(
         )
         .limit(1),
 
-      admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       ),
     ]);
 

@@ -2,6 +2,10 @@ import {
   MENSAGEM_CFOP_NATUREZA_GRUPO_NAO_CONFIGURADO,
 } from "./catalogo";
 import {
+  identidadeSugeridaParaTipo,
+  validarCfopNaMatrizNatureza,
+} from "./coerencia-natureza-cfop";
+import {
   filtrarRegistrosDaEmpresaAtiva,
 } from "@/lib/empresa/assert-registro-empresa-ativa";
 
@@ -48,6 +52,38 @@ function texto(valor: unknown) {
 
 function cfopValido(valor: string) {
   return /^\d{4}$/.test(valor);
+}
+
+function concluirCfopResolvido(params: {
+  cfop: string;
+  origem: "grupo_fiscal_venda" | "regra_natureza";
+  tipoOperacaoInterno: string;
+  tipoDestino: TipoDestinoCfop;
+  tpNf?: string | null;
+  finNfe?: string | null;
+}): ResultadoCfopEfetivo {
+  const sugerida = identidadeSugeridaParaTipo(params.tipoOperacaoInterno);
+  const tpNf = texto(params.tpNf) || sugerida?.tpNf || "";
+  const finNfe = texto(params.finNfe) || sugerida?.finNfe || "";
+
+  if (tpNf) {
+    const coerencia = validarCfopNaMatrizNatureza({
+      cfop: params.cfop,
+      tpNf,
+      tipoDestino: params.tipoDestino,
+      tipoOperacaoInterno: params.tipoOperacaoInterno,
+      finNfe,
+    });
+    if (!coerencia.ok) {
+      return coerencia;
+    }
+  }
+
+  return {
+    ok: true,
+    cfop: params.cfop,
+    origem: params.origem,
+  };
 }
 
 export function ehTipoDestinoCfop(
@@ -165,6 +201,8 @@ export function resolverCfopEfetivo(params: {
   empresaIdAtiva?: string | null;
   naturezaPadrao?: boolean;
   naturezaDescricao?: string | null;
+  tpNf?: string | null;
+  finNfe?: string | null;
 }): ResultadoCfopEfetivo {
   const tipo = texto(params.tipoOperacaoInterno);
   const naturezaId = texto(params.naturezaId);
@@ -190,11 +228,14 @@ export function resolverCfopEfetivo(params: {
   const escolhida = regrasAtivas[0];
 
   if (escolhida) {
-    return {
-      ok: true,
+    return concluirCfopResolvido({
       cfop: texto(escolhida.cfop),
       origem: "regra_natureza",
-    };
+      tipoOperacaoInterno: tipo,
+      tipoDestino: params.tipoDestino,
+      tpNf: params.tpNf,
+      finNfe: params.finNfe,
+    });
   }
 
   const podeFallbackGrupoFiscal =
@@ -211,11 +252,14 @@ export function resolverCfopEfetivo(params: {
       };
     }
 
-    return {
-      ok: true,
+    return concluirCfopResolvido({
       cfop,
       origem: "grupo_fiscal_venda",
-    };
+      tipoOperacaoInterno: tipo,
+      tipoDestino: params.tipoDestino,
+      tpNf: params.tpNf,
+      finNfe: params.finNfe,
+    });
   }
 
   return {

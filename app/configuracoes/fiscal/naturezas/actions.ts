@@ -17,13 +17,8 @@ import {
 } from "@/lib/fiscal/operacoes/catalogo";
 import {
   ehTipoDestinoCfop,
-  type TipoDestinoCfop,
 } from "@/lib/fiscal/operacoes/resolver-cfop";
-import {
-  CFOPS_INTERESTADUAIS,
-  CFOPS_INTERNOS,
-  existeCodigo,
-} from "@/lib/fiscal/tabelas-fiscais";
+import { validarCfopNaMatrizNatureza, validarCoerenciaNatureza } from "@/lib/fiscal/operacoes/coerencia-natureza-cfop";
 
 const BASE = "/configuracoes/fiscal/naturezas";
 
@@ -102,8 +97,17 @@ function lerNaturezaForm(formData: FormData) {
 
   if (!ehFinNfeSuportada(finNfe)) {
     irComErro(
-      "A finalidade fiscal deve ser 1 (Normal), 2 (Complementar), 3 (Ajuste) ou 4 (Devolução)."
+      "A finalidade fiscal deve ser 1 (Normal), 2 (Complementar), 3 (Ajuste) ou 4 (Devolução/Retorno)."
     );
+  }
+
+  const coerencia = validarCoerenciaNatureza({
+    tipoOperacaoInterno,
+    tpNf,
+    finNfe,
+  });
+  if (!coerencia.ok) {
+    irComErro(coerencia.mensagem);
   }
 
   return {
@@ -116,22 +120,14 @@ function lerNaturezaForm(formData: FormData) {
   };
 }
 
-function cfopValidoNaMatriz(
-  cfop: string,
-  tipoDestino: TipoDestinoCfop
-) {
-  if (tipoDestino === "interna") {
-    return existeCodigo(CFOPS_INTERNOS, cfop);
-  }
-
-  return existeCodigo(CFOPS_INTERESTADUAIS, cfop);
-}
-
 async function persistirRegrasCfopNatureza(params: {
   admin: ReturnType<typeof createAdminClient>;
   empresaId: string;
   naturezaId: string;
   formData: FormData;
+  tpNf: string;
+  tipoOperacaoInterno: string;
+  finNfe: string;
 }) {
   const { admin, empresaId, naturezaId, formData } = params;
 
@@ -204,12 +200,15 @@ async function persistirRegrasCfopNatureza(params: {
         continue;
       }
 
-      if (!cfopValidoNaMatriz(cfop, tipoDestino)) {
-        irComErro(
-          `CFOP ${cfop} inválido para operação ${
-            tipoDestino === "interna" ? "interna" : "interestadual"
-          }. Use o catálogo fiscal (5xxx interna / 6xxx interestadual).`
-        );
+      const coerenciaCfop = validarCfopNaMatrizNatureza({
+        cfop,
+        tpNf: params.tpNf,
+        tipoDestino,
+        tipoOperacaoInterno: params.tipoOperacaoInterno,
+        finNfe: params.finNfe,
+      });
+      if (!coerenciaCfop.ok) {
+        irComErro(coerenciaCfop.mensagem);
       }
 
       if (existente) {
@@ -283,6 +282,9 @@ export async function salvarNaturezaOperacao(formData: FormData) {
       empresaId,
       naturezaId: id,
       formData,
+      tpNf: dados.tp_nf,
+      tipoOperacaoInterno: dados.tipo_operacao_interno,
+      finNfe: dados.fin_nfe,
     });
 
     revalidatePath(BASE);

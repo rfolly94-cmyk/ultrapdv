@@ -13,7 +13,6 @@ import { PageHeader } from "@/components/ui/page-header";
 import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CancelarVendaComercial } from "@/components/vendas/cancelar-venda-comercial";
-import { DocumentoFiscalBotoes } from "@/components/vendas/documento-fiscal-botoes";
 import { VendasModuleTabs } from "@/components/vendas/vendas-module-tabs";
 import { VendasPeriodoFiltro } from "@/components/vendas/vendas-periodo-filtro";
 import { imprimirUrlPdfNoUltraPdvConector } from "@/lib/impressao/imprimir-pdf";
@@ -203,12 +202,12 @@ function fiscalResumo(
 
   return (
     <>
-      <div className="text-[11px] text-zinc-500">
+      <div className="whitespace-normal break-words text-[11px] leading-snug text-zinc-500">
         {serieNumero}
       </div>
       {motivo ? (
         <div
-          className="max-w-[240px] truncate text-[11px] text-zinc-600"
+          className="whitespace-normal break-words text-[11px] leading-snug text-zinc-600"
           title={motivo}
         >
           {motivo}
@@ -456,19 +455,19 @@ export function VendasLista({
         }
       />
 
-      <DataTable minWidth={1180}>
+      <DataTable minWidth={980}>
         <thead>
           <tr>
+            <th>Ações</th>
             <th>Venda</th>
             <th>Data</th>
             <th>Cliente</th>
             <th>Operador</th>
             <th>Origem</th>
-            <th>Pagamento</th>
+            <th className="w-[9rem] max-w-[9rem]">Pagamento</th>
             <th>Status</th>
-            <th>Fiscal</th>
-            <th className="num">Total</th>
-            <th>Ações</th>
+            <th className="w-[9.5rem] max-w-[9.5rem]">Fiscal</th>
+            <th className="num min-w-[8rem]">Valor</th>
           </tr>
         </thead>
         <tbody>
@@ -493,60 +492,14 @@ export function VendasLista({
               statusFiscal: venda.fiscal?.status,
               modelo: "65",
             });
+            const pagamentoTexto =
+              venda.pagamentos.length > 0
+                ? venda.pagamentos.map((item) => item.nome).join(" + ")
+                : "—";
             return (
             <tr key={venda.id}>
-              <td className="font-medium">#{venda.numero ?? "—"}</td>
-              <td>{formatarData(venda.dataVenda)}</td>
-              <td className="max-w-[220px] truncate font-medium">
-                {venda.cliente}
-              </td>
-              <td className="max-w-[180px] truncate">{venda.usuario}</td>
-              <td>
-                <StatusBadge status={venda.origem}>
-                  {rotuloOrigemVendaComercial(venda.origem)}
-                </StatusBadge>
-              </td>
-              <td>
-                {venda.pagamentos.length > 0
-                  ? venda.pagamentos.map((item) => item.nome).join(" + ")
-                  : "—"}
-              </td>
-              <td>
-                <StatusBadge status={venda.status} />
-              </td>
-              <td>
-                {venda.fiscal ? (
-                  <div className="space-y-0.5">
-                    <StatusBadge
-                      status={venda.fiscal.status}
-                    >
-                      {fiscalLabel(venda)}
-                    </StatusBadge>
-                    {fiscalResumo(venda)}
-                  </div>
-                ) : (
-                  modeloFiscal(venda.modeloFiscalIntencao)
-                )}
-              </td>
-              <td className="num font-medium">
-                {moeda.format(venda.valorTotal)}
-              </td>
               <td>
                 <RowActions
-                  editHref={`/vendas/${venda.id}`}
-                  editLabel="Abrir"
-                  extra={
-                    venda.fiscal &&
-                    (venda.fiscal.status === "autorizada" ||
-                      venda.fiscal.status === "cancelada") ? (
-                      <DocumentoFiscalBotoes
-                        emissaoId={venda.fiscal.id}
-                        modelo={venda.fiscal.modelo}
-                        compacto
-                        somente="pdf"
-                      />
-                    ) : null
-                  }
                   items={[
                     {
                       label: "Abrir venda",
@@ -606,6 +559,7 @@ export function VendasLista({
                       href: venda.fiscal
                         ? `/api/fiscal/emissoes/${venda.fiscal.id}/arquivo?tipo=pdf`
                         : undefined,
+                      target: "_blank",
                       hidden:
                         !venda.fiscal ||
                         (venda.fiscal.status !== "autorizada" &&
@@ -622,6 +576,45 @@ export function VendasLista({
                     },
                   ]}
                 />
+              </td>
+              <td className="font-medium">#{venda.numero ?? "—"}</td>
+              <td>{formatarData(venda.dataVenda)}</td>
+              <td className="max-w-[220px] truncate font-medium">
+                {venda.cliente}
+              </td>
+              <td className="max-w-[180px] truncate">{venda.usuario}</td>
+              <td>
+                <StatusBadge status={venda.origem}>
+                  {rotuloOrigemVendaComercial(venda.origem)}
+                </StatusBadge>
+              </td>
+              <td className="w-[9rem] max-w-[9rem]">
+                <span
+                  className="block truncate"
+                  title={pagamentoTexto === "—" ? undefined : pagamentoTexto}
+                >
+                  {pagamentoTexto}
+                </span>
+              </td>
+              <td>
+                <StatusBadge status={venda.status} />
+              </td>
+              <td className="w-[9.5rem] max-w-[9.5rem] !h-auto !max-h-none !whitespace-normal align-top">
+                {venda.fiscal ? (
+                  <div className="min-w-0 max-w-[9.5rem] space-y-0.5 py-1.5 [&_span]:h-auto [&_span]:max-w-full [&_span]:whitespace-normal [&_span]:leading-snug">
+                    <StatusBadge
+                      status={venda.fiscal.status}
+                    >
+                      {fiscalLabel(venda)}
+                    </StatusBadge>
+                    {fiscalResumo(venda)}
+                  </div>
+                ) : (
+                  modeloFiscal(venda.modeloFiscalIntencao)
+                )}
+              </td>
+              <td className="num min-w-[8rem] font-medium">
+                {moeda.format(venda.valorTotal)}
               </td>
             </tr>
             );

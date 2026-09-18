@@ -959,6 +959,70 @@ export async function salvarInformacoesAdicionaisDevolucao(input: {
   }
 }
 
+export async function listarNotasEntradaParaDevolucao(input?: {
+  busca?: string;
+}): Promise<
+  | {
+      ok: true;
+      entradas: Array<{
+        id: string;
+        numero: string;
+        serie: string;
+        chave: string;
+        emitente: string;
+      }>;
+    }
+  | { ok: false; erro: string }
+> {
+  try {
+    const { supabase, empresaId } = await getContexto();
+    const termo = String(input?.busca ?? "").trim();
+    const seguro = termo.replace(/[%_,()]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+
+    let consulta = supabase
+      .from("fiscal_documentos_entrada")
+      .select(
+        "id, empresa_id, numero, serie, chave_acesso, razao_social_emitente, status"
+      )
+      .eq("empresa_id", empresaId)
+      .eq("status", "entrada_concluida")
+      .order("created_at", { ascending: false })
+      .limit(40);
+
+    if (seguro) {
+      consulta = consulta.or(
+        `numero.ilike.%${seguro}%,chave_acesso.ilike.%${seguro}%,razao_social_emitente.ilike.%${seguro}%`
+      );
+    }
+
+    const { data, error } = await consulta;
+    if (error) {
+      return { ok: false, erro: error.message };
+    }
+
+    return {
+      ok: true,
+      entradas: (data ?? [])
+        .filter((entrada) => registroPertenceAEmpresaAtiva(entrada, empresaId))
+        .map((entrada) => ({
+          id: String(entrada.id),
+          numero: String(entrada.numero ?? ""),
+          serie: String(entrada.serie ?? ""),
+          chave: String(entrada.chave_acesso ?? ""),
+          emitente: String(entrada.razao_social_emitente ?? ""),
+        })),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      erro: mensagemErro(
+        error,
+        "Não foi possível listar as notas de entrada da empresa ativa."
+      ),
+    };
+  }
+}
+
 export async function listarEntradasElegiveisDevolucao(input: {
   devolucaoId: string;
 }): Promise<

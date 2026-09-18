@@ -40,6 +40,8 @@ export type PixGeranetCheckoutState = {
   pagoEm?: string | null;
   expiraEm?: string | null;
   mensagemConsulta?: string | null;
+  valorPago?: number | null;
+  e2eidMascarado?: string | null;
 };
 
 type Props = {
@@ -59,9 +61,13 @@ function horarioLocal(iso: string) {
   return new Date(iso).toLocaleString("pt-BR");
 }
 
+function ehPixC6(state: PixGeranetCheckoutState | null) {
+  return /c6/i.test(String(state?.provedorNome ?? ""));
+}
+
 function statusUi(state: PixGeranetCheckoutState) {
   if (state.status === "paga") {
-    return "PIX recebido";
+    return "Pagamento confirmado";
   }
 
   if (state.status === "divergencia_valor") {
@@ -82,6 +88,10 @@ function statusUi(state: PixGeranetCheckoutState) {
 
   if (state.mensagemConsulta) {
     return state.mensagemConsulta;
+  }
+
+  if (ehPixC6(state)) {
+    return "Aguardando pagamento";
   }
 
   return "Aguardando pagamento...";
@@ -143,6 +153,15 @@ function mapearEstado(data: Record<string, unknown>, fallback: PixGeranetCheckou
         : status === "divergencia_valor"
           ? MENSAGEM_PIX_GERANET_DIVERGENCIA
           : null,
+    valorPago:
+      data.valor_pago != null
+        ? Number(data.valor_pago)
+        : cobranca.valor_pago != null
+          ? Number(cobranca.valor_pago)
+          : fallback.valorPago,
+    e2eidMascarado: data.e2eid_mascarado
+      ? String(data.e2eid_mascarado)
+      : fallback.e2eidMascarado,
   } satisfies PixGeranetCheckoutState;
 }
 
@@ -226,6 +245,10 @@ export function PixGeranetCheckout({
         evidencia: String(data.evidencia ?? "emissao_pendente"),
         pagoEm: data.pago_em ? String(data.pago_em) : null,
         expiraEm: data.expira_em ? String(data.expira_em) : null,
+        valorPago: data.valor_pago != null ? Number(data.valor_pago) : null,
+        e2eidMascarado: data.e2eid_mascarado
+          ? String(data.e2eid_mascarado)
+          : null,
       });
     } catch (error) {
       onErro(
@@ -370,7 +393,9 @@ export function PixGeranetCheckout({
   return (
     <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
       <p className="text-sm font-semibold text-zinc-950">
-        PIX Integrado / Geranet
+        {(provedorNome || state?.provedorNome) === "C6 Bank"
+          ? "PIX C6"
+          : "PIX Integrado / Geranet"}
       </p>
       {(provedorNome || state?.provedorNome) && (
         <p className="text-xs text-zinc-500">
@@ -400,8 +425,12 @@ export function PixGeranetCheckout({
 
       {qrCompativel && state.status === "paga" && (
         <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-          <p className="font-semibold">✓ PIX recebido</p>
-          <p className="mt-1">{formatarValorPixBr(valor)}</p>
+          <p className="font-semibold">
+            {ehPixC6(state) ? "Pagamento confirmado" : "✓ PIX recebido"}
+          </p>
+          <p className="mt-1">
+            {formatarValorPixBr(state.valorPago ?? valor)}
+          </p>
           {state.provedorNome && (
             <p className="mt-2 text-xs">Banco: {state.provedorNome}</p>
           )}
@@ -410,6 +439,9 @@ export function PixGeranetCheckout({
           )}
           {state.pagoEm && (
             <p className="text-xs">Pago em: {horarioLocal(state.pagoEm)}</p>
+          )}
+          {state.e2eidMascarado && (
+            <p className="text-xs">E2E: {state.e2eidMascarado}</p>
           )}
           <p className="mt-2 text-xs">Pagamento confirmado automaticamente.</p>
         </div>
@@ -444,7 +476,7 @@ export function PixGeranetCheckout({
                 }}
                 className="text-xs font-semibold text-blue-700"
               >
-                {copiado ? "Código copiado" : "Copiar"}
+                {copiado ? "Código copiado" : "Copiar código PIX"}
               </button>
             </>
           )}
@@ -468,14 +500,26 @@ export function PixGeranetCheckout({
             {statusUi(state)}
           </p>
           {state.status === "pendente" && (
-            <button
-              type="button"
-              disabled={ocupado || cancelando}
-              onClick={() => setDialogAberto(true)}
-              className="h-9 w-full rounded-md border border-zinc-300 text-xs font-semibold uppercase tracking-wide text-zinc-600 hover:bg-zinc-100"
-            >
-              Descartar cobrança
-            </button>
+            <div className={`grid gap-2 ${ehPixC6(state) ? "grid-cols-1" : "grid-cols-2"}`}>
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => void consultar(state)}
+                className="h-9 rounded-md border border-zinc-300 text-xs font-semibold uppercase tracking-wide text-zinc-600 hover:bg-zinc-100"
+              >
+                Consultar pagamento
+              </button>
+              {ehPixC6(state) ? null : (
+              <button
+                type="button"
+                disabled={ocupado || cancelando}
+                onClick={() => setDialogAberto(true)}
+                className="h-9 rounded-md border border-zinc-300 text-xs font-semibold uppercase tracking-wide text-zinc-600 hover:bg-zinc-100"
+              >
+                Cancelar
+              </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -511,7 +555,7 @@ export function PixGeranetCheckout({
                 onClick={() => void cancelarPendente()}
                 className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
               >
-                {cancelando ? "Cancelando..." : "Descartar"}
+                {cancelando ? "Cancelando..." : "Cancelar"}
               </button>
             </div>
           </div>

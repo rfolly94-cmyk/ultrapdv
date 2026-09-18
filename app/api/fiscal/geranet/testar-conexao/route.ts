@@ -3,10 +3,12 @@ import {
 } from "next/server";
 
 import {
-  ErroAdministracaoUsuarios,
-  MENSAGEM_ADMIN_DIAGNOSTICO,
-  obterContextoAdministracaoUsuarios,
-} from "@/lib/usuarios/contexto-administracao";
+  GERANET_NFE_BASE_URL,
+  MENSAGEM_API_GERANET_PLATAFORMA_AUSENTE,
+  obterApiKeyGeranetPlataforma,
+} from "@/lib/fiscal/geranet/credencial-plataforma";
+import { ErroMaster, exigirMaster } from "@/lib/master/exigir-master";
+import { ErroAdminPlataforma } from "@/lib/plataforma/contexto";
 
 function respostaErro(
   mensagem: string,
@@ -21,58 +23,23 @@ function respostaErro(
   );
 }
 
-function texto(
-  valor: unknown
-) {
-  return String(
-    valor ?? ""
-  ).trim();
-}
-
 export async function GET() {
   try {
-    const {
-      admin,
-      empresaId,
-    } =
-      await obterContextoAdministracaoUsuarios({
-        mensagemNaoAdmin:
-          MENSAGEM_ADMIN_DIAGNOSTICO,
-      });
+    const { admin } = await exigirMaster();
 
-    const {
-      data: segredosData,
-      error: segredosError,
-    } = await admin.rpc(
-      "obter_segredos_fiscais",
-      {
-        p_empresa_id:
-          empresaId,
-      }
-    );
-
-    if (segredosError) {
+    let apiKey = "";
+    try {
+      apiKey = await obterApiKeyGeranetPlataforma(admin);
+    } catch {
       return respostaErro(
-        "Não foi possível ler os segredos fiscais no servidor.",
+        "Não foi possível ler a API Geranet da plataforma.",
         500
       );
     }
 
-    const segredos =
-      (segredosData ?? {}) as {
-        geranet_api_key?:
-          | string
-          | null;
-      };
-
-    const apiKey =
-      texto(
-        segredos.geranet_api_key
-      );
-
     if (!apiKey) {
       return respostaErro(
-        "API Key da Geranet não está configurada.",
+        MENSAGEM_API_GERANET_PLATAFORMA_AUSENTE,
         422
       );
     }
@@ -91,7 +58,7 @@ export async function GET() {
 
     try {
       resposta = await fetch(
-        "https://nfe.geranet.net/api/v1/user",
+        `${GERANET_NFE_BASE_URL}/user`,
         {
           method: "GET",
 
@@ -169,9 +136,6 @@ export async function GET() {
       );
     }
 
-    // Não retornamos o objeto completo
-    // de /api/v1/user porque não é
-    // necessário para validar a integração.
     return NextResponse.json({
       ok: true,
 
@@ -182,16 +146,13 @@ export async function GET() {
       geranet_http_status:
         resposta.status,
 
-      empresa_id:
-        empresaId,
-
       aviso:
         "Conexão com a Geranet validada. Nenhuma nota foi emitida e nenhuma numeração fiscal foi alterada.",
     });
   } catch (error) {
     if (
-      error instanceof
-      ErroAdministracaoUsuarios
+      error instanceof ErroMaster ||
+      error instanceof ErroAdminPlataforma
     ) {
       return respostaErro(
         error.message,

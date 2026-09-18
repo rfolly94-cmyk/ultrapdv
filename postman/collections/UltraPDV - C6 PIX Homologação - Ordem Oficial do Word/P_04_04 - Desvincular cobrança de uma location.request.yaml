@@ -1,0 +1,16 @@
+$kind: http-request
+description: No Word do C6 este item aparece por engano como P_02_04; ele é o 4º teste do bloco P_04.
+url: "{{pix_base}}/loc/{{location_id}}/txid"
+method: DELETE
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 200', function () {
+          pm.response.to.have.status(200);
+      });
+    language: text/javascript
+order: 18000

@@ -15,6 +15,7 @@ import type {
   CredenciaisBancariasPix,
   IntegracaoPixPublica,
 } from "./types";
+import { obterApiKeyGeranetPlataforma } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 export { ErroPixGeranet } from "./erro";
 
@@ -88,26 +89,36 @@ export async function carregarIntegracaoPix(empresaId: string) {
   return (data as IntegracaoPixPublica | null) ?? null;
 }
 
-export async function carregarApiKeyGeranet(empresaId: string) {
+export async function carregarApiKeyGeranet(_empresaId?: string) {
   const admin = createAdminClient();
-  const { data, error } = await admin.rpc("obter_segredos_fiscais", {
-    p_empresa_id: empresaId,
-  });
-
-  if (error) {
+  let chave = "";
+  try {
+    chave = await obterApiKeyGeranetPlataforma(admin);
+  } catch {
     throw new ErroPixGeranet(
-      "Não foi possível ler a API Key Geranet do cofre fiscal.",
+      "Não foi possível ler a API Key Geranet da plataforma.",
       500
     );
   }
 
-  const chave = String(
-    (data as { geranet_api_key?: string } | null)?.geranet_api_key ?? ""
-  ).trim();
+  if (!chave && _empresaId) {
+    const { data, error } = await admin.rpc("obter_segredos_fiscais", {
+      p_empresa_id: _empresaId,
+    });
+    if (error) {
+      throw new ErroPixGeranet(
+        "Não foi possível ler a API Key Geranet do cofre fiscal.",
+        500
+      );
+    }
+    chave = String(
+      (data as { geranet_api_key?: string } | null)?.geranet_api_key ?? ""
+    ).trim();
+  }
 
   if (!chave) {
     throw new ErroPixGeranet(
-      "Configure a API Key Geranet em Configurações → Fiscal → Geranet antes de usar o PIX.",
+      "A API Geranet da plataforma ainda não está configurada.",
       422
     );
   }

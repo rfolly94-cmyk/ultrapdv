@@ -1,0 +1,25 @@
+$kind: collection
+description: Coleção organizada exatamente na sequência do roteiro C6 Developers v3.0 para PIX. Use as requisições UMA POR UMA, na ordem. Configure o certificado mTLS do Sandbox no Postman para baas-api-sandbox.c6bank.info:443. Preencha client_id e client_secret somente localmente. O AT_01 salva automaticamente access_token. P_05_01/P_05_03/P_05_04 exigem e2eid real de PIX recebido. P_06_01 exige webhook_url HTTPS público.
+variables:
+  auth_url: https://baas-api-sandbox.c6bank.info/v1/auth/
+  pix_base: https://baas-api-sandbox.c6bank.info/v2/pix
+  client_id: ""
+  client_secret: ""
+  access_token: ""
+  chave_pix: 13cd2116-0a34-4cfe-a5bb-cc3ffc85a70a
+  cnpj: "42741754000142"
+  nome_devedor: SMARTCELL CELULARES E UTILIDADES LTDA
+  txid_imediata: ULTRAPDV20260911TESTE000001ABC
+  txid_cobv: ULTRAPDVCV202609110000000001
+  lote_id: ULTRAPDVLOTE202609110000000001
+  lote_item_txid_1: ULTRAPDVLOTEITEM202609110000001
+  lote_item_txid_2: ULTRAPDVLOTEITEM202609110000002
+  location_id: "1175"
+  inicio: 2026-09-11T00:00:00Z
+  fim: 2026-09-11T23:59:59Z
+  data_vencimento: 2026-12-30
+  data_vencimento_lote: 2026-12-31
+  e2eid: ""
+  id_devolucao: ULTRAPDVDEV202609110001
+  valor_devolucao: "1.00"
+  webhook_url: ""

@@ -20,6 +20,7 @@ import {
   checkFusoHorarioProntidao,
   checkNaturezaProntidao,
 } from "@/lib/fiscal/fuso-horario-empresa";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 export const dynamic =
   "force-dynamic";
@@ -211,12 +212,9 @@ export default async function ProntidaoFiscalPage() {
         )
         .maybeSingle(),
 
-      admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       ),
     ]);
 
@@ -435,7 +433,7 @@ export default async function ProntidaoFiscalPage() {
       codigo:
         "geranet",
       titulo:
-        "Integração Geranet",
+        "Serviço de emissão fiscal",
       ok:
         Boolean(
           texto(
@@ -448,8 +446,8 @@ export default async function ProntidaoFiscalPage() {
           segredos
             .geranet_api_key
         )
-          ? "API Key presente no cofre fiscal."
-          : "API Key da Geranet não encontrada.",
+          ? "Configurado na plataforma."
+          : "A plataforma ainda não configurou o serviço de emissão.",
       obrigatorio:
         true,
     },

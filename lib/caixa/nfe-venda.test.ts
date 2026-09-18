@@ -100,6 +100,24 @@ test("natureza real: só venda comercial nova com recebimento exige Caixa", () =
   );
   assert.equal(
     nfeVendaNovaExigeCaixa({
+      tipoOperacaoInterno: "devolucao_venda",
+    }),
+    false
+  );
+  assert.equal(
+    nfeVendaNovaExigeCaixa({
+      tipoOperacaoInterno: "remessa",
+    }),
+    false
+  );
+  assert.equal(
+    nfeVendaNovaExigeCaixa({
+      tipoOperacaoInterno: "retorno",
+    }),
+    false
+  );
+  assert.equal(
+    nfeVendaNovaExigeCaixa({
       tipoOperacaoInterno: "ajuste",
     }),
     false

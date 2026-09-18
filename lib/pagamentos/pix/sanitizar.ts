@@ -1,5 +1,5 @@
 const CHAVES_SECRETAS =
-  /certificado|senha|api.?key|token|authorization|csc|csrt|password|secret|clienteSegredo|clienteId|chaveUsuario|chavePrivada|chaveConsumidor|segredoConsumidor|chaveAplicacao|autenticacaoApi|chaveAutenticacao/i;
+  /certificado|senha|api.?key|token|authorization|csc|csrt|password|secret|clienteSegredo|clienteId|chaveUsuario|chavePrivada|chaveConsumidor|segredoConsumidor|chaveAplicacao|autenticacaoApi|chaveAutenticacao|private.?key|access_token|client_secret/i;
 
 export function sanitizarRespostaPix(valor: unknown): unknown {
   if (valor === null || valor === undefined) {

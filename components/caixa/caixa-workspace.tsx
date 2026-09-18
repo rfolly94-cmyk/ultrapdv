@@ -2,6 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  ClipboardList,
+  Lock,
+  PanelBottomOpen,
+  Wallet,
+} from "lucide-react";
 
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
 import { DetailDrawer } from "@/components/ui/detail-drawer";
@@ -138,7 +146,8 @@ export function CaixaWorkspace({
   }
 
   return (
-    <div className="space-y-4 px-4 py-4">
+    <div className="space-y-5 pb-8 pt-5">
+      <div className="space-y-5 px-[var(--page-pad)]">
       {erroCego || erroFechar || msgGaveta?.tipo === "erro" ? (
         <PageAlert type="erro" className="mx-0 mt-0">
           {erroCego || erroFechar || msgGaveta?.texto}
@@ -160,37 +169,45 @@ export function CaixaWorkspace({
       ) : null}
 
       {podeConfigurar ? (
-        <label className="flex items-center gap-2 text-[13px] text-zinc-700">
+        <label className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-md)] border border-[var(--line)] bg-white px-4 py-3 text-[13px] text-zinc-700 shadow-[var(--shadow-card)]">
           <input
             type="checkbox"
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300"
             checked={painel.fechamentoCego}
             disabled={pendingCego}
             onChange={(event) => alternarCego(event.target.checked)}
           />
-          Fechamento cego (não mostra o esperado durante a conferência)
+          <span className="leading-5">
+            Fechamento cego (não mostra o esperado durante a conferência)
+          </span>
         </label>
       ) : null}
 
       {aba === "atual" ? (
         atual ? (
-          <section className="space-y-4 rounded-md border border-zinc-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-[16px] font-semibold text-zinc-950">
-                    Caixa #{atual.numero}
-                  </h2>
-                  <StatusBadge status="aberto">Aberto</StatusBadge>
-                  {atual.reaberto ? (
-                    <StatusBadge status="reaberto">REABERTO</StatusBadge>
-                  ) : null}
+          <section className="space-y-5 rounded-[var(--radius-lg)] border border-[var(--line)] bg-white p-5 shadow-[var(--shadow-card)] sm:p-6">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-soft)] text-[var(--primary)]">
+                  <Wallet className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-[20px] font-semibold tracking-tight text-zinc-950">
+                      Caixa #{atual.numero}
+                    </h2>
+                    <StatusBadge status="aberto">Aberto</StatusBadge>
+                    {atual.reaberto ? (
+                      <StatusBadge status="reaberto">REABERTO</StatusBadge>
+                    ) : null}
+                  </div>
+                  <p className="mt-1.5 text-[13px] leading-5 text-zinc-500">
+                    Aberto em {formatarDataHora(atual.aberto_em)} · Operador{" "}
+                    {atual.usuario_abertura_nome || "—"}
+                  </p>
                 </div>
-                <p className="mt-1 text-[13px] text-zinc-500">
-                  Aberto em {formatarDataHora(atual.aberto_em)} · Operador{" "}
-                  {atual.usuario_abertura_nome || "—"}
-                </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2 xl:max-w-[min(100%,42rem)] xl:justify-end">
                 {podeMovimentar ? (
                   <>
                     <button
@@ -198,6 +215,7 @@ export function CaixaWorkspace({
                       className="updv-btn updv-btn-ghost"
                       onClick={() => setModal("suprimento")}
                     >
+                      <ArrowDownToLine className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                       Suprimento
                     </button>
                     <button
@@ -205,6 +223,7 @@ export function CaixaWorkspace({
                       className="updv-btn updv-btn-ghost"
                       onClick={() => setModal("sangria")}
                     >
+                      <ArrowUpFromLine className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                       Sangria
                     </button>
                   </>
@@ -215,23 +234,15 @@ export function CaixaWorkspace({
                   disabled={pendingGaveta}
                   onClick={abrirGavetaManual}
                 >
+                  <PanelBottomOpen className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                   {pendingGaveta ? "Abrindo..." : "Abrir gaveta"}
                 </button>
-                {podeFechar ? (
-                  <button
-                    type="button"
-                    className="updv-btn updv-btn-primary"
-                    disabled={pendingFechar}
-                    onClick={abrirFechamento}
-                  >
-                    {pendingFechar ? "Preparando..." : "Fechar Caixa"}
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   className="updv-btn updv-btn-ghost"
                   onClick={() => setModal("resumo")}
                 >
+                  <ClipboardList className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                   Ver Resumo
                 </button>
                 <CaixaRelatorioAcoes
@@ -239,12 +250,23 @@ export function CaixaWorkspace({
                   numero={atual.numero}
                   abertoEm={atual.aberto_em}
                 />
+                {podeFechar ? (
+                  <button
+                    type="button"
+                    className="updv-btn updv-btn-primary"
+                    disabled={pendingFechar}
+                    onClick={abrirFechamento}
+                  >
+                    <Lock className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                    {pendingFechar ? "Preparando..." : "Fechar Caixa"}
+                  </button>
+                ) : null}
               </div>
             </div>
 
             {atual.reaberto ? (
               <div
-                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-950"
+                className="rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] leading-5 text-amber-950"
                 data-caixa-bloco-reaberto="true"
               >
                 <p>
@@ -264,7 +286,7 @@ export function CaixaWorkspace({
             <CaixaResumoSessao totais={atual} />
 
             <div>
-              <h3 className="mb-2 text-[13px] font-semibold text-zinc-950">
+              <h3 className="mb-3 text-[15px] font-semibold tracking-tight text-zinc-950">
                 Movimentações
               </h3>
               <CaixaMovimentosTabela movimentos={atual.movimentos} />
@@ -276,12 +298,15 @@ export function CaixaWorkspace({
             />
           </section>
         ) : (
-          <section className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-10 text-center">
+          <section className="flex flex-col items-center rounded-[var(--radius-lg)] border border-dashed border-zinc-300 bg-white px-6 py-14 text-center shadow-[var(--shadow-card)]">
+            <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 text-zinc-500">
+              <Wallet className="h-6 w-6" strokeWidth={1.75} aria-hidden />
+            </span>
             <StatusBadge status="fechado">Fechado</StatusBadge>
-            <h2 className="mt-3 text-[16px] font-semibold text-zinc-950">
+            <h2 className="mt-3 text-[18px] font-semibold tracking-tight text-zinc-950">
               {painel.controleAtivo ? "Caixa fechado" : MENSAGEM_CONTROLE_CAIXA_DESATIVADO}
             </h2>
-            <p className="mt-1 text-[13px] text-zinc-500">
+            <p className="mt-1 max-w-md text-[13px] leading-5 text-zinc-500">
               {painel.controleAtivo
                 ? "Abra uma sessão para registrar suprimentos e sangrias."
                 : MENSAGEM_CONTROLE_CAIXA_DESATIVADO_DETALHE}
@@ -289,7 +314,7 @@ export function CaixaWorkspace({
             {painel.controleAtivo && podeAbrir ? (
               <button
                 type="button"
-                className="updv-btn updv-btn-primary mt-4"
+                className="updv-btn updv-btn-primary mt-5"
                 onClick={() => setModal("abrir")}
               >
                 Abrir Caixa
@@ -320,7 +345,10 @@ export function CaixaWorkspace({
             ) : null}
           </section>
         )
-      ) : (
+      ) : null}
+      </div>
+
+      {aba === "anteriores" ? (
         <DataTable minWidth={980}>
           <thead>
             <tr>
@@ -370,7 +398,7 @@ export function CaixaWorkspace({
             )}
           </tbody>
         </DataTable>
-      )}
+      ) : null}
 
       <ModalAbrirCaixa
         open={modal === "abrir"}
@@ -441,7 +469,7 @@ export function CaixaWorkspace({
               </PageAlert>
             ) : null}
             {anterior.reaberto && anterior.reaberturas.length > 0 ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-950">
+              <div className="rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950">
                 <p>
                   Reaberto em{" "}
                   {formatarDataHora(anterior.reaberturas.at(-1)?.reaberto_em)}

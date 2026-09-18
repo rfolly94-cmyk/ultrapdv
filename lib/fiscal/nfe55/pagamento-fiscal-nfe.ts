@@ -28,6 +28,7 @@ export type FormaParaPagamentoFiscalNfe = {
   nome?: string | null;
   codigo_fiscal?: string | null;
   permite_fiado?: boolean | null;
+  ativo?: boolean | null;
 };
 
 export type PagamentoParaFiscalNfe = {
@@ -92,6 +93,18 @@ export function formaEhDuplicataMercantil(forma: FormaParaPagamentoFiscalNfe | n
   );
 }
 
+export function escolherFormaDuplicataMercantil<
+  T extends FormaParaPagamentoFiscalNfe,
+>(formas: T[]): T | null {
+  const candidatas = formas.filter((forma) => formaEhDuplicataMercantil(forma));
+  if (candidatas.length === 0) {
+    return null;
+  }
+  return (
+    candidatas.find((forma) => forma.ativo !== false) ?? candidatas[0] ?? null
+  );
+}
+
 export function pagamentoEhPagamentoPosterior(
   pagamento: PagamentoParaFiscalNfe,
   formas: FormaParaPagamentoFiscalNfe[]
@@ -145,7 +158,7 @@ export function mesclarPagamentoDuplicataMercantil<
   coberturaDuplicataCentavos: number;
 }): T[] {
   const cobertura = Math.max(0, Math.round(input.coberturaDuplicataCentavos));
-  const forma = input.formas.find((item) => formaEhDuplicataMercantil(item));
+  const forma = escolherFormaDuplicataMercantil(input.formas);
   const formaId = String(forma?.id ?? "").trim();
   const semDuplicata = input.pagamentos.filter((pagamento) => {
     const encontrada = encontrarFormaPagamentoFiscal(

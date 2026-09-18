@@ -30,9 +30,9 @@ export const FISCAL_CONFIG_ABAS = [
     description: "Naturezas usadas na emissão.",
   },
   {
-    label: "Integração Geranet",
+    label: "Credenciais Fiscais",
     href: "/configuracoes/fiscal/integracao",
-    description: "API, certificado, CSC e testes.",
+    description: "Certificado digital A1 e CSC da NFC-e.",
   },
   {
     label: "Contingência",

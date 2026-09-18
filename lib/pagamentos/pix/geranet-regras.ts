@@ -1,5 +1,10 @@
 import { garantirEmpresa } from "./montar-payload";
-import { valoresPixCompativeis } from "./evidencia-pagamento";
+import {
+  valoresPixCompativeis,
+  valoresPixInformadosCompativeis,
+} from "./evidencia-pagamento";
+import { ehProvedorPixC6Direto } from "./c6/regras";
+import { ehE2eidPixC6Valido } from "./c6/confirmacao";
 import type {
   EstadoPagamentoPixGeranet,
   StatusCobrancaPix,
@@ -41,6 +46,11 @@ export const CAMPOS_PROIBIDOS_EMITIR_PDV = [
   "clienteSegredo",
   "certificado",
   "token",
+  "access_token",
+  "client_secret",
+  "client_id",
+  "certificadoPemHexadecimal",
+  "chavePrivadaPemHexadecimal",
   "modo",
   "modo_pix",
 ] as const;
@@ -197,7 +207,9 @@ export function validarVinculoPixGeranetNaFinalizacao(params: {
     modo_pix?: string | null;
     venda_id?: string | null;
     valor: number;
+    valor_pago?: number | null;
     txid?: string | null;
+    e2eid?: string | null;
     provedor?: string | null;
   };
 }) {
@@ -227,6 +239,25 @@ export function validarVinculoPixGeranetNaFinalizacao(params: {
     throw new Error(
       "O valor do PIX pago deve ser igual ao pagamento."
     );
+  }
+
+  if (ehProvedorPixC6Direto(params.cobranca.provedor)) {
+    if (!ehE2eidPixC6Valido(params.cobranca.e2eid)) {
+      throw new Error("Cobrança PIX C6 sem e2eid não pode finalizar a venda.");
+    }
+
+    if (
+      !valoresPixInformadosCompativeis(
+        Number(params.cobranca.valor),
+        params.cobranca.valor_pago
+      ) ||
+      !valoresPixInformadosCompativeis(
+        params.valorPagamento,
+        params.cobranca.valor_pago
+      )
+    ) {
+      throw new Error("Cobrança PIX C6 sem valor pago não pode finalizar a venda.");
+    }
   }
 }
 

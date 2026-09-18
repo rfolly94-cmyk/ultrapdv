@@ -16,6 +16,7 @@ import {
   exigirOperacaoPdv,
   resultadoNegacaoPdv,
 } from "@/lib/pdv/acesso-operacao";
+import { origemItemPdv, ORIGEM_ITEM_AVULSO } from "@/lib/pdv/item-avulso";
 import { mensagemErroFinalizacaoPublica } from "@/lib/pdv/mensagem-erro-publica";
 import {
   buscarCaixaAbertoEmpresa,
@@ -45,8 +46,11 @@ export type FinalizarVendaPdvInput = {
   observacao?: string | null;
   catalogoPedidoId?: string | null;
   itens: Array<{
-    produtoId: string;
+    produtoId?: string | null;
+    origem?: "produto" | "avulso";
+    descricao?: string;
     quantidade: number;
+    valorUnitarioCentavos?: number;
   }>;
   pagamentos: Array<{
     formaPagamentoId: string;
@@ -266,9 +270,35 @@ export async function executarFinalizacaoVendaPdv(
     const itens =
       input.itens.map(
         (item) => {
+          if (origemItemPdv(item.origem) === ORIGEM_ITEM_AVULSO) {
+            const descricao = String(item.descricao ?? "").trim();
+            const quantidade = Number(item.quantidade);
+            const valorUnitarioCentavos = Math.round(
+              Number(item.valorUnitarioCentavos ?? 0)
+            );
+            if (
+              !descricao ||
+              !Number.isFinite(quantidade) ||
+              quantidade <= 0 ||
+              !Number.isInteger(valorUnitarioCentavos) ||
+              valorUnitarioCentavos <= 0
+            ) {
+              throw new Error("Item da venda inválido.");
+            }
+
+            return {
+              origem: ORIGEM_ITEM_AVULSO,
+              descricao,
+              quantidade,
+              valor_unitario: centavosParaDecimal(valorUnitarioCentavos),
+              desconto: 0,
+              acrescimo: 0,
+            };
+          }
+
           if (
             !uuidValido(
-              item.produtoId
+              String(item.produtoId ?? "")
             ) ||
             !Number.isInteger(
               item.quantidade
@@ -280,9 +310,10 @@ export async function executarFinalizacaoVendaPdv(
             );
           }
 
-          // NÃO enviamos valor_unitario.
+          // NÃO enviamos valor_unitario para produto cadastrado.
           // O banco usa produtos.preco_venda.
           return {
+            origem: "produto",
             produto_id:
               item.produtoId,
             quantidade:
@@ -412,7 +443,12 @@ export async function executarFinalizacaoVendaPdv(
     const teto = await avaliarTetoPagamentosNoServidor({
       supabase,
       empresaId: vinculo.empresa_id,
-      itens: input.itens,
+      itens: input.itens.map((item) => ({
+        produtoId: item.produtoId,
+        origem: item.origem,
+        quantidade: item.quantidade,
+        precoUnitarioCentavos: item.valorUnitarioCentavos,
+      })),
       descontoCentavos: input.descontoCentavos,
       freteCentavos,
       acrescimoCentavos,

@@ -15,6 +15,7 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import { obterLogomarcaFiscalHex } from "@/lib/empresa/obter-logomarca-fiscal-hex";
 import {
   capturaErroAutorizacaoFiscal,
@@ -704,13 +705,10 @@ export async function POST(
           { ascending: true }
         ),
 
-      admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
-      ),
+        obterSegredosFiscaisEmissao(
+          admin,
+          empresaId
+        ),
 
       supabase
         .from("produtos")

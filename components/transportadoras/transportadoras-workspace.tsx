@@ -9,6 +9,14 @@ import {
   useRouter,
 } from "next/navigation";
 
+import { ConsultaCnpjCampo } from "@/components/cadastro/consulta-cnpj-campo";
+import {
+  mascararCnpjDigitando,
+  preencherCadastroComCnpj,
+  type DadosCnpjNormalizados,
+} from "@/lib/cadastro/cnpj";
+import { mascararCpfDigitando } from "@/lib/fiscal/destinatario/documento";
+
 type Veiculo = {
   id: string;
   empresa_id: string;
@@ -132,6 +140,28 @@ function formatarDocumento(
   }
 
   return valor;
+}
+
+function formatarDocumentoDigitando(
+  valor: string
+) {
+  const d =
+    valor.replace(
+      /\D/g,
+      ""
+    );
+
+  if (
+    d.length <= 11
+  ) {
+    return mascararCpfDigitando(
+      valor
+    );
+  }
+
+  return mascararCnpjDigitando(
+    valor
+  );
 }
 
 export function TransportadorasWorkspace({
@@ -337,6 +367,85 @@ export function TransportadorasWorkspace({
     setMensagem(null);
     setSucesso(false);
     setModalAberto(true);
+  }
+
+  function aplicarDadosCnpj(
+    dados: DadosCnpjNormalizados
+  ) {
+    setForm(
+      (atual) => {
+        const preenchido =
+          preencherCadastroComCnpj(
+            {
+              nome_razao_social:
+                atual.nome_razao_social,
+              nome_fantasia:
+                atual.nome_fantasia,
+              inscricao_estadual:
+                atual.inscricao_estadual,
+              telefone:
+                atual.telefone,
+              email:
+                atual.email,
+              logradouro:
+                atual.logradouro,
+              numero:
+                atual.numero,
+              complemento:
+                atual.complemento,
+              bairro:
+                atual.bairro,
+              municipio:
+                atual.municipio,
+              codigo_municipio_ibge:
+                atual.codigo_municipio_ibge,
+              uf:
+                atual.uf,
+              cep:
+                atual.cep,
+              cpf_cnpj:
+                atual.cpf_cnpj,
+            },
+            {
+              nome_razao_social:
+                dados.razaoSocial,
+              nome_fantasia:
+                dados.nomeFantasia,
+              inscricao_estadual:
+                dados.inscricaoEstadual,
+              telefone:
+                dados.telefone,
+              email:
+                dados.email,
+              logradouro:
+                dados.logradouro,
+              numero:
+                dados.numero,
+              complemento:
+                dados.complemento,
+              bairro:
+                dados.bairro,
+              municipio:
+                dados.cidade,
+              codigo_municipio_ibge:
+                dados.codigoIbge,
+              uf:
+                dados.uf,
+              cep:
+                dados.cep,
+              cpf_cnpj:
+                mascararCnpjDigitando(
+                  dados.cnpj
+                ),
+            }
+          );
+
+        return {
+          ...atual,
+          ...preenchido,
+        };
+      }
+    );
   }
 
   function patch(
@@ -782,15 +891,29 @@ export function TransportadorasWorkspace({
                     }
                   />
 
-                  <Campo
+                  <ConsultaCnpjCampo
+                    name="cpf_cnpj"
                     label="CNPJ / CPF *"
                     value={form.cpf_cnpj}
                     onChange={(value) =>
                       patch(
                         "cpf_cnpj",
-                        value
+                        formatarDocumentoDigitando(
+                          value
+                        )
                       )
                     }
+                    onAplicar={aplicarDadosCnpj}
+                    modo={
+                      form.id
+                        ? "edicao"
+                        : "novo"
+                    }
+                    required
+                    formatar={
+                      formatarDocumentoDigitando
+                    }
+                    inputClassName="mt-1.5 h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none focus:border-zinc-500"
                   />
 
                   <Campo

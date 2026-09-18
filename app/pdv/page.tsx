@@ -19,6 +19,7 @@ import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir
 import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
 import { filtrarFormasPagamentoCheckoutPdv } from "@/lib/pdv/formas-pagamento-checkout";
 import { permitirVendaSemEstoqueDoRegistro } from "@/lib/pdv/venda-sem-estoque";
+import { configuracaoItemAvulsoDoRegistro } from "@/lib/pdv/item-avulso-servidor";
 import {
   filtrarRegistrosDaEmpresaAtiva,
   registroPertenceAEmpresaAtiva,
@@ -216,7 +217,7 @@ export default async function PdvPage({
       .eq("empresa_id", vinculo.empresa_id),
     supabase
       .from("pdv_configuracoes")
-      .select("empresa_id, permitir_venda_sem_estoque")
+      .select("empresa_id, permitir_venda_sem_estoque, permitir_item_avulso, produto_fiscal_padrao_item_avulso_id")
       .eq("empresa_id", vinculo.empresa_id)
       .maybeSingle(),
   ]);
@@ -268,6 +269,7 @@ export default async function PdvPage({
   const permitirVendaSemEstoque = permitirVendaSemEstoqueDoRegistro(
     pdvConfig?.permitir_venda_sem_estoque
   );
+  const configItemAvulso = configuracaoItemAvulsoDoRegistro(pdvConfig);
   const controleAtivo = configuracaoCaixa.controleAtivo;
 
   const fiscal = registroPertenceAEmpresaAtiva(
@@ -324,6 +326,10 @@ export default async function PdvPage({
       logoUrl={logoUrl}
       preferenciasIniciais={preferencias}
       permitirVendaSemEstoqueInicial={permitirVendaSemEstoque}
+      permitirItemAvulsoInicial={configItemAvulso.permitirItemAvulso}
+      produtoFiscalPadraoItemAvulsoIdInicial={
+        configItemAvulso.produtoFiscalPadraoId
+      }
       produtos={
         (produtosResult.data ?? []).map((produto) => ({
           ...produto,

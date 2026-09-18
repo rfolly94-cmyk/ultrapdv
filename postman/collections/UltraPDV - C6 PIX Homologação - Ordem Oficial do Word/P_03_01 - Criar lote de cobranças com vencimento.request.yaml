@@ -1,0 +1,58 @@
+$kind: http-request
+description: No Sandbox este endpoint já retornou HTTP 502 Host Error. Não trate 502 como aprovado.
+url: "{{pix_base}}/lotecobv/{{lote_id}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "descricao": "Lote de homologacao UltraPDV",
+      "cobsv": [
+        {
+          "calendario": {
+            "dataDeVencimento": "{{data_vencimento_lote}}",
+            "validadeAposVencimento": 30
+          },
+          "txid": "{{lote_item_txid_1}}",
+          "devedor": {
+            "cnpj": "{{cnpj}}",
+            "nome": "{{nome_devedor}}"
+          },
+          "valor": {
+            "original": "1.00"
+          },
+          "chave": "{{chave_pix}}",
+          "solicitacaoPagador": "Item 1 lote homologacao UltraPDV"
+        },
+        {
+          "calendario": {
+            "dataDeVencimento": "{{data_vencimento_lote}}",
+            "validadeAposVencimento": 30
+          },
+          "txid": "{{lote_item_txid_2}}",
+          "devedor": {
+            "cnpj": "{{cnpj}}",
+            "nome": "{{nome_devedor}}"
+          },
+          "valor": {
+            "original": "1.01"
+          },
+          "chave": "{{chave_pix}}",
+          "solicitacaoPagador": "Item 2 lote homologacao UltraPDV"
+        }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 201', function () {
+          pm.response.to.have.status(201);
+      });
+    language: text/javascript
+order: 11000

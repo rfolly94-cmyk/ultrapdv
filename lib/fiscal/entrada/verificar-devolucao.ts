@@ -7,6 +7,11 @@ import {
 import type { NaturezaOperacaoFiscal } from "@/lib/fiscal/operacoes/catalogo";
 import { naturezaEstaCompleta } from "@/lib/fiscal/operacoes/resolver-natureza";
 import { montarItemDevolucaoFornecedor } from "@/lib/fiscal/entrada/montar-item-devolucao";
+import {
+  naturezaFiscalmenteCoerente,
+  validarCfopNaMatrizNatureza,
+  validarDocumentoFiscalReferenciado,
+} from "@/lib/fiscal/operacoes/coerencia-natureza-cfop";
 import type { EnderecoEmitenteNfe } from "@/lib/fiscal/entrada/parse-xml-nfe";
 import type { AmbienteGeranet, CodigoRegimeTributario } from "@/lib/fiscal/geranet/resolver-politica-ibscbs";
 
@@ -88,12 +93,24 @@ export function verificarDevolucaoFornecedor(params: {
       mensagem:
         "A natureza selecionada não é de devolução ao fornecedor.",
     });
+  } else {
+    const coerencia = naturezaFiscalmenteCoerente(params.natureza);
+    if (!coerencia.ok) {
+      pendencias.push({
+        codigo: "natureza",
+        mensagem: coerencia.mensagem,
+      });
+    }
   }
 
-  if (!/^[0-9]{44}$/.test(params.chaveOrigem)) {
+  const referencia = validarDocumentoFiscalReferenciado({
+    tipoOperacaoInterno: "devolucao_fornecedor",
+    chaveDocumentoOrigem: params.chaveOrigem,
+  });
+  if (!referencia.ok) {
     pendencias.push({
       codigo: "referencia",
-      mensagem: "A NF-e de entrada não possui chave de acesso válida para referência.",
+      mensagem: referencia.mensagem,
     });
   }
 
@@ -159,6 +176,8 @@ export function verificarDevolucaoFornecedor(params: {
             regras: params.regrasCfop,
             empresaIdAtiva: params.empresaIdAtiva,
             naturezaDescricao: params.natureza?.descricao,
+            tpNf: params.natureza?.tp_nf,
+            finNfe: params.natureza?.fin_nfe,
           })
         : { ok: false as const, mensagem: "Destino fiscal não determinado." };
 
@@ -172,6 +191,20 @@ export function verificarDevolucaoFornecedor(params: {
         codigo: "cfop",
         mensagem: `${item.descricao}: ${cfop.mensagem}`,
       });
+    } else if (tipoDestino && params.natureza) {
+      const coerenciaCfop = validarCfopNaMatrizNatureza({
+        cfop: cfop.cfop,
+        tpNf: params.natureza.tp_nf,
+        tipoDestino,
+        tipoOperacaoInterno: "devolucao_fornecedor",
+        finNfe: params.natureza.fin_nfe,
+      });
+      if (!coerenciaCfop.ok) {
+        pendencias.push({
+          codigo: "cfop",
+          mensagem: `${item.descricao}: ${coerenciaCfop.mensagem}`,
+        });
+      }
     }
 
     const montado = montarItemDevolucaoFornecedor({
@@ -213,17 +246,6 @@ export function verificarDevolucaoFornecedor(params: {
       cfop: cfop.ok ? cfop.cfop : null,
     };
   });
-
-  if (params.natureza?.tp_nf && params.natureza.tp_nf !== "1") {
-    alertas.push(
-      `A natureza está com tpNF ${params.natureza.tp_nf}. A devolução ao fornecedor costuma ser saída (1).`
-    );
-  }
-  if (params.natureza?.fin_nfe && params.natureza.fin_nfe !== "4") {
-    alertas.push(
-      `A natureza está com finNFe ${params.natureza.fin_nfe}. A devolução costuma usar finalidade 4.`
-    );
-  }
 
   return {
     ok: pendencias.length === 0,

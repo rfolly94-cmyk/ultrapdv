@@ -7,7 +7,6 @@ const ROTAS_ADMIN_ONLY = [
   "app/api/fiscal/geranet/diagnosticar-ultimo-erro/route.ts",
   "app/api/fiscal/geranet/diagnosticar-duplicidade-nfe/route.ts",
   "app/api/fiscal/geranet/nfce-csc-diagnostico/route.ts",
-  "app/api/fiscal/geranet/testar-conexao/route.ts",
   "app/api/fiscal/sefaz/status-homologacao/route.ts",
   "app/api/fiscal/sefaz/autorizar-existente-homologacao/route.ts",
 ];
@@ -48,6 +47,12 @@ test("diagnóstico: rotas Geranet/SEFAZ exigem o helper de administração", () 
     assert.match(conteudo, /MENSAGEM_ADMIN_DIAGNOSTICO/, arquivo);
     assert.match(conteudo, /ErroAdministracaoUsuarios/, arquivo);
   }
+});
+
+test("teste de conexão Geranet não fica no diagnóstico da empresa", () => {
+  const rota = fonte("app/api/fiscal/geranet/testar-conexao/route.ts");
+  assert.match(rota, /exigirMaster/);
+  assert.doesNotMatch(rota, /obterContextoAdministracaoUsuarios/);
 });
 
 test("diagnóstico: administrador usa a empresa da sessão, não um empresa_id do cliente", () => {

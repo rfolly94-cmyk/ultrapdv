@@ -20,6 +20,7 @@ import {
   conferenciaComercialNfeComDuplicata,
   faturaPermitidaNoPayloadNfe,
   mapearDetalhamentoFiscalNfe55,
+  escolherFormaDuplicataMercantil,
   mesclarPagamentoDuplicataMercantil,
   saldoDuplicataMercantilCentavos,
   validarPagamentoFiscalNfe55,
@@ -522,10 +523,80 @@ test("mescla Duplicata Mercantil no rascunho sem duplicar tPag 14", () => {
     { formaPagamentoId: "pix", valorCentavos: 30000 },
     { formaPagamentoId: "dup", valorCentavos: 70000 },
   ]);
+  assert.deepEqual(
+    mesclarPagamentoDuplicataMercantil({
+      pagamentos: [],
+      formas: [formaDuplicata],
+      coberturaDuplicataCentavos: 70000,
+    }),
+    [{ formaPagamentoId: "dup", valorCentavos: 70000 }]
+  );
+  assert.deepEqual(
+    mesclarPagamentoDuplicataMercantil({
+      pagamentos: [],
+      formas: [formaPix, formaFiado],
+      coberturaDuplicataCentavos: 70000,
+    }),
+    []
+  );
   const conferencia = conferenciaComercialNfeComDuplicata({
     valorTotal: 1000,
     pagamentos: [{ status: "confirmado", valor: 300 }],
     coberturaDuplicataCentavos: 70000,
   });
   assert.equal(conferencia.ok, true);
+});
+
+test("Duplicata Mercantil é localizada pelo tPag 14, não pelo nome", () => {
+  const daEmpresa = {
+    id: "dup-a",
+    nome: "Cobrança a prazo",
+    codigo_fiscal: "14",
+    permite_fiado: false,
+    ativo: true,
+  };
+  assert.equal(
+    escolherFormaDuplicataMercantil([
+      { ...daEmpresa, codigo_fiscal: "91", nome: "Duplicata Mercantil" },
+      daEmpresa,
+    ])?.id,
+    "dup-a"
+  );
+  assert.equal(
+    escolherFormaDuplicataMercantil([
+      { ...daEmpresa, permite_fiado: true },
+    ]),
+    null
+  );
+  const preferida = escolherFormaDuplicataMercantil([
+    { ...daEmpresa, id: "inativa", ativo: false },
+    daEmpresa,
+  ]);
+  assert.equal(preferida?.id, "dup-a");
+});
+
+test("finalizar NF-e a prazo localiza tPag 14 da empresa ativa sem criar duplicata", () => {
+  const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
+  const migracao = fonte(
+    "supabase/migrations/20260830100000_forma_duplicata_mercantil_padrao.sql"
+  );
+  assert.match(actions, /mesclarPagamentoDuplicataMercantil/);
+  assert.match(actions, /\.eq\("empresa_id", empresaId\)/);
+  assert.match(actions, /codigo_fiscal/);
+  assert.doesNotMatch(
+    actions,
+    /nome === ["']Duplicata Mercantil["']/
+  );
+  assert.match(migracao, /btrim\(COALESCE\(fp\.codigo_fiscal, ''\)\) = '14'/);
+  assert.match(migracao, /p_empresa_id/);
+  assert.match(migracao, /'Duplicata Mercantil'/);
+  assert.match(migracao, /codigo_fiscal = '14'/);
+  assert.match(migracao, /NOT EXISTS/);
+  assert.match(migracao, /AFTER INSERT ON public\.empresas/);
+  assert.match(migracao, /REVOKE ALL ON FUNCTION public\.garantir_forma_duplicata_mercantil_empresa/);
+  assert.match(migracao, /FROM authenticated/);
+  assert.doesNotMatch(migracao, /DELETE FROM public\.formas_pagamento/);
+  assert.doesNotMatch(migracao, /nome = 'Duplicata Mercantil'/);
+  assert.doesNotMatch(fonte("lib/fiscal/nfe55/pagamento-fiscal-nfe.ts"), /createAdminClient/);
+  assert.doesNotMatch(actions, /garantir_forma_duplicata_mercantil_empresa/);
 });

@@ -10,8 +10,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ErroPermissao } from "@/lib/permissoes/erro";
 import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 
-const GERANET_BASE_URL = "https://nfe.geranet.net/api/v1";
-
 function irComErro(mensagem: string): never {
   redirect(
     "/configuracoes/fiscal/integracao?erro=" +
@@ -63,88 +61,6 @@ async function getContextoAdministrador() {
   };
 }
 
-// =========================================================
-// API KEY GERANET
-// =========================================================
-
-export async function salvarApiGeranet(
-  formData: FormData
-) {
-  const { supabase, empresaId } =
-    await getContextoAdministrador();
-
-  const apiKey = String(
-    formData.get("api_key") ?? ""
-  ).trim();
-
-  if (apiKey.length < 20) {
-    irComErro("Informe uma API Key Geranet válida.");
-  }
-
-  // Primeiro validamos a chave diretamente na Geranet.
-  // Não salvamos uma chave inválida.
-  let resposta: Response;
-
-  try {
-    resposta = await fetch(
-      `${GERANET_BASE_URL}/user`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
-  } catch {
-    irComErro(
-      "Não foi possível conectar à API da Geranet."
-    );
-  }
-
-  if (!resposta.ok) {
-    irComErro(
-      `A Geranet recusou a API Key. HTTP ${resposta.status}.`
-    );
-  }
-
-  const { error } = await supabase.rpc(
-    "salvar_segredo_fiscal",
-    {
-      p_empresa_id: empresaId,
-      p_tipo: "geranet_api_key",
-      p_valor: apiKey,
-    }
-  );
-
-  if (error) {
-    console.error(
-      "Erro ao armazenar API Key Geranet:",
-      {
-        message: error.message,
-        code: error.code,
-      }
-    );
-
-    irComErro(
-      "Não foi possível armazenar a API Key."
-    );
-  }
-
-  revalidatePath(
-    "/configuracoes/fiscal/integracao"
-  );
-
-  irComSucesso(
-    "API Key Geranet validada e armazenada com segurança."
-  );
-}
-
-// =========================================================
-// CERTIFICADO A1
-// =========================================================
-
 export async function salvarCertificadoA1(
   formData: FormData
 ) {
@@ -168,8 +84,6 @@ export async function salvarCertificadoA1(
     );
   }
 
-  // Certificados A1 normalmente são pequenos.
-  // Este limite evita uploads acidentais enormes.
   const LIMITE = 2 * 1024 * 1024;
 
   if (arquivo.size > LIMITE) {
@@ -208,7 +122,6 @@ export async function salvarCertificadoA1(
     );
   }
 
-  // Salva certificado em hexadecimal.
   const { error: certificadoError } =
     await supabase.rpc(
       "salvar_segredo_fiscal",
@@ -230,7 +143,6 @@ export async function salvarCertificadoA1(
     );
   }
 
-  // Salva a senha separadamente.
   const { error: senhaError } =
     await supabase.rpc(
       "salvar_segredo_fiscal",
@@ -252,8 +164,6 @@ export async function salvarCertificadoA1(
     );
   }
 
-  // Apenas o nome do arquivo pode ficar na tabela pública
-  // de status. O certificado e sua senha permanecem no Vault.
   const admin = createAdminClient();
 
   const { error: statusError } = await admin
@@ -280,10 +190,6 @@ export async function salvarCertificadoA1(
     "Certificado A1 armazenado com segurança."
   );
 }
-
-// =========================================================
-// NFC-e / CSC
-// =========================================================
 
 export async function salvarConfiguracaoNfce(
   formData: FormData
@@ -358,83 +264,5 @@ export async function salvarConfiguracaoNfce(
 
   irComSucesso(
     "Configuração da NFC-e salva com sucesso."
-  );
-}
-
-// =========================================================
-// TESTE DO COFRE + GERANET
-// =========================================================
-
-export async function testarConexaoGeranet() {
-  const { empresaId } =
-    await getContextoAdministrador();
-
-  const admin =
-    createAdminClient();
-
-  const { data, error } =
-    await admin.rpc(
-      "obter_segredos_fiscais",
-      {
-        p_empresa_id: empresaId,
-      }
-    );
-
-  if (error) {
-    console.error(
-      "Erro ao recuperar segredos:",
-      error.message
-    );
-
-    irComErro(
-      "Não foi possível acessar o cofre fiscal."
-    );
-  }
-
-  const segredos =
-    data as {
-      geranet_api_key?: string | null;
-      certificado_a1?: string | null;
-      senha_certificado?: string | null;
-      csc?: string | null;
-    } | null;
-
-  const apiKey =
-    segredos?.geranet_api_key;
-
-  if (!apiKey) {
-    irComErro(
-      "A API Key Geranet ainda não está configurada."
-    );
-  }
-
-  let resposta: Response;
-
-  try {
-    resposta = await fetch(
-      `${GERANET_BASE_URL}/user`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
-  } catch {
-    irComErro(
-      "Não foi possível alcançar a API Geranet."
-    );
-  }
-
-  if (!resposta.ok) {
-    irComErro(
-      `Falha ao autenticar na Geranet. HTTP ${resposta.status}.`
-    );
-  }
-
-  irComSucesso(
-    "Conexão com a Geranet funcionando e leitura do cofre fiscal confirmada."
   );
 }

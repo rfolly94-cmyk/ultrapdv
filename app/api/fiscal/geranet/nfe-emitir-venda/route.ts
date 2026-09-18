@@ -40,6 +40,7 @@ import {
   snapshotTributarioItemCompleto,
   vendaTemTributacaoItensCongelada,
 } from "@/lib/fiscal/snapshot-tributario-venda";
+import { mensagemEmissaoItemAvulsoSemFiscal } from "@/lib/pdv/item-avulso";
 import {
   DistribuicaoDescontoFiscalError,
   conferirSomaItensFiscaisComVenda,
@@ -135,6 +136,7 @@ import {
   persistenciaFalhaComunicacaoEmitir,
   patchEmissaoFalhaComunicacao,
 } from "@/lib/fiscal/geranet/cliente-geranet";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import {
   classificarRespostaEmitir,
   extraBloqueioRetransmissaoFiscal,
@@ -528,6 +530,7 @@ export async function POST(
             cofins_cst,
             cst_ibscbs,
             classificacao_ibscbs,
+            origem_item,
             snapshot_fiscal
           `)
           .eq(
@@ -663,12 +666,9 @@ export async function POST(
             }
           ),
 
-        admin.rpc(
-          "obter_segredos_fiscais",
-          {
-            p_empresa_id:
-              empresaId,
-          }
+        obterSegredosFiscaisEmissao(
+          admin,
+          empresaId
         ),
         admin.rpc(
           "obter_csrt_fiscal",
@@ -1980,6 +1980,12 @@ export async function POST(
         snapshotTributarioItemCompleto(
           itemVenda.snapshot_fiscal
         );
+
+      const bloqueioAvulso =
+        mensagemEmissaoItemAvulsoSemFiscal(itemVenda);
+      if (bloqueioAvulso) {
+        return erro(bloqueioAvulso);
+      }
 
       if (
         !snapshotCompleto &&

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { consultarEmissaoGeranet } from "@/lib/fiscal/geranet/consultar-emissao";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import { reconciliarInutilizacaoFiscal } from "@/lib/fiscal/reconciliar-inutilizacao";
 import { extrairChaveAcessoXml } from "@/lib/fiscal/documento-fiscal";
 import {
@@ -129,9 +130,7 @@ export async function reconciliarEmissaoFiscal({
         .select("cnpj")
         .eq("id", empresaId)
         .maybeSingle(),
-      admin.rpc("obter_segredos_fiscais", {
-        p_empresa_id: empresaId,
-      }),
+      obterSegredosFiscaisEmissao(admin, empresaId),
     ]);
 
   if (empresaError || !empresa) {

@@ -33,6 +33,7 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 function respostaErro(
   mensagem: string,
@@ -339,12 +340,9 @@ export async function GET(
       // exclusivamente no servidor para ler o Vault.
       //
       // Nunca retornar este resultado cru ao navegador.
-      admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       ),
 
       supabase

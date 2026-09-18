@@ -12,6 +12,7 @@ import {
   exigirEmpresaOperacional,
 } from "@/lib/assinatura/exigir-empresa-operacional";
 import { registroPertenceAEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import { obterLogomarcaFiscalHex } from "@/lib/empresa/obter-logomarca-fiscal-hex";
 import { montarItemDevolucaoFornecedor } from "@/lib/fiscal/entrada/montar-item-devolucao";
 import {
@@ -259,7 +260,7 @@ export async function POST(request: NextRequest) {
         )
         .eq("empresa_id", empresaId)
         .eq("ativo", true),
-      admin.rpc("obter_segredos_fiscais", { p_empresa_id: empresaId }),
+      obterSegredosFiscaisEmissao(admin, empresaId),
       admin.rpc("obter_csrt_fiscal", { p_empresa_id: empresaId }),
     ]);
 

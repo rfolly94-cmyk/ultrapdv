@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 
 import { cadastrarCliente, editarCliente } from "./actions";
 
+import { ClienteCamposCnpj } from "@/components/cadastro/cliente-campos-cnpj";
 import { ClienteNavegacao } from "@/components/clientes/cliente-navegacao";
 import { ClientesListagemWorkspace } from "@/components/clientes/clientes-listagem-workspace";
-import { EnderecoViaCepCampos } from "@/components/cadastro/endereco-via-cep-campos";
 import { createClient } from "@/lib/supabase/server";
 import { PageAlert } from "@/components/ui/page-alert";
 import { PageHeader } from "@/components/ui/page-header";
@@ -264,86 +264,26 @@ export default async function ClientesPage({
               Identificação
             </h3>
 
-            <div className="mt-4 grid gap-5 md:grid-cols-2 lg:grid-cols-5">
-              <div>
-                <Label>
-                  Tipo de pessoa
-                </Label>
-
-                <select
-                  name="tipo_pessoa"
-                  defaultValue={
-                    clienteEdicao
-                      ?.tipo_pessoa ??
-                    "F"
-                  }
-                  className={inputClass}
-                >
-                  <option value="F">
-                    Pessoa Física
-                  </option>
-                  <option value="J">
-                    Pessoa Jurídica
-                  </option>
-                </select>
-              </div>
-
-              <Campo
-                label="Nome / Razão social"
-                name="nome"
-                defaultValue={
-                  clienteEdicao?.nome
-                }
-                required
-              />
-
-              <Campo
-                label="Nome fantasia"
-                name="nome_fantasia"
-                defaultValue={
-                  clienteEdicao
-                    ?.nome_fantasia
-                }
-              />
-
-              <Campo
-                label="CPF / CNPJ"
-                name="cpf_cnpj"
-                defaultValue={
-                  clienteEdicao
-                    ?.cpf_cnpj
-                }
-                inputMode="numeric"
-              />
-
-              <Campo
-                label="Inscrição Estadual"
-                name="inscricao_estadual"
-                defaultValue={
-                  clienteEdicao
-                    ?.inscricao_estadual
-                }
-              />
-
-              <Campo
-                label="Telefone"
-                name="telefone"
-                defaultValue={
-                  clienteEdicao
-                    ?.telefone
-                }
-                inputMode="tel"
-              />
-
-              <Campo
-                label="E-mail"
-                name="email"
-                type="email"
-                defaultValue={
-                  clienteEdicao?.email
-                }
-              />
-
+            <ClienteCamposCnpj
+              modo={clienteEdicao ? "edicao" : "novo"}
+              inicial={{
+                tipoPessoa: clienteEdicao?.tipo_pessoa,
+                nome: clienteEdicao?.nome,
+                nomeFantasia: clienteEdicao?.nome_fantasia,
+                cpfCnpj: clienteEdicao?.cpf_cnpj,
+                inscricaoEstadual: clienteEdicao?.inscricao_estadual,
+                telefone: clienteEdicao?.telefone,
+                email: clienteEdicao?.email,
+                cep: clienteEdicao?.cep,
+                logradouro: clienteEdicao?.logradouro,
+                numero: clienteEdicao?.numero,
+                complemento: clienteEdicao?.complemento,
+                bairro: clienteEdicao?.bairro,
+                municipio: clienteEdicao?.municipio,
+                codigoMunicipioIbge: clienteEdicao?.codigo_municipio_ibge,
+                uf: clienteEdicao?.uf,
+              }}
+              extraIdentificacao={
               <div className="flex flex-col gap-3 pt-1">
                 <div>
                   <Label>Indicador IE</Label>
@@ -384,25 +324,7 @@ export default async function ClientesPage({
                   fiscal e não volta a este campo depois de criada.
                 </p>
               </div>
-            </div>
-
-            <div className="my-7 border-t border-zinc-200" />
-
-            <h3 className="font-semibold text-zinc-900">
-              Endereço
-            </h3>
-
-            <EnderecoViaCepCampos
-              inicial={{
-                cep: clienteEdicao?.cep,
-                logradouro: clienteEdicao?.logradouro,
-                numero: clienteEdicao?.numero,
-                complemento: clienteEdicao?.complemento,
-                bairro: clienteEdicao?.bairro,
-                municipio: clienteEdicao?.municipio,
-                codigoMunicipioIbge: clienteEdicao?.codigo_municipio_ibge,
-                uf: clienteEdicao?.uf,
-              }}
+              }
             />
 
             <div className="my-7 border-t border-zinc-200" />

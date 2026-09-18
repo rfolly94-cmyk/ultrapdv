@@ -1,0 +1,57 @@
+$kind: http-request
+url: "{{pix_base}}/lotecobv/{{lote_id}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "descricao": "Lote de homologacao UltraPDV revisado",
+      "cobsv": [
+        {
+          "calendario": {
+            "dataDeVencimento": "{{data_vencimento_lote}}",
+            "validadeAposVencimento": 30
+          },
+          "txid": "{{lote_item_txid_1}}",
+          "devedor": {
+            "cnpj": "{{cnpj}}",
+            "nome": "{{nome_devedor}}"
+          },
+          "valor": {
+            "original": "1.00"
+          },
+          "chave": "{{chave_pix}}",
+          "solicitacaoPagador": "Item 1 lote homologacao UltraPDV"
+        },
+        {
+          "calendario": {
+            "dataDeVencimento": "{{data_vencimento_lote}}",
+            "validadeAposVencimento": 30
+          },
+          "txid": "{{lote_item_txid_2}}",
+          "devedor": {
+            "cnpj": "{{cnpj}}",
+            "nome": "{{nome_devedor}}"
+          },
+          "valor": {
+            "original": "1.01"
+          },
+          "chave": "{{chave_pix}}",
+          "solicitacaoPagador": "Item 2 lote homologacao UltraPDV"
+        }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 200', function () {
+          pm.response.to.have.status(200);
+      });
+    language: text/javascript
+order: 12000

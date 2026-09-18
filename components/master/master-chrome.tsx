@@ -10,6 +10,7 @@ const NAV = [
   { href: "/master", label: "Dashboard" },
   { href: "/master/empresas", label: "Empresas" },
   { href: "/master/planos", label: "Planos" },
+  { href: "/master/integracoes", label: "Integrações" },
 ];
 
 export function MasterChrome({ children }: { children: ReactNode }) {

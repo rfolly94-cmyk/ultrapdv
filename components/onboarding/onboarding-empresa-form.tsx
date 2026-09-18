@@ -6,6 +6,13 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 
+import { ConsultaCnpjCampo } from "@/components/cadastro/consulta-cnpj-campo";
+import {
+  mascararCnpjDigitando,
+  preencherCadastroComCnpj,
+  type DadosCnpjNormalizados,
+} from "@/lib/cadastro/cnpj";
+
 type Props = {
   nomeInicial: string;
   email: string;
@@ -18,36 +25,6 @@ function somenteDigitos(
     /\D/g,
     ""
   );
-}
-
-function formatarCnpj(
-  valor: string
-) {
-  const digitos =
-    somenteDigitos(
-      valor
-    ).slice(
-      0,
-      14
-    );
-
-  return digitos
-    .replace(
-      /^(\d{2})(\d)/,
-      "$1.$2"
-    )
-    .replace(
-      /^(\d{2})\.(\d{3})(\d)/,
-      "$1.$2.$3"
-    )
-    .replace(
-      /\.(\d{3})(\d)/,
-      ".$1/$2"
-    )
-    .replace(
-      /(\d{4})(\d)/,
-      "$1-$2"
-    );
 }
 
 export function
@@ -73,6 +50,51 @@ OnboardingEmpresaForm({
     setCnpj,
   ] =
     useState("");
+
+  const [
+    razaoSocial,
+    setRazaoSocial,
+  ] =
+    useState("");
+
+  const [
+    nomeFantasia,
+    setNomeFantasia,
+  ] =
+    useState("");
+
+  function aplicarDadosCnpj(
+    dados: DadosCnpjNormalizados
+  ) {
+    const preenchido =
+      preencherCadastroComCnpj(
+        {
+          cnpj,
+          razaoSocial,
+          nomeFantasia,
+        },
+        {
+          cnpj:
+            mascararCnpjDigitando(
+              dados.cnpj
+            ),
+          razaoSocial:
+            dados.razaoSocial,
+          nomeFantasia:
+            dados.nomeFantasia,
+        }
+      );
+
+    setCnpj(
+      preenchido.cnpj
+    );
+    setRazaoSocial(
+      preenchido.razaoSocial
+    );
+    setNomeFantasia(
+      preenchido.nomeFantasia
+    );
+  }
 
   async function
   enviar(
@@ -221,33 +243,30 @@ OnboardingEmpresaForm({
             </div>
           </div>
 
-          <Campo
+          <ConsultaCnpjCampo
             label="CNPJ"
             name="cnpj_visual"
             value={cnpj}
-            onChange={(
-              valor
-            ) =>
-              setCnpj(
-                formatarCnpj(
-                  valor
-                )
-              )
-            }
-            inputMode="numeric"
-            placeholder="00.000.000/0000-00"
+            onChange={setCnpj}
+            onAplicar={aplicarDadosCnpj}
+            modo="novo"
             required
+            inputClassName="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-700 focus:ring-2 focus:ring-zinc-100"
           />
 
           <Campo
             label="Razão social"
             name="razao_social"
+            value={razaoSocial}
+            onChange={setRazaoSocial}
             required
           />
 
           <Campo
             label="Nome fantasia"
             name="nome_fantasia"
+            value={nomeFantasia}
+            onChange={setNomeFantasia}
             required
           />
 

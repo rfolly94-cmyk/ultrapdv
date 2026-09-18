@@ -24,6 +24,15 @@ export async function POST(request: NextRequest) {
       empresaId,
       cobrancaId: body.cobranca_id,
     });
+    const extraC6 =
+      "e2eid_mascarado" in resultado
+        ? {
+            e2eid_mascarado: (
+              resultado as { e2eid_mascarado?: string | null }
+            ).e2eid_mascarado,
+            estado: (resultado as { estado?: string }).estado,
+          }
+        : {};
 
     return jsonPix({
       ok: true,
@@ -32,6 +41,9 @@ export async function POST(request: NextRequest) {
       txid: resultado.txid,
       evidencia: resultado.evidencia,
       contrato: resultado.contrato,
+      valor_pago: resultado.cobranca.valor_pago,
+      pago_em: resultado.cobranca.pago_em,
+      ...extraC6,
     });
   } catch (error) {
     return erroPix(error);

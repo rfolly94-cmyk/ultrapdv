@@ -1,3 +1,7 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
 import {
   CODIGOS_TIPO_OPERACAO_INTERNO,
   ROTULOS_FIN_NFE,
@@ -5,6 +9,10 @@ import {
   ROTULOS_TP_NF,
   type NaturezaOperacaoFiscal,
 } from "@/lib/fiscal/operacoes/catalogo";
+import {
+  identidadeSugeridaParaTipo,
+  textoAjudaRegrasCfop,
+} from "@/lib/fiscal/operacoes/coerencia-natureza-cfop";
 import {
   NaturezaCfopRegrasCampos,
   type GrupoFiscalNaturezaCfop,
@@ -25,6 +33,21 @@ export function NaturezaOperacaoForm({
   gruposFiscais?: GrupoFiscalNaturezaCfop[];
   regrasCfop?: RegraCfopNaturezaForm[];
 }) {
+  const [tipoOperacaoInterno, setTipoOperacaoInterno] = useState(
+    natureza?.tipo_operacao_interno ?? "venda"
+  );
+  const [tpNf, setTpNf] = useState(natureza?.tp_nf ?? "1");
+  const [finNfe, setFinNfe] = useState(natureza?.fin_nfe ?? "1");
+
+  const ajudaCfop = useMemo(
+    () =>
+      textoAjudaRegrasCfop({
+        tpNf,
+        tipoOperacaoInterno,
+      }),
+    [tpNf, tipoOperacaoInterno]
+  );
+
   return (
     <form
       action={action}
@@ -39,8 +62,9 @@ export function NaturezaOperacaoForm({
           {natureza ? "Editar natureza" : "Nova natureza de operação"}
         </h3>
         <p className="mt-1 text-sm text-zinc-500">
-          A descrição vira o natOp da NF-e. O tipo interno não é a
-          finalidade fiscal (finNFe).
+          A descrição vira o natOp da NF-e. O tipo interno é a regra do
+          UltraPDV e não define tributação. A finalidade fiscal (finNFe)
+          é um campo à parte.
         </p>
       </div>
 
@@ -64,12 +88,23 @@ export function NaturezaOperacaoForm({
         </label>
         <select
           name="tipo_operacao_interno"
-          defaultValue={natureza?.tipo_operacao_interno ?? "venda"}
+          value={tipoOperacaoInterno}
+          onChange={(event) => {
+            const tipo = event.target.value;
+            setTipoOperacaoInterno(tipo);
+            const sugestao = identidadeSugeridaParaTipo(tipo);
+            if (sugestao) {
+              setTpNf(sugestao.tpNf);
+              setFinNfe(sugestao.finNfe);
+            }
+          }}
           className={inputClass}
         >
           {CODIGOS_TIPO_OPERACAO_INTERNO.map((codigo) => (
             <option key={codigo} value={codigo}>
-              {ROTULOS_TIPO_OPERACAO[codigo]}
+              {codigo === "nota_credito" || codigo === "nota_debito"
+                ? `${ROTULOS_TIPO_OPERACAO[codigo]} (em desenvolvimento)`
+                : ROTULOS_TIPO_OPERACAO[codigo]}
             </option>
           ))}
         </select>
@@ -81,7 +116,8 @@ export function NaturezaOperacaoForm({
         </label>
         <select
           name="tp_nf"
-          defaultValue={natureza?.tp_nf ?? "1"}
+          value={tpNf}
+          onChange={(event) => setTpNf(event.target.value)}
           className={inputClass}
         >
           <option value="1">{ROTULOS_TP_NF["1"]}</option>
@@ -95,7 +131,8 @@ export function NaturezaOperacaoForm({
         </label>
         <select
           name="fin_nfe"
-          defaultValue={natureza?.fin_nfe ?? "1"}
+          value={finNfe}
+          onChange={(event) => setFinNfe(event.target.value)}
           className={inputClass}
         >
           {(Object.keys(ROTULOS_FIN_NFE) as Array<keyof typeof ROTULOS_FIN_NFE>).map(
@@ -106,6 +143,10 @@ export function NaturezaOperacaoForm({
             )
           )}
         </select>
+        <p className="mt-1 text-xs text-zinc-500">
+          Nota de crédito (5) e nota de débito (6) ainda não são geradas
+          neste fluxo.
+        </p>
       </div>
 
       <div>
@@ -142,25 +183,23 @@ export function NaturezaOperacaoForm({
 
       <div className="md:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
         <h4 className="font-semibold text-zinc-900">Regras de CFOP</h4>
-        <p className="mt-1 text-sm text-zinc-500">
-          Matriz por grupo fiscal desta empresa. Não preenchemos CFOP
-          automaticamente. Saídas 5xxx (interna) e 6xxx (interestadual),
-          inclusive devolução ao fornecedor. Sem fallback da venda.
-        </p>
+        <p className="mt-1 text-sm text-zinc-500">{ajudaCfop}</p>
         {natureza ? (
           <NaturezaCfopRegrasCampos
             grupos={gruposFiscais}
             regras={regrasCfop}
-            tipoOperacaoInterno={natureza.tipo_operacao_interno}
+            tipoOperacaoInterno={tipoOperacaoInterno}
+            tpNf={tpNf}
+            finNfe={finNfe}
             naturezaPadraoVenda={
-              natureza.tipo_operacao_interno === "venda" &&
+              tipoOperacaoInterno === "venda" &&
               Boolean(natureza.padrao)
             }
           />
         ) : (
           <p className="mt-3 text-sm text-zinc-600">
             Salve a natureza para configurar as regras de CFOP por grupo
-            fiscal.
+            fiscal. O CFOP não é preenchido automaticamente.
           </p>
         )}
       </div>

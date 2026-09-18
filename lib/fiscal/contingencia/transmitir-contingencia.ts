@@ -7,6 +7,7 @@ import {
   persistenciaFalhaComunicacaoEmitir,
   patchEmissaoFalhaComunicacao,
 } from "@/lib/fiscal/geranet/cliente-geranet";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import { ehRejeicaoFiscalReal } from "@/lib/fiscal/geranet/classificar-emissao";
 import {
   anexarTentativaTransmissaoContingencia,
@@ -205,12 +206,9 @@ export async function transmitirContingenciaNfce({
         )
         .maybeSingle(),
 
-      admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       ),
     ]);
 

@@ -11,6 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacional";
 import { exigirEmpresaOperacional } from "@/lib/assinatura/exigir-empresa-operacional";
+import { ORIGEM_ITEM_AVULSO, origemItemPdv } from "@/lib/pdv/item-avulso";
 import { exigirEdicaoPdv, resultadoNegacaoPdv } from "@/lib/pdv/acesso-operacao";
 
 type Resultado =
@@ -50,8 +51,11 @@ type EditarVendaPdvInput = {
   trocoCentavos: number;
   itens: Array<{
     vendaItemId: string | null;
-    produtoId: string;
+    origem?: "produto" | "avulso";
+    produtoId?: string | null;
+    descricao?: string;
     quantidade: number;
+    valorUnitarioCentavos?: number;
   }>;
   pagamentos: Array<{
     formaPagamentoId: string;
@@ -181,8 +185,36 @@ export async function editarVendaPdv(
 
     const itens = input.itens.map(
       (item) => {
+        if (origemItemPdv(item.origem) === ORIGEM_ITEM_AVULSO) {
+          const descricao = String(item.descricao ?? "").trim();
+          const quantidade = Number(item.quantidade);
+          const valorUnitarioCentavos = Math.round(
+            Number(item.valorUnitarioCentavos ?? 0)
+          );
+          if (
+            !descricao ||
+            !Number.isFinite(quantidade) ||
+            quantidade <= 0 ||
+            valorUnitarioCentavos <= 0 ||
+            (
+              item.vendaItemId !== null &&
+              !uuidValido(item.vendaItemId)
+            )
+          ) {
+            throw new Error("Item da venda inválido.");
+          }
+
+          return {
+            origem: ORIGEM_ITEM_AVULSO,
+            venda_item_id: item.vendaItemId,
+            descricao,
+            quantidade,
+            valor_unitario: centavosParaDecimal(valorUnitarioCentavos),
+          };
+        }
+
         if (
-          !uuidValido(item.produtoId) ||
+          !uuidValido(String(item.produtoId ?? "")) ||
           !Number.isInteger(
             item.quantidade
           ) ||
@@ -200,6 +232,7 @@ export async function editarVendaPdv(
         }
 
         return {
+          origem: "produto",
           venda_item_id:
             item.vendaItemId,
           produto_id: item.produtoId,
@@ -254,7 +287,12 @@ export async function editarVendaPdv(
     const teto = await avaliarTetoPagamentosNoServidor({
       supabase,
       empresaId: vinculo.empresa_id,
-      itens: input.itens,
+      itens: input.itens.map((item) => ({
+        produtoId: item.produtoId,
+        origem: item.origem,
+        quantidade: item.quantidade,
+        precoUnitarioCentavos: item.valorUnitarioCentavos,
+      })),
       descontoCentavos: input.descontoCentavos,
       pagamentos: input.pagamentos,
     });

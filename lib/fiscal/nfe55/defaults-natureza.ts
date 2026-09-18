@@ -14,6 +14,24 @@ export type CatalogoTipoOperacaoNfe = {
 export const MENSAGEM_AVISO_DEVOLUCAO_ENTRADA =
   "Devolução ao fornecedor parte da nota de entrada.";
 
+export const MENSAGEM_DEVOLUCAO_SELECIONE_ORIGEM =
+  "Selecione o documento fiscal de origem para carregar os itens da devolução.";
+
+export function naturezaDevolucaoNoEmissor(codigo: string) {
+  return codigo === "devolucao_fornecedor" || codigo === "devolucao_venda";
+}
+
+export function hrefDevolverNotaEntrada(
+  documentoId: string,
+  naturezaId?: string | null
+) {
+  const base = `/fiscal/entradas/${documentoId}/devolver`;
+  const natureza = String(naturezaId ?? "").trim();
+  return natureza
+    ? `${base}?natureza=${encodeURIComponent(natureza)}`
+    : base;
+}
+
 export function tipoOperacaoEmitivelNestaTela(
   codigo: string
 ): codigo is TipoOperacaoEmitivelNfe {

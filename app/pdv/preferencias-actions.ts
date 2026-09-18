@@ -9,10 +9,13 @@ import {
 } from "@/lib/pdv/acesso-operacao";
 import { gravarPreferenciasPdvSessao } from "@/lib/pdv/preferencias-servidor";
 import type { PreferenciasPdv } from "@/lib/pdv/preferencias";
+import { gravarItemAvulsoSessao } from "@/lib/pdv/item-avulso-servidor";
 import { gravarPermitirVendaSemEstoqueSessao } from "@/lib/pdv/venda-sem-estoque-servidor";
 
 export type SalvarPreferenciasPdvInput = PreferenciasPdv & {
   permitirVendaSemEstoque: boolean;
+  permitirItemAvulso: boolean;
+  produtoFiscalPadraoItemAvulsoId: string | null;
 };
 
 export async function salvarPreferenciasPdvAction(
@@ -49,11 +52,21 @@ export async function salvarPreferenciasPdvAction(
     return estoque;
   }
 
+  const avulso = await gravarItemAvulsoSessao({
+    permitirItemAvulso: input.permitirItemAvulso === true,
+    produtoFiscalPadraoId: input.produtoFiscalPadraoItemAvulsoId,
+  });
+  if (!avulso.ok) {
+    return avulso;
+  }
+
   revalidatePath("/pdv");
 
   return {
     ok: true as const,
     preferencias: resultado.preferencias,
     permitirVendaSemEstoque: estoque.permitirVendaSemEstoque,
+    permitirItemAvulso: avulso.permitirItemAvulso,
+    produtoFiscalPadraoItemAvulsoId: avulso.produtoFiscalPadraoId,
   };
 }

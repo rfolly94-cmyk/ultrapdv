@@ -129,9 +129,11 @@ import {
 import {
   avisoNaturezaNestaTela,
   destinatarioTipoPeloTipoOperacao,
+  naturezaDevolucaoNoEmissor,
   naturezaExigeFinanceiro,
   tipoOperacaoEmitivelNestaTela,
 } from "@/lib/fiscal/nfe55/defaults-natureza";
+import { NfeItensDevolucaoOrigem } from "@/components/fiscal/nfe55/nfe-itens-devolucao-origem";
 import {
   MENSAGEM_AGUARDANDO_RECONCILIACAO_BLOQUEIA_EDICAO,
   operacaoPodeConfirmarRecebimento,
@@ -632,6 +634,7 @@ export function NfeEmissaoForm({
     });
   }
   const emitivel = tipoOperacaoEmitivelNestaTela(tipoAtual);
+  const ehDevolucao = naturezaDevolucaoNoEmissor(tipoAtual);
   const destTipo = destinatarioTipoPeloTipoOperacao(tipoAtual);
   const nfeAutorizada = emissao?.status === "autorizada";
   const edicaoDocumento = podeEditarDocumentoFiscal({
@@ -2596,7 +2599,7 @@ export function NfeEmissaoForm({
       <NfeSecao
         titulo="Itens da nota fiscal"
         extra={
-          podeEditar ? (
+          podeEditar && !ehDevolucao ? (
             <button
               type="button"
               className="text-[12px] font-medium text-blue-700"
@@ -2607,7 +2610,14 @@ export function NfeEmissaoForm({
           ) : null
         }
       >
-        {podeEditar ? (
+        {ehDevolucao ? (
+          <NfeItensDevolucaoOrigem
+            tipoOperacaoInterno={tipoAtual}
+            naturezaId={naturezaId}
+            bloqueado={!podeEditarCabecalho}
+          />
+        ) : null}
+        {podeEditar && !ehDevolucao ? (
           <div className="nfe-itens-toolbar">
             <div className="nfe-busca-item">
             <input
@@ -2679,6 +2689,7 @@ export function NfeEmissaoForm({
             </div>
           </div>
         ) : null}
+        {ehDevolucao ? null : (
         <div className="nfe-itens-wrap">
           <table className="nfe-itens min-w-[980px]">
             <thead>
@@ -2752,6 +2763,7 @@ export function NfeEmissaoForm({
             </tbody>
           </table>
         </div>
+        )}
       </NfeSecao>
 
       <NfeSecao
@@ -3227,6 +3239,11 @@ export function NfeEmissaoForm({
               <li key={chave}>{chave}</li>
             ))}
           </ul>
+        ) : ehDevolucao ? (
+          <p className="mt-2 text-[12.5px] text-zinc-500">
+            A chave da NF-e de origem é preenchida automaticamente ao selecionar
+            a nota de entrada. Não é necessário redigitar.
+          </p>
         ) : (
           <p className="mt-2 text-[12.5px] text-zinc-500">
             Esta natureza não exige documento anterior. Referências serão usadas

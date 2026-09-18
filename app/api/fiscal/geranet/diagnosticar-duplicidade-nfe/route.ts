@@ -8,6 +8,7 @@ import {
   MENSAGEM_ADMIN_DIAGNOSTICO,
   obterContextoAdministracaoUsuarios,
 } from "@/lib/usuarios/contexto-administracao";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 type Registro = Record<
   string,
@@ -195,12 +196,9 @@ export async function GET(
       data: segredosData,
       error: segredosError,
     } =
-      await admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      await obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       );
 
     if (

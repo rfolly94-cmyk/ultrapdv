@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+import { excluirRascunhoOperacaoFiscal } from "@/app/fiscal/nfe/operacoes-actions";
 import { DataTable, DataTableEmpty } from "@/components/ui/data-table";
 import { ListToolbar } from "@/components/ui/list-toolbar";
 import { PageHeader } from "@/components/ui/page-header";
@@ -10,6 +11,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { VendasModuleTabs } from "@/components/vendas/vendas-module-tabs";
 import type { ItemListaRascunhoNfe55 } from "@/lib/fiscal/nfe55/rascunhos-nfe";
+import { MENSAGEM_CONFIRMAR_EXCLUSAO_RASCUNHO_NFE } from "@/lib/fiscal/nfe55/rascunhos-nfe";
 import { useRecursoLiberado } from "@/lib/plataforma/entitlements/contexto-ui";
 
 function formatarData(valor: string | null) {
@@ -43,13 +45,17 @@ export function NfeRascunhosWorkspace({
   const router = useRouter();
   const nfeLiberada = useRecursoLiberado("nfe");
   const [busca, setBusca] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+  const [excluidos, setExcluidos] = useState<string[]>([]);
+  const [, startTransition] = useTransition();
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
+    const vigentes = rascunhos.filter((item) => !excluidos.includes(item.id));
     if (!termo) {
-      return rascunhos;
+      return vigentes;
     }
-    return rascunhos.filter((item) =>
+    return vigentes.filter((item) =>
       [
         item.identificacao,
         item.destinatario,
@@ -61,7 +67,27 @@ export function NfeRascunhosWorkspace({
         .toLowerCase()
         .includes(termo)
     );
-  }, [busca, rascunhos]);
+  }, [busca, excluidos, rascunhos]);
+
+  function excluirRascunho(item: ItemListaRascunhoNfe55) {
+    if (!window.confirm(MENSAGEM_CONFIRMAR_EXCLUSAO_RASCUNHO_NFE)) {
+      return;
+    }
+    setErro(null);
+    startTransition(async () => {
+      const resultado = await excluirRascunhoOperacaoFiscal({
+        operacaoId: item.id,
+      });
+      if (!resultado.ok) {
+        setErro(resultado.erro);
+        return;
+      }
+      setExcluidos((atual) =>
+        atual.includes(item.id) ? atual : [...atual, item.id]
+      );
+      router.refresh();
+    });
+  }
 
   return (
     <section className="updv-page">
@@ -91,9 +117,16 @@ export function NfeRascunhosWorkspace({
         onSearchChange={setBusca}
       />
 
+      {erro ? (
+        <div className="mx-4 mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {erro}
+        </div>
+      ) : null}
+
       <DataTable minWidth={1080}>
         <thead>
           <tr>
+            <th>Ações</th>
             <th>Rascunho</th>
             <th>Data</th>
             <th>Destinatário</th>
@@ -103,7 +136,6 @@ export function NfeRascunhosWorkspace({
             <th>Status</th>
             <th>Usuário</th>
             <th>Atualizado</th>
-            <th className="sticky right-0 z-10 bg-[#f4f4f5]">Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -118,6 +150,21 @@ export function NfeRascunhosWorkspace({
                 className="cursor-pointer"
                 onClick={() => router.push(item.href)}
               >
+                <td>
+                  <RowActions
+                    items={[
+                      {
+                        label: "Continuar",
+                        href: item.href,
+                      },
+                      {
+                        label: "Excluir",
+                        danger: true,
+                        onClick: () => excluirRascunho(item),
+                      },
+                    ]}
+                  />
+                </td>
                 <td>{item.identificacao}</td>
                 <td>{formatarData(item.data)}</td>
                 <td>{item.destinatario}</td>
@@ -131,9 +178,6 @@ export function NfeRascunhosWorkspace({
                 </td>
                 <td>{item.usuario}</td>
                 <td>{formatarData(item.atualizadoEm)}</td>
-                <td className="sticky right-0 z-10 bg-white">
-                  <RowActions editHref={item.href} editLabel="Continuar" />
-                </td>
               </tr>
             ))
           )}

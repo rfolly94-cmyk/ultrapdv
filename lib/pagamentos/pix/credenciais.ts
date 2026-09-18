@@ -80,7 +80,7 @@ export function filtrarCredenciaisDoProvedor(
     }
   }
 
-  if (meta?.usaChavePix && texto(chavePixPublica)) {
+  if (meta?.usaChavePix && texto(chavePixPublica) && !texto(saida.chavePix)) {
     saida.chavePix = texto(chavePixPublica);
   }
 
@@ -150,6 +150,11 @@ export function mesclarSegredosProvedor(params: {
     if (escolhido) {
       saida[campo.chave] = escolhido;
     }
+  }
+
+  const chavePixCofre = texto(params.existentes.chavePix);
+  if (chavePixCofre && !saida.chavePix) {
+    saida.chavePix = chavePixCofre;
   }
 
   return saida;

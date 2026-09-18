@@ -57,7 +57,7 @@ const fiscal: MenuItem[] = [
     href: "/configuracoes/fiscal/prontidao",
   },
   {
-    label: "Integração Geranet",
+    label: "Credenciais Fiscais",
     href: "/configuracoes/fiscal/integracao",
   },
 ];

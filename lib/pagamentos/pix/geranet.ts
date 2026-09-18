@@ -23,12 +23,22 @@ import {
   METODO_TESTE_PIX_GERANET,
   TXID_TESTE_CONEXAO_PIX,
 } from "./testar-conexao";
+import { linhaPublicaCobrancaPix } from "./cobranca-publica";
+import { ehProvedorPixC6Direto } from "./c6/regras";
+import {
+  cancelarCobrancaPixC6,
+  consultarCobrancaPixC6,
+  emitirCobrancaPixC6Teste,
+  testarConexaoPixC6,
+} from "./c6/adapter";
 import type {
   AmbientePixGeranet,
   CobrancaPixPublica,
   DevedorPix,
   StatusCobrancaPix,
 } from "./types";
+
+export { linhaPublicaCobrancaPix } from "./cobranca-publica";
 
 function agoraIso() {
   return new Date().toISOString();
@@ -53,43 +63,6 @@ async function registrarLog(params: {
     situacao: params.situacao ?? null,
     mensagem: params.mensagem ?? null,
   });
-}
-
-export function linhaPublicaCobrancaPix(
-  row: Record<string, unknown>
-): CobrancaPixPublica {
-  return {
-    id: String(row.id),
-    empresa_id: String(row.empresa_id),
-    txid: row.txid ? String(row.txid) : null,
-    valor: Number(row.valor),
-    status: row.status as StatusCobrancaPix,
-    provedor: row.provedor ? String(row.provedor) : null,
-    ambiente: row.ambiente ? String(row.ambiente) : null,
-    dados_publicos:
-      row.dados_publicos && typeof row.dados_publicos === "object"
-        ? (row.dados_publicos as Record<string, unknown>)
-        : {},
-    geranet_http_status:
-      typeof row.geranet_http_status === "number"
-        ? row.geranet_http_status
-        : null,
-    geranet_situacao: row.geranet_situacao
-      ? String(row.geranet_situacao)
-      : null,
-    geranet_mensagem: row.geranet_mensagem
-      ? String(row.geranet_mensagem)
-      : null,
-    expira_em: row.expira_em ? String(row.expira_em) : null,
-    pago_em: row.pago_em ? String(row.pago_em) : null,
-    cancelado_em: row.cancelado_em ? String(row.cancelado_em) : null,
-    modo_pix: row.modo_pix ? String(row.modo_pix) : null,
-    valor_pago:
-      row.valor_pago == null || row.valor_pago === ""
-        ? null
-        : Number(row.valor_pago),
-    checkout_key: row.checkout_key ? String(row.checkout_key) : null,
-  };
 }
 
 function linhaPublica(row: Record<string, unknown>): CobrancaPixPublica {
@@ -150,6 +123,14 @@ export async function emitirCobrancaPixTeste({
 
   if (!integracao.recebedor_nome || !integracao.recebedor_cidade) {
     throw new ErroPixGeranet("Preencha os dados do recebedor PIX.");
+  }
+
+  if (ehProvedorPixC6Direto(integracao.provedor)) {
+    return emitirCobrancaPixC6Teste({
+      empresaId,
+      valor,
+      devedor,
+    });
   }
 
   const [apiKey, cnpj, credenciais] = await Promise.all([
@@ -283,6 +264,11 @@ export async function consultarCobrancaPix({
 }) {
   await exigirPixGeranetAtivo(empresaId);
   const cobranca = await carregarCobrancaDaEmpresa(empresaId, cobrancaId);
+
+  if (ehProvedorPixC6Direto(String(cobranca.provedor))) {
+    return consultarCobrancaPixC6({ empresaId, cobrancaId });
+  }
+
   const txid = String(cobranca.txid ?? "").trim();
 
   if (!txid) {
@@ -440,6 +426,11 @@ export async function cancelarCobrancaPix({
 }) {
   await exigirPixGeranetAtivo(empresaId);
   const cobranca = await carregarCobrancaDaEmpresa(empresaId, cobrancaId);
+
+  if (ehProvedorPixC6Direto(String(cobranca.provedor))) {
+    return cancelarCobrancaPixC6({ empresaId, cobrancaId });
+  }
+
   const statusAtual = cobranca.status as StatusCobrancaPix;
 
   if (statusAtual === "paga") {
@@ -613,6 +604,10 @@ export async function testarConexaoPixGeranet(empresaId: string) {
 
   if (!integracao.provedor) {
     throw new ErroPixGeranet("Selecione um provedor PIX da Geranet.");
+  }
+
+  if (ehProvedorPixC6Direto(integracao.provedor)) {
+    return testarConexaoPixC6(empresaId);
   }
 
   const meta = obterProvedorPixGeranet(integracao.provedor);

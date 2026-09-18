@@ -21,7 +21,7 @@ import {
 } from "@/lib/pagamentos/pix/provedores";
 import type { CobrancaPixPublica, ModoPix } from "@/lib/pagamentos/pix/types";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
-import { salvarConfiguracaoPix } from "./actions";
+import { gerenciarWebhookPixC6, salvarConfiguracaoPix } from "./actions";
 import { PixLocalPanel } from "./pix-local-panel";
 
 type FlagsCredenciais = Record<
@@ -73,6 +73,10 @@ export function PixGeranetWorkspace({
   const [valor, setValor] = useState("1.00");
   const [devedorNome, setDevedorNome] = useState("");
   const [diagnostico, setDiagnostico] = useState<unknown>(null);
+  const [flagsArquivoSalvas, setFlagsArquivoSalvas] = useState<{
+    certificadoConfigurado: boolean;
+    chavePrivadaConfigurada: boolean;
+  } | null>(null);
   const [lista, setLista] = useState(cobrancas);
   const [provedor, setProvedor] = useState(() =>
     codigoProvedorPixParaTela(integracao?.provedor)
@@ -100,6 +104,7 @@ export function PixGeranetWorkspace({
     return integracao?.modo === "local_manual" ? "local_manual" : "geranet";
   });
 
+  const ehC6 = provedor === "c6bank";
   const formulario = useMemo(
     () => formularioCredenciaisProvedor(provedor, ambiente),
     [provedor, ambiente]
@@ -112,6 +117,22 @@ export function PixGeranetWorkspace({
     credenciaisConfiguradas: integracao?.credenciais_configuradas,
     certificadoConfigurado: integracao?.certificado_configurado,
   });
+  const certificadoConfiguradoVisivel =
+    flagsArquivoSalvas?.certificadoConfigurado ??
+    Boolean(flags.certificadoPemHexadecimal);
+  const chavePrivadaConfiguradaVisivel =
+    flagsArquivoSalvas?.chavePrivadaConfigurada ??
+    Boolean(flags.chavePrivadaPemHexadecimal);
+
+  function arquivoConfiguradoVisivel(chave: string) {
+    if (chave === "certificadoPemHexadecimal") {
+      return certificadoConfiguradoVisivel;
+    }
+    if (chave === "chavePrivadaPemHexadecimal") {
+      return chavePrivadaConfiguradaVisivel;
+    }
+    return Boolean(flags[chave]);
+  }
 
   function trocarProvedor(proximo: string) {
     if (!ehProvedorPixSelecionavel(proximo)) {
@@ -125,11 +146,13 @@ export function PixGeranetWorkspace({
         : ambientePadraoDoProvedor(proximo)
     );
     setArquivosLocais({});
+    setFlagsArquivoSalvas(null);
   }
 
   function trocarAmbiente(proximo: string) {
     setAmbiente(proximo);
     setArquivosLocais({});
+    setFlagsArquivoSalvas(null);
   }
 
   async function salvar(event: React.FormEvent<HTMLFormElement>) {
@@ -138,15 +161,26 @@ export function PixGeranetWorkspace({
     setMensagem(null);
 
     try {
-      const resultado = await salvarConfiguracaoPix(
-        new FormData(event.currentTarget)
-      );
+      const form = event.currentTarget;
+      const formData = new FormData(form);
+      const resultado = await salvarConfiguracaoPix(formData);
       setTomAlerta(resultado.ok ? "sucesso" : "erro");
       setMensagem(
         resultado.ok
-          ? "Configuração PIX Geranet salva. Credenciais foram para o cofre."
+          ? "mensagem" in resultado && resultado.mensagem
+            ? resultado.mensagem
+            : "Credenciais salvas com segurança."
           : resultado.erro
       );
+      if (
+        "certificadoConfigurado" in resultado &&
+        "chavePrivadaConfigurada" in resultado
+      ) {
+        setFlagsArquivoSalvas({
+          certificadoConfigurado: Boolean(resultado.certificadoConfigurado),
+          chavePrivadaConfigurada: Boolean(resultado.chavePrivadaConfigurada),
+        });
+      }
       if (resultado.ok) {
         setArquivosLocais({});
       }
@@ -199,6 +233,29 @@ export function PixGeranetWorkspace({
       setTomAlerta("erro");
       setMensagem(
         error instanceof Error ? error.message : "Falha de rede no PIX."
+      );
+    } finally {
+      setOperando(false);
+    }
+  }
+
+  async function webhookC6(operacao: "registrar" | "consultar" | "remover") {
+    setOperando(true);
+    setMensagem(null);
+    try {
+      const resultado = await gerenciarWebhookPixC6(operacao);
+      setTomAlerta(resultado.ok ? "sucesso" : "erro");
+      setMensagem(
+        resultado.ok
+          ? [resultado.mensagem, resultado.webhookUrl]
+              .filter(Boolean)
+              .join(" ")
+          : resultado.erro
+      );
+    } catch (error) {
+      setTomAlerta("erro");
+      setMensagem(
+        error instanceof Error ? error.message : "Falha ao operar o webhook C6."
       );
     } finally {
       setOperando(false);
@@ -291,18 +348,19 @@ export function PixGeranetWorkspace({
       >
         <input type="hidden" name="modo" value="geranet" />
         <h2 className="text-[15px] font-semibold text-zinc-950">
-          Integração PIX Geranet
+          {ehC6 ? "Integração PIX C6 Bank" : "Integração PIX Geranet"}
         </h2>
         <p className="mt-1 text-[13px] text-zinc-500">
-          Etapa isolada: não altera o PDV. A API Key Geranet continua a da
-          integração fiscal. Credenciais do banco entram só no cofre.
+          {ehC6
+            ? "Autenticação e cobrança imediatas no C6. Sandbox e produção usam credenciais, certificado, chave privada e chave PIX separados no cofre da empresa ativa."
+            : "Etapa isolada: não altera o PDV. A API Key Geranet continua a da integração fiscal. Credenciais do banco entram só no cofre."}
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="text-[13px] font-medium text-zinc-700">
             Integração
             <input
-              value="Geranet"
+              value={ehC6 ? "C6 Bank (direto)" : "Geranet"}
               readOnly
               className="updv-input mt-1 w-full bg-zinc-50"
             />
@@ -317,7 +375,7 @@ export function PixGeranetWorkspace({
               className="updv-select mt-1 w-full"
             >
               {formulario.ambientes.includes("2") && (
-                <option value="2">Homologação</option>
+                <option value="2">{ehC6 ? "Sandbox" : "Homologação"}</option>
               )}
               {formulario.ambientes.includes("1") && (
                 <option value="1">Produção</option>
@@ -353,11 +411,31 @@ export function PixGeranetWorkspace({
             <label className="text-[13px] font-medium text-zinc-700">
               Chave PIX
               <input
+                key={`${provedor}-${ambiente}-chave-pix`}
                 name="chave_pix"
-                defaultValue={integracao?.chave_pix ?? ""}
-                required={formulario.chavePixObrigatoria}
+                defaultValue={ehC6 ? "" : (integracao?.chave_pix ?? "")}
+                required={
+                  ehC6 ? !flags.chavePix : formulario.chavePixObrigatoria
+                }
+                autoComplete="off"
+                placeholder={
+                  ehC6 && flags.chavePix
+                    ? "Informe somente para substituir neste ambiente"
+                    : undefined
+                }
                 className="updv-input mt-1 w-full"
               />
+              {ehC6 && flags.chavePix ? (
+                <span className="mt-1 block text-[12px] text-emerald-700">
+                  Chave PIX configurada ✓
+                </span>
+              ) : null}
+              {ehC6 ? (
+                <span className="mt-1 block text-[12px] text-zinc-500">
+                  Sandbox e produção usam chaves distintas no cofre. Trocar o
+                  ambiente não copia a chave anterior.
+                </span>
+              ) : null}
             </label>
           )}
 
@@ -451,7 +529,7 @@ export function PixGeranetWorkspace({
                         ? arquivosLocais[campo.chave]
                         : rotuloEscolherArquivo(campo)}
                     </span>
-                    {flags[campo.chave] && (
+                    {arquivoConfiguradoVisivel(campo.chave) && (
                       <span className="mt-1 block text-[12px] text-emerald-700">
                         {rotuloArquivoConfigurado(campo)}
                       </span>
@@ -502,16 +580,80 @@ export function PixGeranetWorkspace({
             onClick={() => chamar("/api/pagamentos/pix/geranet/testar", {})}
             className="updv-btn updv-btn-ghost"
           >
-            Testar conexão
+            {ehC6 && ambiente === "1"
+              ? "Testar conexão de produção"
+              : ehC6
+                ? "Testar conexão de sandbox"
+                : "Testar conexão"}
           </button>
         </div>
         <p className="mt-2 text-[12px] text-zinc-500">
-          O teste consulta um TXID sintético, sem emitir cobrança. Só marca
-          sucesso quando a resposta comprova autenticação aceita e erro de
-          cobrança inexistente. Resposta genérica fica inconclusiva; recusa
-          de certificado, token ou credencial é erro.
+          {ehC6
+            ? ambiente === "1"
+              ? "O teste autentica no C6 Produção com mTLS. O access_token não é enviado ao navegador e nenhuma cobrança é emitida."
+              : "O teste autentica no C6 Sandbox com mTLS. O access_token não é enviado ao navegador e nenhuma cobrança é emitida."
+            : "O teste consulta um TXID sintético, sem emitir cobrança. Só marca sucesso quando a resposta comprova autenticação aceita e erro de cobrança inexistente. Resposta genérica fica inconclusiva; recusa de certificado, token ou credencial é erro."}
         </p>
-      </form>
+        {ehC6 && (
+          <ul className="mt-3 grid gap-1 text-[12px] text-zinc-700 md:grid-cols-2">
+            <li>
+              Client ID configurado {flags.clienteId ? "✓" : "—"}
+            </li>
+            <li>
+              Client Secret configurado {flags.clienteSegredo ? "✓" : "—"}
+            </li>
+            <li>
+              Certificado configurado {certificadoConfiguradoVisivel ? "✓" : "—"}
+            </li>
+            <li>
+              Chave privada configurada {chavePrivadaConfiguradaVisivel ? "✓" : "—"}
+            </li>
+            <li>
+              Chave PIX configurada{" "}
+              {flags.chavePix || integracao?.chave_pix ? "✓" : "—"}
+            </li>
+          </ul>
+        )}
+        </form>
+
+      {ehC6 ? (
+        <section className="rounded-md border border-zinc-200 bg-white p-4">
+          <h2 className="text-[15px] font-semibold text-zinc-950">
+            Webhook C6
+          </h2>
+          <p className="mt-1 text-[13px] text-zinc-500">
+            O cadastro no C6 é feito pelo servidor. A URL pública aponta para o
+            domínio HTTPS do UltraPDV. O webhook só dispara a consulta da
+            cobrança; o pagamento não é confirmado pelo POST recebido.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={operando}
+              onClick={() => void webhookC6("registrar")}
+              className="updv-btn updv-btn-primary"
+            >
+              Registrar webhook
+            </button>
+            <button
+              type="button"
+              disabled={operando}
+              onClick={() => void webhookC6("consultar")}
+              className="updv-btn updv-btn-ghost"
+            >
+              Consultar webhook
+            </button>
+            <button
+              type="button"
+              disabled={operando}
+              onClick={() => void webhookC6("remover")}
+              className="updv-btn updv-btn-ghost"
+            >
+              Remover webhook
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-md border border-zinc-200 bg-white p-4">
         <h2 className="text-[15px] font-semibold text-zinc-950">
@@ -569,13 +711,19 @@ export function PixGeranetWorkspace({
             <tbody>
               {lista.map((cobranca) => {
                 const dados = cobranca.dados_publicos as {
+                  pixCopiaECola?: string | null;
+                  contrato?: { pixCopiaECola?: string | null; qrCode?: string | null };
                   normalizado?: {
                     copiaECola?: string | null;
                     qrCode?: string | null;
                   };
                 };
-                const copia = dados.normalizado?.copiaECola;
-                const qr = dados.normalizado?.qrCode;
+                const copia =
+                  dados.contrato?.pixCopiaECola ??
+                  dados.pixCopiaECola ??
+                  dados.normalizado?.copiaECola;
+                const qr =
+                  dados.contrato?.qrCode ?? dados.normalizado?.qrCode;
 
                 return (
                   <tr key={cobranca.id}>
@@ -590,7 +738,11 @@ export function PixGeranetWorkspace({
                     </td>
                     <td>{cobranca.status}</td>
                     <td>
-                      {cobranca.ambiente === "1" ? "Produção" : "Homologação"}
+                      {cobranca.ambiente === "1"
+                        ? "Produção"
+                        : cobranca.provedor === "c6bank"
+                          ? "Sandbox"
+                          : "Homologação"}
                     </td>
                     <td>
                       <div className="flex flex-wrap gap-1">
@@ -611,8 +763,14 @@ export function PixGeranetWorkspace({
                           disabled={
                             operando ||
                             !cobranca.txid ||
+                            cobranca.provedor === "c6bank" ||
                             cobranca.status === "paga" ||
                             cobranca.status === "cancelada"
+                          }
+                          title={
+                            cobranca.provedor === "c6bank"
+                              ? "Cancelamento remoto C6 ainda não está documentado nesta fase."
+                              : undefined
                           }
                           onClick={() =>
                             chamar("/api/pagamentos/pix/geranet/cancelar", {
@@ -660,7 +818,7 @@ export function PixGeranetWorkspace({
       {diagnostico != null && (
         <section className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
           <h2 className="text-[15px] font-semibold text-zinc-950">
-            Resposta Geranet sanitizada
+            Resposta sanitizada
           </h2>
           <pre className="mt-2 overflow-auto text-[12px] text-zinc-700">
             {JSON.stringify(diagnostico, null, 2)}

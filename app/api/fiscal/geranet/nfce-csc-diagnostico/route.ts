@@ -7,6 +7,7 @@ import {
   MENSAGEM_ADMIN_DIAGNOSTICO,
   obterContextoAdministracaoUsuarios,
 } from "@/lib/usuarios/contexto-administracao";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 function texto(
   valor: unknown
@@ -94,12 +95,9 @@ export async function GET() {
           true
         ),
 
-      admin.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       ),
     ]);
 

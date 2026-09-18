@@ -4,7 +4,10 @@ import {
   totalLiquidoNota,
   totaisNotaDoSnapshot,
 } from "@/lib/fiscal/nfe55/totais-nota";
-import { rotuloStatusOperacaoFiscal } from "@/lib/fiscal/operacoes/status-operacao";
+import {
+  podeEditarDocumentoFiscal,
+  rotuloStatusOperacaoFiscal,
+} from "@/lib/fiscal/operacoes/status-operacao";
 
 export const HREF_RASCUNHOS_NFE = "/vendas/rascunhos-nfe";
 
@@ -12,6 +15,18 @@ export const ABA_RASCUNHOS_NFE = "rascunhos-nfe";
 
 export const MENSAGEM_SAIR_NFE_COM_ALTERACOES =
   "Existem alterações não salvas. Deseja sair mesmo assim?";
+
+export const MENSAGEM_CONFIRMAR_EXCLUSAO_RASCUNHO_NFE =
+  "Deseja excluir este rascunho de NF-e?";
+
+export const MENSAGEM_RASCUNHO_NFE_NAO_EXCLUIVEL =
+  "Este registro não é um rascunho de NF-e e não pode ser excluído.";
+
+export const MENSAGEM_NFE_AUTORIZADA_NAO_EXCLUI =
+  "NF-e autorizada não pode ser excluída.";
+
+export const MENSAGEM_RASCUNHO_COM_ESTOQUE_NAO_EXCLUI =
+  "Este rascunho já movimentou estoque e não pode ser excluído.";
 
 export const STATUS_RASCUNHO_NFE55 = [
   "rascunho",
@@ -43,6 +58,32 @@ export function identificacaoRascunhoNfe55(input: {
 
 export function hrefContinuarRascunhoNfe55(operacaoId: string) {
   return hrefEdicaoOperacaoFiscal(operacaoId);
+}
+
+export function motivoImpedeExcluirRascunhoNfe55(input: {
+  status: string;
+  saidaEstoqueProcessadaAt?: string | null;
+  recebimentoProcessadoAt?: string | null;
+  emissao?: Parameters<typeof podeEditarDocumentoFiscal>[0]["emissao"];
+}) {
+  const status = String(input.status ?? "");
+  if (status === "autorizada") {
+    return MENSAGEM_NFE_AUTORIZADA_NAO_EXCLUI;
+  }
+  if (!statusEhRascunhoNfe55(status)) {
+    return MENSAGEM_RASCUNHO_NFE_NAO_EXCLUIVEL;
+  }
+  if (input.saidaEstoqueProcessadaAt || input.recebimentoProcessadoAt) {
+    return MENSAGEM_RASCUNHO_COM_ESTOQUE_NAO_EXCLUI;
+  }
+  const gate = podeEditarDocumentoFiscal({
+    statusOperacao: status,
+    emissao: input.emissao,
+  });
+  if (!gate.permitido) {
+    return gate.motivo ?? MENSAGEM_RASCUNHO_NFE_NAO_EXCLUIVEL;
+  }
+  return null;
 }
 
 export type ItemListaRascunhoNfe55 = {

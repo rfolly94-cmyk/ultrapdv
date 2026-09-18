@@ -4,10 +4,8 @@ import { PageAlert } from "@/components/ui/page-alert";
 import { createClient } from "@/lib/supabase/server";
 
 import {
-  salvarApiGeranet,
   salvarCertificadoA1,
   salvarConfiguracaoNfce,
-  testarConexaoGeranet,
 } from "./actions";
 
 type PageProps = {
@@ -17,7 +15,7 @@ type PageProps = {
   }>;
 };
 
-export default async function IntegracaoFiscalPage({
+export default async function CredenciaisFiscaisPage({
   searchParams,
 }: PageProps) {
   const params = await searchParams;
@@ -73,7 +71,6 @@ export default async function IntegracaoFiscalPage({
         "fiscal_credenciais_status"
       )
       .select(`
-        api_key_configurada,
         certificado_configurado,
         certificado_nome,
         certificado_validade
@@ -115,17 +112,7 @@ export default async function IntegracaoFiscalPage({
           {empresa?.nome_fantasia}
         </p>
 
-        {/* STATUS */}
-
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <Status
-            titulo="API Geranet"
-            configurado={
-              credenciais?.api_key_configurada ??
-              false
-            }
-          />
-
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <Status
             titulo="Certificado A1"
             configurado={
@@ -152,69 +139,13 @@ export default async function IntegracaoFiscalPage({
           />
         </div>
 
-        {/* API KEY */}
-
         <section className="mt-4 rounded-md border border-zinc-200 bg-white p-4">
           <h2 className="text-lg font-semibold text-zinc-900">
-            API Geranet
+            Certificado Digital A1
           </h2>
 
           <p className="mt-1 text-sm text-zinc-500">
-            A chave será validada na Geranet
-            antes de ser armazenada.
-          </p>
-
-          <form
-            action={salvarApiGeranet}
-            className="mt-5"
-          >
-            <label className="block text-sm font-medium text-zinc-700">
-              API Key
-            </label>
-
-            <input
-              name="api_key"
-              type="password"
-              required
-              autoComplete="off"
-              placeholder="gn_..."
-              className={inputClass}
-            />
-
-            <button
-              type="submit"
-              className={buttonClass}
-            >
-              Validar e salvar API Key
-            </button>
-          </form>
-
-          {credenciais?.api_key_configurada && (
-            <form
-              action={testarConexaoGeranet}
-              className="mt-4"
-            >
-              <button
-                type="submit"
-                className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-              >
-                Testar conexão com Geranet
-              </button>
-            </form>
-          )}
-        </section>
-
-        {/* CERTIFICADO */}
-
-        <section className="mt-4 rounded-md border border-zinc-200 bg-white p-4">
-          <h2 className="text-lg font-semibold text-zinc-900">
-            Certificado digital A1
-          </h2>
-
-          <p className="mt-1 text-sm text-zinc-500">
-            Envie o arquivo .pfx ou .p12.
-            O UltraPDV converterá o certificado
-            para hexadecimal no servidor.
+            Envie o arquivo .pfx ou .p12 utilizado na emissão fiscal.
           </p>
 
           <form
@@ -258,16 +189,13 @@ export default async function IntegracaoFiscalPage({
           </form>
         </section>
 
-        {/* NFC-E */}
-
         <section className="mt-4 rounded-md border border-zinc-200 bg-white p-4">
           <h2 className="text-lg font-semibold text-zinc-900">
             NFC-e
           </h2>
 
           <p className="mt-1 text-sm text-zinc-500">
-            CSC utilizado para geração do QR Code
-            da NFC-e modelo 65.
+            Configure o CSC utilizado na geração do QR Code da NFC-e.
           </p>
 
           <form
@@ -311,12 +239,6 @@ export default async function IntegracaoFiscalPage({
             </button>
           </form>
         </section>
-
-        <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] text-blue-800">
-          Continuaremos trabalhando em ambiente
-          de homologação. Nenhuma emissão em
-          produção será feita nesta etapa.
-        </div>
     </div>
   );
 }

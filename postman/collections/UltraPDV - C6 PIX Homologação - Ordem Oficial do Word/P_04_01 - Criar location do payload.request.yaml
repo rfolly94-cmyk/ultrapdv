@@ -1,0 +1,30 @@
+$kind: http-request
+url: "{{pix_base}}/loc"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "tipoCob": "cob"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 201', function () {
+          pm.response.to.have.status(201);
+      });
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      if (pm.response.code === 201) {
+          const j = pm.response.json();
+          if (j.id !== undefined && j.id !== null) pm.collectionVariables.set('location_id', String(j.id));
+      }
+    language: text/javascript
+order: 15000

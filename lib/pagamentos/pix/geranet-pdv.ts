@@ -12,6 +12,8 @@ import {
   montarContratoPixGeranet,
   normalizarStatusPagamentoPixGeranet,
 } from "./evidencia-pagamento";
+import { ehProvedorPixC6Direto } from "./c6/regras";
+import { emitirCobrancaPixC6Pdv } from "./c6/adapter";
 import { cancelarCobrancaPix, linhaPublicaCobrancaPix } from "./geranet";
 import {
   checkoutKeyPixValida,
@@ -258,6 +260,10 @@ export async function emitirCobrancaPixPdv(input: {
   }
 
   const { empresaId } = await resolverEmpresaPix();
+  const integracaoAtual = await carregarIntegracaoPix(empresaId);
+  if (ehProvedorPixC6Direto(integracaoAtual?.provedor)) {
+    return emitirCobrancaPixC6Pdv(input);
+  }
 
   let pre;
   try {

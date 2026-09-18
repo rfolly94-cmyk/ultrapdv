@@ -82,7 +82,12 @@ test("cadastro de cliente consulta CEP no ViaCEP sem criar campos novos", () => 
     path.join(process.cwd(), "components/cadastro/endereco-via-cep-campos.tsx"),
     "utf8"
   );
-  assert.match(pagina, /EnderecoViaCepCampos/);
+  const cnpj = readFileSync(
+    path.join(process.cwd(), "components/cadastro/cliente-campos-cnpj.tsx"),
+    "utf8"
+  );
+  assert.match(pagina, /ClienteCamposCnpj/);
+  assert.match(cnpj, /EnderecoViaCepCampos/);
   assert.match(pagina, /const mostrarLista = !clienteEdicao && !params\.novo/);
   assert.match(pagina, /ClienteNavegacao/);
   assert.match(campos, /name="cep"/);

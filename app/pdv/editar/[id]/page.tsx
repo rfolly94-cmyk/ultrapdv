@@ -18,6 +18,7 @@ import {
   vendaPossuiDocumentoFiscalBloqueante,
 } from "@/lib/fiscal/estado-operacional-fiscal";
 import { filtrarRegistrosDaEmpresaAtiva } from "@/lib/empresa/assert-registro-empresa-ativa";
+import { origemItemPdv } from "@/lib/pdv/item-avulso";
 
 function centavos(valor: unknown) {
   const numero = Number(valor ?? 0);
@@ -173,6 +174,7 @@ export default async function EditarVendaNoPdvPage({
       .select(`
         id,
         produto_id,
+        origem_item,
         produto_codigo,
         produto_nome,
         unidade_medida,
@@ -317,6 +319,7 @@ export default async function EditarVendaNoPdvPage({
     itens: (itensResult.data ?? []).map(
       (item) => ({
         vendaItemId: item.id,
+        origem: origemItemPdv(item.origem_item),
         produtoId: item.produto_id,
         codigo: item.produto_codigo ?? "",
         nome: item.produto_nome,

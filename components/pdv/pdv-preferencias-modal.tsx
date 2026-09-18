@@ -10,21 +10,33 @@ import {
 export function PdvPreferenciasModal({
   inicial,
   permitirVendaSemEstoque,
+  permitirItemAvulso,
+  produtoFiscalPadraoItemAvulsoId,
+  produtos,
   salvando,
   onCancelar,
   onPreview,
   onPermitirVendaSemEstoque,
+  onPermitirItemAvulso,
+  onProdutoFiscalPadraoItemAvulso,
   onSalvar,
 }: {
   inicial: PreferenciasPdv;
   permitirVendaSemEstoque: boolean;
+  permitirItemAvulso: boolean;
+  produtoFiscalPadraoItemAvulsoId: string | null;
+  produtos: Array<{ id: string; codigo: string; nome: string }>;
   salvando: boolean;
   onCancelar: () => void;
   onPreview: (preferencias: PreferenciasPdv) => void;
   onPermitirVendaSemEstoque: (valor: boolean) => void;
+  onPermitirItemAvulso: (valor: boolean) => void;
+  onProdutoFiscalPadraoItemAvulso: (valor: string | null) => void;
   onSalvar: (
     preferencias: PreferenciasPdv,
-    permitirVendaSemEstoque: boolean
+    permitirVendaSemEstoque: boolean,
+    permitirItemAvulso: boolean,
+    produtoFiscalPadraoItemAvulsoId: string | null
   ) => void;
 }) {
   function atualizar(parcial: Partial<PreferenciasPdv>) {
@@ -133,6 +145,47 @@ export function PdvPreferenciasModal({
           Vale para toda a empresa, não só para este usuário.
         </p>
 
+        <p className="mt-5 text-xs font-semibold uppercase tracking-wide">
+          Item avulso
+        </p>
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={permitirItemAvulso}
+            onChange={(event) => onPermitirItemAvulso(event.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Permitir venda de item avulso</span>
+            <span className="pdv-muted mt-0.5 block text-xs">
+              Permite vender descrição, quantidade e valor sem cadastrar produto.
+            </span>
+          </span>
+        </label>
+        <label className="mt-3 block text-sm">
+          <span className="font-medium">
+            Produto fiscal padrão para item avulso
+          </span>
+          <select
+            className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+            value={produtoFiscalPadraoItemAvulsoId ?? ""}
+            onChange={(event) =>
+              onProdutoFiscalPadraoItemAvulso(event.target.value || null)
+            }
+          >
+            <option value="">Nenhum</option>
+            {produtos.map((produto) => (
+              <option key={produto.id} value={produto.id}>
+                {produto.codigo} — {produto.nome}
+              </option>
+            ))}
+          </select>
+          <span className="pdv-muted mt-1 block text-xs">
+            Usado só como fonte tributária na NF-e/NFC-e. Não substitui a
+            descrição nem o preço digitados e não movimenta estoque.
+          </span>
+        </label>
+
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
@@ -144,7 +197,14 @@ export function PdvPreferenciasModal({
           <button
             type="button"
             disabled={salvando}
-            onClick={() => onSalvar(inicial, permitirVendaSemEstoque)}
+            onClick={() =>
+              onSalvar(
+                inicial,
+                permitirVendaSemEstoque,
+                permitirItemAvulso,
+                produtoFiscalPadraoItemAvulsoId
+              )
+            }
             className="pdv-btn-primary rounded-md px-4 py-2 text-sm font-semibold disabled:opacity-60"
           >
             {salvando ? "Salvando..." : "Salvar"}

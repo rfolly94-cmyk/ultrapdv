@@ -25,7 +25,7 @@ export type ExigenciaRota =
   | { tipo: "autenticado" }
   | { tipo: "permissao"; modulo: keyof PermissoesEfetivas; acao: string };
 
-const PREFIXOS_AUTENTICADOS = ["/api/auth"];
+const PREFIXOS_AUTENTICADOS = ["/api/auth", "/api/cadastro"];
 
 export function rotaLivrePermissao(pathname: string) {
   if (ROTAS_LIVRES_PERMISSAO.includes(pathname)) {
@@ -102,6 +102,17 @@ export function resolverExigenciaRota(
   }
 
   if (pathname.startsWith("/pdv")) {
+    return { tipo: "permissao", modulo: "pdv", acao: "acessar" };
+  }
+
+  if (
+    pathname.startsWith("/api/pagamentos/pix/geranet/pdv") ||
+    pathname.startsWith("/api/pagamentos/pix/geranet/consultar") ||
+    pathname.startsWith("/api/pagamentos/pix/geranet/cancelar") ||
+    pathname.startsWith("/api/pagamentos/pix/local/gerar") ||
+    pathname.startsWith("/api/pagamentos/pix/local/confirmar") ||
+    pathname.startsWith("/api/pagamentos/pix/local/descartar")
+  ) {
     return { tipo: "permissao", modulo: "pdv", acao: "acessar" };
   }
 

@@ -484,10 +484,12 @@ test("fluxo de venda resolve natureza, tpNF, finNFe e não hardcodifica 1 no pay
     fonte("app/vendas/[id]/nfe/page.tsx"),
     /fiscal_natureza_cfop_regras/
   );
-  assert.match(
-    fonte("app/configuracoes/fiscal/naturezas/natureza-operacao-form.tsx"),
-    /Regras de CFOP/
+  const formNatureza = fonte(
+    "app/configuracoes/fiscal/naturezas/natureza-operacao-form.tsx"
   );
+  assert.match(formNatureza, /Regras de CFOP/);
+  assert.match(formNatureza, /textoAjudaRegrasCfop/);
+  assert.doesNotMatch(formNatureza, /inclusive devolução ao fornecedor/);
 });
 
 test("reconciliação e anti-retransmissão não foram alteradas nesta etapa", () => {

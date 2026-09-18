@@ -120,6 +120,17 @@ export function valoresPixCompativeis(
   return Math.round(esperado * 100) === Math.round(recebido * 100);
 }
 
+export function valoresPixInformadosCompativeis(
+  esperado: number,
+  recebido?: number | null
+) {
+  if (recebido == null || !Number.isFinite(recebido)) {
+    return false;
+  }
+
+  return Math.round(esperado * 100) === Math.round(recebido * 100);
+}
+
 export function montarContratoPixGeranet(
   resposta: Record<string, unknown>
 ): ContratoPixGeranet {

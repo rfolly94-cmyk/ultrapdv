@@ -1,3 +1,4 @@
+import { itemVendaEhAvulso } from "./item-avulso";
 import {
   MENSAGEM_PAGAMENTOS_ULTRAPASSAM,
   avaliarPagamentosPdv,
@@ -17,7 +18,9 @@ export async function avaliarTetoPagamentosNoServidor(params: {
   supabase: ClienteConsulta;
   empresaId: string;
   itens: Array<{
-    produtoId: string;
+    produtoId?: string | null;
+    origem?: string;
+    origem_item?: string;
     quantidade: number;
     precoUnitarioCentavos?: number;
   }>;
@@ -43,33 +46,56 @@ export async function avaliarTetoPagamentosNoServidor(params: {
     }
 > {
   const produtoIds = [
-    ...new Set(params.itens.map((item) => item.produtoId)),
+    ...new Set(
+      params.itens
+        .filter((item) => !itemVendaEhAvulso(item) && item.produtoId)
+        .map((item) => String(item.produtoId))
+    ),
   ];
-  const { data: produtos, error: erroProdutos } = await params.supabase
-    .from("produtos")
-    .select("id, preco_venda")
-    .eq("empresa_id", params.empresaId)
-    .in("id", produtoIds);
+  const precoPorId = new Map<string, number>();
+  if (produtoIds.length > 0) {
+    const { data: produtos, error: erroProdutos } = await params.supabase
+      .from("produtos")
+      .select("id, preco_venda")
+      .eq("empresa_id", params.empresaId)
+      .in("id", produtoIds);
 
-  if (erroProdutos || !produtos) {
-    return {
-      ok: false,
-      erro: "Não foi possível validar os produtos da venda.",
-    };
+    if (erroProdutos || !produtos) {
+      return {
+        ok: false,
+        erro: "Não foi possível validar os produtos da venda.",
+      };
+    }
+
+    for (const produto of produtos as Array<{
+      id: string;
+      preco_venda: number | string;
+    }>) {
+      precoPorId.set(produto.id, Math.round(Number(produto.preco_venda) * 100));
+    }
+
+    if (produtoIds.some((id) => !precoPorId.has(id))) {
+      return {
+        ok: false,
+        erro: "Produto não encontrado.",
+      };
+    }
   }
 
-  const precoPorId = new Map<string, number>(
-    produtos.map((produto: { id: string; preco_venda: number | string }) => [
-      produto.id,
-      Math.round(Number(produto.preco_venda) * 100),
-    ])
-  );
-
-  if (produtoIds.some((id) => !precoPorId.has(id))) {
-    return {
-      ok: false,
-      erro: "Produto não encontrado.",
-    };
+  for (const item of params.itens) {
+    if (!itemVendaEhAvulso(item)) {
+      continue;
+    }
+    if (
+      item.precoUnitarioCentavos == null ||
+      !Number.isFinite(item.precoUnitarioCentavos) ||
+      item.precoUnitarioCentavos <= 0
+    ) {
+      return {
+        ok: false,
+        erro: "Item avulso inválido.",
+      };
+    }
   }
 
   const totalVendaCentavos = recalcularTotalLiquidoVenda({
@@ -79,7 +105,7 @@ export async function avaliarTetoPagamentosNoServidor(params: {
         item.precoUnitarioCentavos != null &&
         Number.isFinite(item.precoUnitarioCentavos)
           ? Math.round(item.precoUnitarioCentavos)
-          : precoPorId.get(item.produtoId) ?? 0,
+          : precoPorId.get(String(item.produtoId ?? "")) ?? 0,
     })),
     descontoCentavos: params.descontoCentavos,
     freteCentavos: params.freteCentavos,

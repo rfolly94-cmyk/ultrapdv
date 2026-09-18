@@ -537,6 +537,7 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.equal(tipoOperacaoEmitivelNestaTela("bonificacao"), true);
   assert.equal(tipoOperacaoEmitivelNestaTela("transferencia"), true);
   assert.equal(tipoOperacaoEmitivelNestaTela("venda"), true);
+  assert.equal(tipoOperacaoEmitivelNestaTela("devolucao_fornecedor"), false);
   assert.equal(avisoNaturezaNestaTela("bonificacao"), null);
   assert.equal(avisoNaturezaNestaTela("venda"), null);
   assert.match(editor, /avisoNaturezaNestaTela/);
@@ -569,6 +570,11 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.match(listaVendas, /resolverRotaEdicaoVenda/);
   assert.match(listaVendas, /Imprimir comprovante de venda/);
   assert.match(listaVendas, /\/pdv\/imprimir\/recibo\//);
+  assert.match(listaVendas, /Imprimir DANFE/);
+  assert.match(listaVendas, /Abrir DANFE/);
+  assert.match(listaVendas, /Abrir venda/);
+  assert.doesNotMatch(listaVendas, /editHref/);
+  assert.doesNotMatch(listaVendas, /DocumentoFiscalBotoes/);
   assert.doesNotMatch(listaVendas, /href=\{`\/pdv\/editar\/\$\{venda\.id\}`\}/);
   const emitirVendaOp = actions.slice(
     actions.indexOf("export async function prepararVendaParaEmissaoNfe")

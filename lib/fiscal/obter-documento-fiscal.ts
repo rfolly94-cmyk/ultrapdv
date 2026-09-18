@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { chamarGeranet } from "@/lib/fiscal/geranet/cliente-geranet";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 import { recuperarArquivosEmissaoGeranet } from "@/lib/fiscal/geranet/consultar-emissao";
 import { objeto, texto } from "@/lib/fiscal/geranet/classificar-consulta";
 import {
@@ -291,7 +292,7 @@ async function recuperarArquivosSePossivel({
 }) {
   const [{ data: empresa }, segredosResult] = await Promise.all([
     admin.from("empresas").select("cnpj").eq("id", empresaId).maybeSingle(),
-    admin.rpc("obter_segredos_fiscais", { p_empresa_id: empresaId }),
+    obterSegredosFiscaisEmissao(admin, empresaId),
   ]);
 
   const apiKey = texto(objeto(segredosResult.data).geranet_api_key);
@@ -327,9 +328,7 @@ async function gerarPdfGeranet({
   modelo: string;
   xmlBuffer: Buffer;
 }) {
-  const segredosResult = await admin.rpc("obter_segredos_fiscais", {
-    p_empresa_id: empresaId,
-  });
+  const segredosResult = await obterSegredosFiscaisEmissao(admin, empresaId);
   const apiKey = texto(objeto(segredosResult.data).geranet_api_key);
 
   if (!apiKey) {

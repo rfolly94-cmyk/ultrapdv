@@ -1,0 +1,16 @@
+$kind: http-request
+description: Execute após P_05_03.
+url: "{{pix_base}}/pix/{{e2eid}}/devolucao/{{id_devolucao}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 200', function () {
+          pm.response.to.have.status(200);
+      });
+    language: text/javascript
+order: 22000

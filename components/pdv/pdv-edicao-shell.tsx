@@ -25,6 +25,11 @@ import { finalizarVendaPdv } from "../../app/pdv/actions";
 import { editarVendaPdv } from "../../app/pdv/editar-actions";
 import { CampoValor } from "@/components/ui/campo-valor";
 import {
+  ORIGEM_ITEM_AVULSO,
+  ORIGEM_ITEM_PRODUTO,
+  origemItemPdv,
+} from "@/lib/pdv/item-avulso";
+import {
   MENSAGEM_PAGAMENTOS_ULTRAPASSAM,
   avaliarPagamentosPdv,
   saldoRestanteParaParcela,
@@ -106,8 +111,10 @@ type FormaPagamento = {
 };
 
 type ItemCarrinho = {
+  linhaId: string;
   vendaItemId?: string | null;
-  produtoId: string;
+  origem: "produto" | "avulso";
+  produtoId: string | null;
   codigo: string;
   nome: string;
   unidadeMedida: string;
@@ -127,7 +134,8 @@ type VendaEdicaoPdv = {
   descontoCentavos: number;
   itens: Array<{
     vendaItemId: string;
-    produtoId: string;
+    origem?: "produto" | "avulso";
+    produtoId: string | null;
     codigo: string;
     nome: string;
     unidadeMedida: string;
@@ -338,9 +346,11 @@ export function PdvEdicaoShell({
     useMemo(
       () =>
         new Map(
-          (vendaEdicao?.itens ?? []).map(
+          (vendaEdicao?.itens ?? [])
+            .filter((item) => item.produtoId)
+            .map(
             (item) => [
-              item.produtoId,
+              item.produtoId as string,
               item,
             ] as const
           )
@@ -371,8 +381,10 @@ export function PdvEdicaoShell({
     () =>
       vendaEdicao?.itens.map(
         (item) => ({
+          linhaId: item.vendaItemId,
           vendaItemId:
             item.vendaItemId,
+          origem: origemItemPdv(item.origem),
           produtoId:
             item.produtoId,
           codigo: item.codigo,
@@ -784,6 +796,7 @@ export function PdvEdicaoShell({
         const existente =
           atual.find(
             (item) =>
+              item.origem !== ORIGEM_ITEM_AVULSO &&
               item.produtoId ===
               produto.id
           );
@@ -796,6 +809,7 @@ export function PdvEdicaoShell({
         if (existente) {
           return atual.map(
             (item) =>
+              item.origem !== ORIGEM_ITEM_AVULSO &&
               item.produtoId ===
               produto.id
                 ? {
@@ -816,9 +830,11 @@ export function PdvEdicaoShell({
         return [
           ...atual,
           {
+            linhaId: original?.vendaItemId ?? produto.id,
             vendaItemId:
               original?.vendaItemId ??
               null,
+            origem: ORIGEM_ITEM_PRODUTO,
             produtoId:
               produto.id,
             codigo:
@@ -847,7 +863,7 @@ export function PdvEdicaoShell({
   }
 
   function alterarQuantidade(
-    produtoId: string,
+    linhaId: string,
     delta: number
   ) {
     invalidarCheckout();
@@ -857,8 +873,8 @@ export function PdvEdicaoShell({
         atual
           .map(
             (item) =>
-              item.produtoId ===
-              produtoId
+              item.linhaId ===
+              linhaId
                 ? {
                     ...item,
                     quantidade:
@@ -875,7 +891,7 @@ export function PdvEdicaoShell({
   }
 
   function removerItem(
-    produtoId: string
+    linhaId: string
   ) {
     invalidarCheckout();
 
@@ -883,8 +899,8 @@ export function PdvEdicaoShell({
       (atual) =>
         atual.filter(
           (item) =>
-            item.produtoId !==
-            produtoId
+            item.linhaId !==
+            linhaId
         )
     );
   }
@@ -1313,10 +1329,14 @@ export function PdvEdicaoShell({
                       vendaItemId:
                         item.vendaItemId ??
                         null,
+                      origem: item.origem,
                       produtoId:
                         item.produtoId,
+                      descricao: item.nome,
                       quantidade:
                         item.quantidade,
+                      valorUnitarioCentavos:
+                        item.valorUnitarioCentavos,
                     })
                   ),
                 pagamentos:
@@ -1351,12 +1371,20 @@ export function PdvEdicaoShell({
                   trocoCentavos,
                   itens:
                     carrinho.map(
-                      (item) => ({
-                        produtoId:
-                          item.produtoId,
-                        quantidade:
-                          item.quantidade,
-                      })
+                      (item) =>
+                        item.origem === ORIGEM_ITEM_AVULSO
+                          ? {
+                              origem: ORIGEM_ITEM_AVULSO,
+                              descricao: item.nome,
+                              quantidade: item.quantidade,
+                              valorUnitarioCentavos:
+                                item.valorUnitarioCentavos,
+                            }
+                          : {
+                              origem: ORIGEM_ITEM_PRODUTO,
+                              produtoId: item.produtoId as string,
+                              quantidade: item.quantidade,
+                            }
                     ),
                   pagamentos:
                     pagamentosCalculados.map(
@@ -1618,7 +1646,7 @@ export function PdvEdicaoShell({
               ) : (
                 carrinho.map((item, index) => (
                   <div
-                    key={item.produtoId}
+                    key={item.linhaId}
                     className="grid grid-cols-[48px_72px_minmax(0,1fr)_160px] items-start gap-2 border-b border-zinc-100 py-4"
                   >
                     <span className="pt-3 text-sm text-zinc-400">
@@ -1628,7 +1656,7 @@ export function PdvEdicaoShell({
                       <div className="inline-flex items-center overflow-hidden rounded border border-zinc-200">
                         <button
                           type="button"
-                          onClick={() => alterarQuantidade(item.produtoId, -1)}
+                          onClick={() => alterarQuantidade(item.linhaId, -1)}
                           className="px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-50"
                         >
                           −
@@ -1638,7 +1666,7 @@ export function PdvEdicaoShell({
                         </span>
                         <button
                           type="button"
-                          onClick={() => alterarQuantidade(item.produtoId, 1)}
+                          onClick={() => alterarQuantidade(item.linhaId, 1)}
                           className="px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-50"
                         >
                           +
@@ -1667,7 +1695,7 @@ export function PdvEdicaoShell({
                         </span>
                         <button
                           type="button"
-                          onClick={() => removerItem(item.produtoId)}
+                          onClick={() => removerItem(item.linhaId)}
                           className="text-zinc-400 hover:text-red-600"
                           aria-label="Remover"
                         >

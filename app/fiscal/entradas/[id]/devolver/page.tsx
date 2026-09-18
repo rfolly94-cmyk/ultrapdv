@@ -12,10 +12,12 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ natureza?: string }>;
 };
 
-export default async function DevolverItensPage({ params }: PageProps) {
+export default async function DevolverItensPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const query = await searchParams;
   const supabase = await createClient();
   const { data: claimsData, error } = await supabase.auth.getClaims();
   if (error || !claimsData?.claims?.sub) {
@@ -132,6 +134,13 @@ export default async function DevolverItensPage({ params }: PageProps) {
     empresaIdAtiva: empresaId,
     naturezas: (naturezas ?? []) as NaturezaOperacaoFiscal[],
   });
+  const naturezaQuery = String(query.natureza ?? "").trim();
+  const naturezaDaQuery = (naturezas ?? []).find(
+    (natureza) =>
+      String(natureza.id) === naturezaQuery &&
+      registroPertenceAEmpresaAtiva(natureza, empresaId) &&
+      String(natureza.tipo_operacao_interno) === "devolucao_fornecedor"
+  );
 
   return (
     <div className="updv-page">
@@ -153,7 +162,11 @@ export default async function DevolverItensPage({ params }: PageProps) {
         chave={String(documento.chave_acesso)}
         fornecedor={String(documento.razao_social_emitente)}
         naturezaIdInicial={
-          naturezaPadrao.ok ? naturezaPadrao.natureza.id : ""
+          naturezaDaQuery
+            ? String(naturezaDaQuery.id)
+            : naturezaPadrao.ok
+              ? naturezaPadrao.natureza.id
+              : ""
         }
         naturezas={(naturezas ?? [])
           .filter((natureza) =>

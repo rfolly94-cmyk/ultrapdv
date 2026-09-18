@@ -30,6 +30,11 @@ import {
   createClient,
 } from "@/lib/supabase/server";
 
+import {
+  createAdminClient,
+} from "@/lib/supabase/admin";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
+
 function respostaErro(
   mensagem: string,
   status = 422,
@@ -92,6 +97,9 @@ export async function GET(
   try {
     const supabase =
       await createClient();
+
+    const admin =
+      createAdminClient();
 
     const {
       data: claimsData,
@@ -325,14 +333,11 @@ export async function GET(
           ascending: true,
         }),
 
-      // O conteúdo retornado por essa RPC
+      // O conteúdo retornado por essa leitura
       // nunca é enviado cru ao navegador.
-      supabase.rpc(
-        "obter_segredos_fiscais",
-        {
-          p_empresa_id:
-            empresaId,
-        }
+      obterSegredosFiscaisEmissao(
+        admin,
+        empresaId
       ),
 
       supabase

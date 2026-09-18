@@ -12,6 +12,7 @@ import {
   mensagemInutilizacao,
 } from "@/lib/fiscal/geranet/classificar-inutilizacao";
 import { consultarInutilizacaoGeranet } from "@/lib/fiscal/geranet/consultar-inutilizacao";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 export async function reconciliarInutilizacaoFiscal({
   admin,
@@ -79,7 +80,7 @@ export async function reconciliarInutilizacaoFiscal({
         .select("fuso_horario")
         .eq("empresa_id", empresaId)
         .maybeSingle(),
-      admin.rpc("obter_segredos_fiscais", { p_empresa_id: empresaId }),
+      obterSegredosFiscaisEmissao(admin, empresaId),
     ]);
 
   if (!empresa) {

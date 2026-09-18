@@ -287,3 +287,43 @@ test("sem forma PIX única o checkout não promove legado", () => {
   );
   assert.equal(escolherFormaPixComercial(legadoAtivo), null);
 });
+
+test("checkout PDV não mostra Duplicata Mercantil (tPag 14)", () => {
+  const duplicata = {
+    id: "dup",
+    codigo: "DUPLICATA_MERCANTIL",
+    nome: "Duplicata Mercantil",
+    tipo: "OUTROS",
+    codigo_fiscal: "14",
+    permite_troco: false,
+    permite_fiado: false,
+    ordem: 90,
+    ativo: true,
+  };
+  const fiado = {
+    id: "fiado",
+    codigo: "FIADO",
+    nome: "Fiado",
+    tipo: "FIADO",
+    codigo_fiscal: "05",
+    permite_troco: false,
+    permite_fiado: true,
+    ordem: 60,
+    ativo: true,
+  };
+  const visiveis = filtrarFormasPagamentoCheckoutPdv(
+    checkout.concat([duplicata, fiado])
+  );
+  assert.equal(
+    visiveis.some((forma) => String(forma.codigo_fiscal ?? "").trim() === "14"),
+    false
+  );
+  assert.equal(visiveis.some((forma) => forma.id === "dup"), false);
+  assert.equal(visiveis.some((forma) => forma.id === "fiado"), true);
+  assert.deepEqual(
+    visiveis
+      .filter((forma) => !forma.permite_fiado)
+      .map((forma) => rotuloFormaCheckout(forma)),
+    ["Dinheiro", "PIX", "Cartão de Débito", "Cartão de Crédito"]
+  );
+});

@@ -135,6 +135,11 @@ export function filtrarFormasPagamentoCheckoutPdv<
       return false;
     }
 
+    const tPag = String(forma.codigo_fiscal ?? "").trim();
+    if (tPag === "14" && forma.permite_fiado !== true) {
+      return false;
+    }
+
     if (ehFormaPix(forma) && !forma.permite_fiado) {
       return pix != null && forma.id === pix.id;
     }

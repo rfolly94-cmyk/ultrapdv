@@ -1,0 +1,46 @@
+$kind: http-request
+description: Primeiro teste obrigatório. Preencha client_id e client_secret nas Variables da coleção.
+url: "{{auth_url}}"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "mode": "urlencoded",
+      "urlencoded": [
+        {
+          "key": "client_id",
+          "value": "{{client_id}}",
+          "type": "text"
+        },
+        {
+          "key": "client_secret",
+          "value": "{{client_secret}}",
+          "type": "text"
+        },
+        {
+          "key": "grant_type",
+          "value": "client_credentials",
+          "type": "text"
+        }
+      ]
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 200', function () {
+          pm.response.to.have.status(200);
+      });
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      if (pm.response.code === 200) {
+          const j = pm.response.json();
+          if (j.access_token) pm.collectionVariables.set('access_token', j.access_token);
+      }
+    language: text/javascript
+order: 1000

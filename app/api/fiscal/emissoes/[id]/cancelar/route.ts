@@ -10,6 +10,7 @@ import {
 import {
   createAdminClient,
 } from "@/lib/supabase/admin";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 import type {
   SegredosFiscaisGeranet,
@@ -569,12 +570,9 @@ export async function POST(
           )
           .maybeSingle(),
 
-        admin.rpc(
-          "obter_segredos_fiscais",
-          {
-            p_empresa_id:
-              empresaId,
-          }
+        obterSegredosFiscaisEmissao(
+          admin,
+          empresaId
         ),
 
         admin

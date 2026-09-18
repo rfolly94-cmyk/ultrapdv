@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{pix_base}}/cobv/{{txid_cobv}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "valor": {
+        "original": "1.01"
+      },
+      "solicitacaoPagador": "Teste de revisao UltraPDV cobranca com vencimento"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{access_token}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status esperado: 200', function () {
+          pm.response.to.have.status(200);
+      });
+    language: text/javascript
+order: 8000

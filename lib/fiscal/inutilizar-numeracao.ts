@@ -21,6 +21,7 @@ import {
   validarJustificativaInutilizacao,
 } from "@/lib/fiscal/geranet/classificar-inutilizacao";
 import type { SegredosFiscaisGeranet } from "@/lib/fiscal/geranet/montar-payload-nfce";
+import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 
 export type ResultadoInutilizacao = {
   ok: boolean;
@@ -98,7 +99,7 @@ export async function inutilizarNumeracaoFiscal({
       .select("uf, ambiente, fuso_horario, ativo")
       .eq("empresa_id", empresaId)
       .maybeSingle(),
-    admin.rpc("obter_segredos_fiscais", { p_empresa_id: empresaId }),
+    obterSegredosFiscaisEmissao(admin, empresaId),
     admin
       .from("fiscal_emissao_eventos")
       .select(

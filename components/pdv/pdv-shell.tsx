@@ -17,6 +17,7 @@ import {
   LogOut,
   MoreHorizontal,
   Package,
+  Plus,
   Search,
   Settings,
   Smartphone,
@@ -127,8 +128,14 @@ import {
 } from "@/lib/pdv/busca-produto";
 import { urlPublicaCatalogo } from "@/lib/catalogo/storage";
 import { salvarPreferenciasPdvAction } from "@/app/pdv/preferencias-actions";
-import { PdvBuscaResultados } from "@/components/pdv/pdv-busca-resultados";
+import {
+  ORIGEM_ITEM_AVULSO,
+  ORIGEM_ITEM_PRODUTO,
+  itemVendaEhAvulso,
+} from "@/lib/pdv/item-avulso";
 import { PdvPreferenciasModal } from "@/components/pdv/pdv-preferencias-modal";
+import { PdvItemAvulsoModal } from "@/components/pdv/pdv-item-avulso-modal";
+import { PdvBuscaResultados } from "@/components/pdv/pdv-busca-resultados";
 import { avaliarQuantidadeEstoquePdv } from "@/lib/pdv/venda-sem-estoque";
 import { executarAberturaGaveta } from "@/lib/caixa/abrir-gaveta-cliente";
 import { deveAbrirGavetaAposVenda } from "@/lib/caixa/gaveta";
@@ -187,7 +194,9 @@ type FormaPagamento = {
 };
 
 type ItemCarrinho = {
-  produtoId: string;
+  linhaId: string;
+  origem: "produto" | "avulso";
+  produtoId: string | null;
   codigo: string;
   nome: string;
   unidadeMedida: string;
@@ -212,6 +221,8 @@ type Props = {
   logoUrl?: string | null;
   preferenciasIniciais?: PreferenciasPdv;
   permitirVendaSemEstoqueInicial?: boolean;
+  permitirItemAvulsoInicial?: boolean;
+  produtoFiscalPadraoItemAvulsoIdInicial?: string | null;
   produtos: Produto[];
   clientes: Cliente[];
   formasPagamento: FormaPagamento[];
@@ -409,6 +420,8 @@ export function PdvShell({
   logoUrl = null,
   preferenciasIniciais = PREFERENCIAS_PDV_PADRAO,
   permitirVendaSemEstoqueInicial = false,
+  permitirItemAvulsoInicial = true,
+  produtoFiscalPadraoItemAvulsoIdInicial = null,
   produtos,
   clientes,
   formasPagamento,
@@ -556,6 +569,31 @@ export function PdvShell({
     permitirVendaSemEstoque,
     setPermitirVendaSemEstoque,
   ] = useState(permitirVendaSemEstoqueInicial);
+
+  const [
+    permitirItemAvulsoSalvo,
+    setPermitirItemAvulsoSalvo,
+  ] = useState(permitirItemAvulsoInicial);
+
+  const [
+    permitirItemAvulso,
+    setPermitirItemAvulso,
+  ] = useState(permitirItemAvulsoInicial);
+
+  const [
+    produtoFiscalPadraoItemAvulsoIdSalvo,
+    setProdutoFiscalPadraoItemAvulsoIdSalvo,
+  ] = useState(produtoFiscalPadraoItemAvulsoIdInicial);
+
+  const [
+    produtoFiscalPadraoItemAvulsoId,
+    setProdutoFiscalPadraoItemAvulsoId,
+  ] = useState(produtoFiscalPadraoItemAvulsoIdInicial);
+
+  const [
+    modalItemAvulso,
+    setModalItemAvulso,
+  ] = useState(false);
 
   const [
     toastPdv,
@@ -796,6 +834,8 @@ export function PdvShell({
         continue;
       }
       itensPedido.push({
+        linhaId: item.produtoId,
+        origem: ORIGEM_ITEM_PRODUTO,
         produtoId: item.produtoId,
         codigo: item.codigo,
         nome: item.nome,
@@ -1087,7 +1127,8 @@ export function PdvShell({
       Number(quantidadeDigitada.replace(",", ".")) || 1
     );
     const existente = carrinho.find(
-      (item) => item.produtoId === produto.id
+      (item) =>
+        item.origem === ORIGEM_ITEM_PRODUTO && item.produtoId === produto.id
     );
     const quantidadeNova = existente
       ? quantidadeAposAdicionarPdv(existente.quantidade, qtd)
@@ -1108,6 +1149,7 @@ export function PdvShell({
         const jaExiste =
           atual.find(
             (item) =>
+              item.origem === ORIGEM_ITEM_PRODUTO &&
               item.produtoId ===
               produto.id
           );
@@ -1115,6 +1157,7 @@ export function PdvShell({
         if (jaExiste) {
           return atual.map(
             (item) =>
+              item.origem === ORIGEM_ITEM_PRODUTO &&
               item.produtoId ===
               produto.id
                 ? {
@@ -1131,6 +1174,8 @@ export function PdvShell({
         return [
           ...atual,
           {
+            linhaId: produto.id,
+            origem: ORIGEM_ITEM_PRODUTO,
             produtoId:
               produto.id,
             codigo:
@@ -1158,21 +1203,45 @@ export function PdvShell({
     );
   }
 
+  function adicionarItemAvulso(item: {
+    descricao: string;
+    quantidade: number;
+    valorUnitarioCentavos: number;
+  }) {
+    invalidarCheckout();
+    setCarrinho((atual) => [
+      ...atual,
+      {
+        linhaId: crypto.randomUUID(),
+        origem: ORIGEM_ITEM_AVULSO,
+        produtoId: null,
+        codigo: "",
+        nome: item.descricao,
+        unidadeMedida: "UN",
+        quantidade: item.quantidade,
+        valorUnitarioCentavos: item.valorUnitarioCentavos,
+      },
+    ]);
+    setModalItemAvulso(false);
+  }
+
   function alterarQuantidade(
-    produtoId: string,
+    linhaId: string,
     delta: number
   ) {
     if (delta > 0) {
-      const item = carrinho.find((linha) => linha.produtoId === produtoId);
-      const produto = produtos.find((linha) => linha.id === produtoId);
-      const checagem = avaliarQuantidadeEstoquePdv({
-        permitirVendaSemEstoque,
-        disponivel: Number(produto?.estoqueDisponivel) || 0,
-        quantidade: (item?.quantidade ?? 0) + delta,
-      });
-      if (!checagem.ok) {
-        setToastPdv(checagem.erro);
-        return;
+      const item = carrinho.find((linha) => linha.linhaId === linhaId);
+      if (item && !itemVendaEhAvulso(item) && item.produtoId) {
+        const produto = produtos.find((linha) => linha.id === item.produtoId);
+        const checagem = avaliarQuantidadeEstoquePdv({
+          permitirVendaSemEstoque,
+          disponivel: Number(produto?.estoqueDisponivel) || 0,
+          quantidade: (item?.quantidade ?? 0) + delta,
+        });
+        if (!checagem.ok) {
+          setToastPdv(checagem.erro);
+          return;
+        }
       }
     }
 
@@ -1183,8 +1252,8 @@ export function PdvShell({
         atual
           .map(
             (item) =>
-              item.produtoId ===
-              produtoId
+              item.linhaId ===
+              linhaId
                 ? {
                     ...item,
                     quantidade:
@@ -1201,7 +1270,7 @@ export function PdvShell({
   }
 
   function removerItem(
-    produtoId: string
+    linhaId: string
   ) {
     invalidarCheckout();
 
@@ -1209,8 +1278,8 @@ export function PdvShell({
       (atual) =>
         atual.filter(
           (item) =>
-            item.produtoId !==
-            produtoId
+            item.linhaId !==
+            linhaId
         )
     );
   }
@@ -1337,12 +1406,16 @@ export function PdvShell({
 
   async function salvarPreferencias(
     proxima: PreferenciasPdv,
-    permitirSemEstoque: boolean
+    permitirSemEstoque: boolean,
+    permitirAvulso: boolean,
+    produtoFiscalPadraoId: string | null
   ) {
     setSalvandoPreferencias(true);
     const resultado = await salvarPreferenciasPdvAction({
       ...proxima,
       permitirVendaSemEstoque: permitirSemEstoque,
+      permitirItemAvulso: permitirAvulso,
+      produtoFiscalPadraoItemAvulsoId: produtoFiscalPadraoId,
     });
     setSalvandoPreferencias(false);
 
@@ -1355,6 +1428,14 @@ export function PdvShell({
     setPreferenciasSalvas(resultado.preferencias);
     setPermitirVendaSemEstoque(resultado.permitirVendaSemEstoque);
     setPermitirVendaSemEstoqueSalvo(resultado.permitirVendaSemEstoque);
+    setPermitirItemAvulso(resultado.permitirItemAvulso);
+    setPermitirItemAvulsoSalvo(resultado.permitirItemAvulso);
+    setProdutoFiscalPadraoItemAvulsoId(
+      resultado.produtoFiscalPadraoItemAvulsoId
+    );
+    setProdutoFiscalPadraoItemAvulsoIdSalvo(
+      resultado.produtoFiscalPadraoItemAvulsoId
+    );
     setModalPreferencias(false);
     setToastPdv("Preferências do PDV salvas.");
   }
@@ -1668,6 +1749,9 @@ export function PdvShell({
     }
 
     for (const item of carrinho) {
+      if (itemVendaEhAvulso(item) || !item.produtoId) {
+        continue;
+      }
       const produto = produtos.find((linha) => linha.id === item.produtoId);
       const checagem = avaliarQuantidadeEstoquePdv({
         permitirVendaSemEstoque,
@@ -1817,12 +1901,19 @@ export function PdvShell({
               trocoCentavos,
               itens:
                 carrinho.map(
-                  (item) => ({
-                    produtoId:
-                      item.produtoId,
-                    quantidade:
-                      item.quantidade,
-                  })
+                  (item) =>
+                    itemVendaEhAvulso(item)
+                      ? {
+                          origem: ORIGEM_ITEM_AVULSO,
+                          descricao: item.nome,
+                          quantidade: item.quantidade,
+                          valorUnitarioCentavos: item.valorUnitarioCentavos,
+                        }
+                      : {
+                          origem: ORIGEM_ITEM_PRODUTO,
+                          produtoId: item.produtoId as string,
+                          quantidade: item.quantidade,
+                        }
                 ),
               pagamentos:
                 pagamentosCalculados.map(
@@ -2432,6 +2523,16 @@ export function PdvShell({
                 className="ml-1 w-10 border-0 bg-transparent p-0 text-center text-sm font-semibold outline-none"
               />
             </div>
+            {permitirItemAvulso ? (
+              <button
+                type="button"
+                onClick={() => setModalItemAvulso(true)}
+                className="flex h-10 shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+              >
+                <Plus className="h-4 w-4" />
+                Item avulso
+              </button>
+            ) : null}
           </div>
 
           {busca.trim() ? (
@@ -2458,7 +2559,30 @@ export function PdvShell({
             </div>
             <div className="mt-2 border-t border-zinc-200">
               {carrinho.length === 0 ? (
-                busca.trim() ? null : (
+                busca.trim() ? null : produtos.length === 0 ? (
+                <div className="py-16 text-center">
+                  <p className="text-sm text-zinc-500">
+                    Nenhum produto cadastrado
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <Link
+                      href="/produtos?novo=1"
+                      className="rounded-md border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+                    >
+                      Cadastrar produto
+                    </Link>
+                    {permitirItemAvulso ? (
+                      <button
+                        type="button"
+                        onClick={() => setModalItemAvulso(true)}
+                        className="pdv-btn-primary rounded-md px-3 py-2 text-sm font-semibold"
+                      >
+                        + Vender item avulso
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                ) : (
                 <p className="py-16 text-center text-sm text-zinc-400">
                   Busque um produto para iniciar a venda.
                 </p>
@@ -2466,7 +2590,7 @@ export function PdvShell({
               ) : (
                 carrinho.map((item, index) => (
                   <div
-                    key={item.produtoId}
+                    key={item.linhaId}
                     className="grid grid-cols-[48px_72px_minmax(0,1fr)_160px] items-start gap-2 border-b border-zinc-100 py-4"
                   >
                     <span className="pt-3 text-sm text-zinc-400">
@@ -2477,7 +2601,7 @@ export function PdvShell({
                         <button
                           type="button"
                           onClick={() =>
-                            alterarQuantidade(item.produtoId, -1)
+                            alterarQuantidade(item.linhaId, -1)
                           }
                           className="px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-50"
                         >
@@ -2489,7 +2613,7 @@ export function PdvShell({
                         <button
                           type="button"
                           onClick={() =>
-                            alterarQuantidade(item.produtoId, 1)
+                            alterarQuantidade(item.linhaId, 1)
                           }
                           className="px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-50"
                         >
@@ -2499,9 +2623,11 @@ export function PdvShell({
                     </div>
                     <div className="flex min-w-0 items-start gap-3">
                       {(() => {
-                        const produto = produtos.find(
+                        const produto = item.produtoId
+                          ? produtos.find(
                           (itemProduto) => itemProduto.id === item.produtoId
-                        );
+                        )
+                          : undefined;
                         const foto =
                           produto &&
                           deveMostrarFotoProduto({
@@ -2541,7 +2667,7 @@ export function PdvShell({
                           {item.nome}
                         </p>
                         <p className="mt-0.5 text-sm text-zinc-400">
-                          Preço:{" "}
+                          {item.quantidade} x{" "}
                           {dinheiroCentavos(item.valorUnitarioCentavos)}
                         </p>
                       </div>
@@ -2555,7 +2681,7 @@ export function PdvShell({
                         </span>
                         <button
                           type="button"
-                          onClick={() => removerItem(item.produtoId)}
+                          onClick={() => removerItem(item.linhaId)}
                           className="text-zinc-400 hover:text-red-600"
                           aria-label="Remover"
                         >
@@ -3132,19 +3258,45 @@ export function PdvShell({
         <PdvPreferenciasModal
           inicial={preferencias}
           permitirVendaSemEstoque={permitirVendaSemEstoque}
+          permitirItemAvulso={permitirItemAvulso}
+          produtoFiscalPadraoItemAvulsoId={produtoFiscalPadraoItemAvulsoId}
+          produtos={produtos}
           salvando={salvandoPreferencias}
           onPreview={setPreferencias}
           onPermitirVendaSemEstoque={setPermitirVendaSemEstoque}
+          onPermitirItemAvulso={setPermitirItemAvulso}
+          onProdutoFiscalPadraoItemAvulso={setProdutoFiscalPadraoItemAvulsoId}
           onCancelar={() => {
             setPreferencias(
               preferenciasAposCancelarPreview(preferenciasSalvas, preferencias)
             );
             setPermitirVendaSemEstoque(permitirVendaSemEstoqueSalvo);
+            setPermitirItemAvulso(permitirItemAvulsoSalvo);
+            setProdutoFiscalPadraoItemAvulsoId(
+              produtoFiscalPadraoItemAvulsoIdSalvo
+            );
             setModalPreferencias(false);
           }}
-          onSalvar={(proxima, permitirSemEstoque) => {
-            void salvarPreferencias(proxima, permitirSemEstoque);
+          onSalvar={(
+            proxima,
+            permitirSemEstoque,
+            permitirAvulso,
+            produtoFiscalPadraoId
+          ) => {
+            void salvarPreferencias(
+              proxima,
+              permitirSemEstoque,
+              permitirAvulso,
+              produtoFiscalPadraoId
+            );
           }}
+        />
+      ) : null}
+
+      {modalItemAvulso ? (
+        <PdvItemAvulsoModal
+          onCancelar={() => setModalItemAvulso(false)}
+          onConfirmar={adicionarItemAvulso}
         />
       ) : null}
 

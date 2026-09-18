@@ -6,6 +6,7 @@ import {
   type TipoDestinoCfop,
 } from "@/lib/fiscal/operacoes/resolver-cfop";
 import type { NaturezaOperacaoFiscal } from "@/lib/fiscal/operacoes/catalogo";
+import { naturezaFiscalmenteCoerente } from "@/lib/fiscal/operacoes/coerencia-natureza-cfop";
 import {
   MENSAGEM_TRANSFERENCIA_DESTINO_CLIENTE,
   MENSAGEM_TRANSFERENCIA_DESTINO_INELEGIVEL,
@@ -98,6 +99,14 @@ export function verificarOperacaoFiscal(params: {
       codigo: "natureza_tipo",
       mensagem: "A natureza selecionada não pertence a esta operação.",
     });
+  } else {
+    const coerencia = naturezaFiscalmenteCoerente(params.natureza);
+    if (!coerencia.ok) {
+      pendencias.push({
+        codigo: "natureza",
+        mensagem: coerencia.mensagem,
+      });
+    }
   }
 
   if (params.tipoOperacaoInterno === "bonificacao" || params.tipoOperacaoInterno === "venda") {
@@ -211,6 +220,8 @@ export function verificarOperacaoFiscal(params: {
         empresaIdAtiva: params.empresaIdAtiva,
         naturezaPadrao: params.natureza.padrao,
         naturezaDescricao: params.natureza.descricao,
+        tpNf: params.natureza.tp_nf,
+        finNfe: params.natureza.fin_nfe,
         grupoFiscal: {
           nome: item.grupoFiscalNome,
           cfopInterno: item.cfopInterno,

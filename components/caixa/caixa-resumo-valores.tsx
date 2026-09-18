@@ -1,3 +1,13 @@
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Banknote,
+  CircleDollarSign,
+  Scale,
+  ScanLine,
+} from "lucide-react";
+
+import { KpiCard, type KpiCardTom } from "@/components/ui/kpi-card";
 import { formatarMoeda } from "@/lib/relatorios/formatacao";
 
 export function CaixaResumoValores({
@@ -17,69 +27,55 @@ export function CaixaResumoValores({
   dinheiroContado?: number | null;
   diferenca?: number | null;
 }) {
+  const tomDiferenca: KpiCardTom =
+    diferenca == null || diferenca === 0
+      ? "neutro"
+      : diferenca > 0
+        ? "positivo"
+        : "negativo";
+
   return (
     <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-        <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-          Saldo inicial
-        </dt>
-        <dd className="mt-1 text-[15px] font-semibold text-zinc-950">
-          {formatarMoeda(saldoInicial)}
-        </dd>
-      </div>
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-        <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-          Suprimentos
-        </dt>
-        <dd className="mt-1 text-[15px] font-semibold text-emerald-700">
-          {formatarMoeda(suprimentos)}
-        </dd>
-      </div>
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-        <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-          Sangrias
-        </dt>
-        <dd className="mt-1 text-[15px] font-semibold text-rose-700">
-          {formatarMoeda(sangrias)}
-        </dd>
-      </div>
+      <KpiCard
+        label="Saldo inicial"
+        value={formatarMoeda(saldoInicial)}
+        icon={<Banknote className="h-3.5 w-3.5" strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Suprimentos"
+        value={formatarMoeda(suprimentos)}
+        tom="positivo"
+        icon={<ArrowDownToLine className="h-3.5 w-3.5" strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Sangrias"
+        value={formatarMoeda(sangrias)}
+        tom="negativo"
+        icon={<ArrowUpFromLine className="h-3.5 w-3.5" strokeWidth={1.75} />}
+      />
       {saldoAtual != null ? (
-        <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-            {rotuloSaldoAtual}
-          </dt>
-          <dd className="mt-1 text-[15px] font-semibold text-zinc-950">
-            {formatarMoeda(saldoAtual)}
-          </dd>
-        </div>
+        <KpiCard
+          label={rotuloSaldoAtual}
+          value={formatarMoeda(saldoAtual)}
+          tom="destaque"
+          icon={<CircleDollarSign className="h-3.5 w-3.5" strokeWidth={1.75} />}
+        />
       ) : null}
       {dinheiroContado != null ? (
-        <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-            Dinheiro contado
-          </dt>
-          <dd className="mt-1 text-[15px] font-semibold text-zinc-950">
-            {formatarMoeda(dinheiroContado)}
-          </dd>
-        </div>
+        <KpiCard
+          label="Dinheiro contado"
+          value={formatarMoeda(dinheiroContado)}
+          tom="info"
+          icon={<ScanLine className="h-3.5 w-3.5" strokeWidth={1.75} />}
+        />
       ) : null}
       {diferenca != null ? (
-        <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-            Diferença
-          </dt>
-          <dd
-            className={`mt-1 text-[15px] font-semibold ${
-              diferenca === 0
-                ? "text-zinc-950"
-                : diferenca > 0
-                  ? "text-emerald-700"
-                  : "text-rose-700"
-            }`}
-          >
-            {formatarMoeda(diferenca)}
-          </dd>
-        </div>
+        <KpiCard
+          label="Diferença"
+          value={formatarMoeda(diferenca)}
+          tom={tomDiferenca}
+          icon={<Scale className="h-3.5 w-3.5" strokeWidth={1.75} />}
+        />
       ) : null}
     </dl>
   );

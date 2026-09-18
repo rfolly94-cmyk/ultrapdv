@@ -64,8 +64,10 @@ export const ROTULOS_FIN_NFE: Record<FinNfeSuportada, string> = {
   "1": "1 — Normal",
   "2": "2 — Complementar",
   "3": "3 — Ajuste",
-  "4": "4 — Devolução",
+  "4": "4 — Devolução/Retorno",
 };
+
+/** finNFe 5 (crédito) e 6 (débito) existem no layout, mas o CHECK, o XML e a Geranet ainda não persistem. */
 
 export const MENSAGEM_CFOP_NAO_CONFIGURADO =
   "Esta operação ainda não possui regras de CFOP configuradas. Configure a natureza e as regras fiscais antes de emitir.";

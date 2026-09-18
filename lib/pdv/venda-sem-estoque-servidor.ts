@@ -10,6 +10,7 @@ import {
   permitirVendaSemEstoqueDoRegistro,
   validarItensEstoquePdv,
 } from "./venda-sem-estoque";
+import { itensCatalogoParaEstoque } from "./item-avulso";
 
 type ClienteConsulta = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,7 +48,11 @@ export async function permitirVendaSemEstoqueEmpresa(
 export async function validarEstoqueNaFinalizacaoPdv(params: {
   supabase: ClienteConsulta;
   empresaId: string;
-  itens: Array<{ produtoId: string; quantidade: number }>;
+  itens: Array<{
+    produtoId?: string | null;
+    origem?: string;
+    quantidade: number;
+  }>;
 }): Promise<{ ok: true } | { ok: false; erro: string }> {
   const empresaId = String(params.empresaId ?? "").trim();
   if (!empresaId) {
@@ -62,9 +67,12 @@ export async function validarEstoqueNaFinalizacaoPdv(params: {
     return { ok: true };
   }
 
-  const produtoIds = [
-    ...new Set(params.itens.map((item) => item.produtoId)),
-  ];
+  const catalogo = itensCatalogoParaEstoque(params.itens);
+  if (catalogo.length === 0) {
+    return { ok: true };
+  }
+
+  const produtoIds = [...new Set(catalogo.map((item) => item.produtoId))];
 
   const { data, error } = await params.supabase
     .from("estoque_atual")
@@ -94,7 +102,7 @@ export async function validarEstoqueNaFinalizacaoPdv(params: {
 
   return validarItensEstoquePdv({
     permitirVendaSemEstoque: false,
-    itens: params.itens,
+    itens: catalogo,
     estoquePorProduto,
   });
 }

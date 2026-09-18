@@ -1,6 +1,7 @@
 import {
   registroPertenceAEmpresaAtiva,
 } from "@/lib/empresa/assert-registro-empresa-ativa";
+import { naturezaFiscalmenteCoerente } from "./coerencia-natureza-cfop";
 import {
   ehFinNfeSuportada,
   ehTpNf,
@@ -54,7 +55,8 @@ export function naturezaEstaCompleta(
     Boolean(natureza.id) &&
     Boolean(natureza.descricao.trim()) &&
     ehTpNf(natureza.tp_nf) &&
-    ehFinNfeSuportada(natureza.fin_nfe)
+    ehFinNfeSuportada(natureza.fin_nfe) &&
+    naturezaFiscalmenteCoerente(natureza).ok
   );
 }
 

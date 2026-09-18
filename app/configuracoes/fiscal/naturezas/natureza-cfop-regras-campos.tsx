@@ -1,10 +1,7 @@
 "use client";
 
 import { FiscalCodeSelect } from "@/app/produtos/grupos-fiscais/fiscal-code-select";
-import {
-  CFOPS_INTERESTADUAIS,
-  CFOPS_INTERNOS,
-} from "@/lib/fiscal/tabelas-fiscais";
+import { cfopsParaMatriz } from "@/lib/fiscal/operacoes/coerencia-natureza-cfop";
 
 export type GrupoFiscalNaturezaCfop = {
   id: string;
@@ -41,11 +38,15 @@ export function NaturezaCfopRegrasCampos({
   regras,
   naturezaPadraoVenda,
   tipoOperacaoInterno,
+  tpNf,
+  finNfe,
 }: {
   grupos: GrupoFiscalNaturezaCfop[];
   regras: RegraCfopNaturezaForm[];
   naturezaPadraoVenda: boolean;
   tipoOperacaoInterno?: string;
+  tpNf: string;
+  finNfe: string;
 }) {
   if (grupos.length === 0) {
     return (
@@ -56,13 +57,33 @@ export function NaturezaCfopRegrasCampos({
     );
   }
 
+  const opcoesInterna = cfopsParaMatriz({
+    tpNf,
+    tipoDestino: "interna",
+    tipoOperacaoInterno,
+    finNfe,
+  });
+  const opcoesInterestadual = cfopsParaMatriz({
+    tpNf,
+    tipoDestino: "interestadual",
+    tipoOperacaoInterno,
+    finNfe,
+  });
+
   return (
     <div className="mt-4 overflow-x-auto">
       {tipoOperacaoInterno === "devolucao_fornecedor" ? (
         <p className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
-          Devolução ao fornecedor: configure CFOP por grupo (interna 5xxx e
-          interestadual 6xxx). O Ultra não escolhe 5202/6202 sozinho. Sem
-          regra, a emissão é bloqueada.
+          Devolução de compra: informe CFOP de devolução/retorno por
+          grupo fiscal. Sem regra, a emissão é bloqueada. Esta matriz não
+          herda CFOP de venda.
+        </p>
+      ) : null}
+      {tipoOperacaoInterno === "devolucao_venda" ? (
+        <p className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          Devolução de venda: informe CFOP de entrada classificado como
+          devolução/retorno. A emissão desta operação ainda depende da
+          próxima etapa do fluxo fiscal.
         </p>
       ) : null}
       <table className="min-w-full text-left text-sm">
@@ -95,9 +116,10 @@ export function NaturezaCfopRegrasCampos({
                 </td>
                 <td className="py-3 pr-3 min-w-[220px]">
                   <FiscalCodeSelect
+                    key={`interna-${grupo.id}-${tpNf}-${tipoOperacaoInterno}-${finNfe}`}
                     label="Interna"
                     name={`cfop_interna_${grupo.id}`}
-                    opcoes={CFOPS_INTERNOS}
+                    opcoes={opcoesInterna}
                     defaultValue={interno || null}
                     placeholder={
                       naturezaPadraoVenda
@@ -108,9 +130,10 @@ export function NaturezaCfopRegrasCampos({
                 </td>
                 <td className="py-3 min-w-[220px]">
                   <FiscalCodeSelect
+                    key={`interestadual-${grupo.id}-${tpNf}-${tipoOperacaoInterno}-${finNfe}`}
                     label="Interestadual"
                     name={`cfop_interestadual_${grupo.id}`}
-                    opcoes={CFOPS_INTERESTADUAIS}
+                    opcoes={opcoesInterestadual}
                     defaultValue={interestadual || null}
                     placeholder={
                       naturezaPadraoVenda

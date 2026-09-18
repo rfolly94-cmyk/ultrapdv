@@ -299,7 +299,10 @@ async function main() {
     senha_certificado?: string | null;
   };
 
-  const apiKey = texto(segredos.geranet_api_key);
+  const plataforma = await admin.rpc("obter_api_key_geranet_plataforma");
+  const apiKey =
+    texto(plataforma.error ? "" : plataforma.data) ||
+    texto(segredos.geranet_api_key);
   const certificado = texto(segredos.certificado_a1);
   const senhaCertificado = texto(segredos.senha_certificado);
 

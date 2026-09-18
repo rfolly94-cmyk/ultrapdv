@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { MENSAGEM_DOCUMENTO_FISCAL_NAO_EDITAVEL } from "@/lib/fiscal/operacoes/status-operacao";
 import { fonte } from "@/lib/multiempresa/fonte";
 
 import {
   ABA_RASCUNHOS_NFE,
+  MENSAGEM_CONFIRMAR_EXCLUSAO_RASCUNHO_NFE,
+  MENSAGEM_NFE_AUTORIZADA_NAO_EXCLUI,
+  MENSAGEM_RASCUNHO_COM_ESTOQUE_NAO_EXCLUI,
+  MENSAGEM_RASCUNHO_NFE_NAO_EXCLUIVEL,
   STATUS_RASCUNHO_NFE55,
   hrefContinuarRascunhoNfe55,
   identificacaoRascunhoNfe55,
   montarItemListaRascunhoNfe55,
+  motivoImpedeExcluirRascunhoNfe55,
   statusEhRascunhoNfe55,
 } from "./rascunhos-nfe";
 
@@ -94,9 +100,100 @@ test("Vendas ganha aba Rascunhos NF-e no mesmo padrão de Pedidos Online", () =>
   assert.match(vendas, /aba === ABA_RASCUNHOS_NFE/);
   assert.match(vendas, /redirect\(HREF_RASCUNHOS_NFE\)/);
   assert.match(workspace, /Continuar/);
-  assert.doesNotMatch(workspace, /excluirRascunho|delete\(/);
+  assert.match(workspace, /Excluir/);
+  assert.match(workspace, /<th>Ações<\/th>/);
+  assert.match(workspace, /RowActions/);
+  assert.match(workspace, /href: item\.href/);
+  assert.match(workspace, /excluirRascunhoOperacaoFiscal/);
+  assert.match(workspace, /MENSAGEM_CONFIRMAR_EXCLUSAO_RASCUNHO_NFE/);
+  assert.doesNotMatch(workspace, /editHref/);
+  assert.doesNotMatch(workspace, /updv-btn-row/);
+  assert.doesNotMatch(workspace, /sticky right-0/);
+  assert.ok(
+    workspace.indexOf("<th>Ações</th>") < workspace.indexOf("<th>Rascunho</th>"),
+    "Ações deve ser a primeira coluna"
+  );
   assert.equal(ABA_RASCUNHOS_NFE, "rascunhos-nfe");
 });
+
+test("Continuar reabre o rascunho existente sem criar outro", () => {
+  assert.equal(
+    hrefContinuarRascunhoNfe55("op-9"),
+    "/fiscal/nfe/op-9/editar"
+  );
+  const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
+  const continuar = fonte("lib/fiscal/nfe55/rascunhos-nfe.ts");
+  assert.match(continuar, /hrefEdicaoOperacaoFiscal/);
+  assert.doesNotMatch(continuar, /criarOperacaoFiscal/);
+  const excluir = actions.slice(
+    actions.indexOf("export async function excluirRascunhoOperacaoFiscal")
+  );
+  assert.doesNotMatch(excluir, /criarOperacaoFiscal/);
+  assert.doesNotMatch(excluir, /insert\(/);
+});
+
+test("Excluir rascunho só apaga o rascunho da empresa ativa", () => {
+  assert.equal(
+    motivoImpedeExcluirRascunhoNfe55({ status: "rascunho" }),
+    null
+  );
+  assert.equal(
+    motivoImpedeExcluirRascunhoNfe55({ status: "pronta_para_emissao" }),
+    null
+  );
+  assert.equal(
+    motivoImpedeExcluirRascunhoNfe55({ status: "autorizada" }),
+    MENSAGEM_NFE_AUTORIZADA_NAO_EXCLUI
+  );
+  assert.equal(
+    motivoImpedeExcluirRascunhoNfe55({ status: "cancelada" }),
+    MENSAGEM_RASCUNHO_NFE_NAO_EXCLUIVEL
+  );
+  assert.equal(
+    motivoImpedeExcluirRascunhoNfe55({
+      status: "rascunho",
+      saidaEstoqueProcessadaAt: "2026-08-30T12:00:00.000Z",
+    }),
+    MENSAGEM_RASCUNHO_COM_ESTOQUE_NAO_EXCLUI
+  );
+  assert.equal(
+    motivoImpedeExcluirRascunhoNfe55({
+      status: "rascunho",
+      emissao: { status: "autorizada" },
+    }),
+    MENSAGEM_DOCUMENTO_FISCAL_NAO_EDITAVEL
+  );
+  assert.equal(MENSAGEM_CONFIRMAR_EXCLUSAO_RASCUNHO_NFE, "Deseja excluir este rascunho de NF-e?");
+
+  const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
+  const excluir = actions.slice(
+    actions.indexOf("export async function excluirRascunhoOperacaoFiscal")
+  );
+  assert.match(excluir, /getContexto\(\)/);
+  assert.match(excluir, /\.eq\("empresa_id", empresaId\)/);
+  assert.match(excluir, /registroPertenceAEmpresaAtiva/);
+  assert.match(excluir, /motivoImpedeExcluirRascunhoNfe55/);
+  assert.match(excluir, /from\("fiscal_operacoes"\)/);
+  assert.match(excluir, /\.delete\(\)/);
+  assert.doesNotMatch(excluir, /empresa_id: input/);
+  assert.doesNotMatch(excluir, /from\("vendas"\)/);
+  assert.doesNotMatch(excluir, /from\("caixa/);
+  assert.doesNotMatch(excluir, /carteira/);
+  assert.doesNotMatch(excluir, /createAdminClient/);
+  assert.doesNotMatch(excluir, /rpc_confirmar_saida/);
+  assert.doesNotMatch(excluir, /rpc_finalizar_venda/);
+
+  const migracao = fonte(
+    "supabase/migrations/20260830120000_fiscal_operacoes_delete_rascunho.sql"
+  );
+  assert.match(migracao, /fiscal_operacoes_delete_empresa/);
+  assert.match(migracao, /tem_acesso_empresa\(empresa_id\)/);
+  assert.match(migracao, /status IN/);
+  assert.match(migracao, /rascunho/);
+  assert.match(migracao, /saida_estoque_processada_at IS NULL/);
+  assert.doesNotMatch(migracao, /service_role/);
+});
+
 
 test("tela da NF-e remove Validar da UI e Emitir valida antes de transmitir", () => {
   const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
