@@ -54,7 +54,7 @@ test("PIX: rota de cancelar resolve empresa da sessão, não do body", () => {
 
 test("PIX: contexto resolve empresa ativa antes do vault", () => {
   const contexto = fonte("lib/pagamentos/pix/contexto.ts");
-  assert.match(contexto, /buscarVinculoEmpresaAtiva/);
+  assert.match(contexto, /resolverContextoAutorizadoEmpresa/);
   assert.match(contexto, /carregarIntegracaoPix\(empresaId\)/);
 });
 

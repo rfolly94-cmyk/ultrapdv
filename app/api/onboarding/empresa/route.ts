@@ -334,16 +334,15 @@ export async function POST(
     createAdminClient();
 
   const {
-    data: vinculoAtual,
-    error:
-      vinculoAtualError,
+    data: vinculosExistentes,
+    error: vinculoAtualError,
   } =
     await admin
       .from(
         "usuarios_empresas"
       )
       .select(
-        "empresa_id"
+        "empresa_id, principal, ativo"
       )
       .eq(
         "usuario_id",
@@ -351,15 +350,7 @@ export async function POST(
           usuarioId
         )
       )
-      .eq(
-        "principal",
-        true
-      )
-      .eq(
-        "ativo",
-        true
-      )
-      .limit(1);
+      .limit(5);
 
   if (
     vinculoAtualError
@@ -374,12 +365,12 @@ export async function POST(
     );
   }
 
-  if (
-    (
-      vinculoAtual ??
-      []
-    ).length > 0
-  ) {
+  const vinculos = vinculosExistentes ?? [];
+  const principalAtivo = vinculos.some(
+    (item) => item.principal === true && item.ativo === true
+  );
+
+  if (principalAtivo) {
     return resposta(
       {
         ok: false,
@@ -389,6 +380,40 @@ export async function POST(
           "/painel",
       },
       409
+    );
+  }
+
+  if (vinculos.length > 0) {
+    return resposta(
+      {
+        ok: false,
+        erro:
+          "Seu acesso à empresa foi desativado. Entre em contato com o administrador.",
+        destino:
+          "/acesso-desativado",
+        codigo: "ACESSO_DESATIVADO",
+      },
+      403
+    );
+  }
+
+  const { data: usuarioApp } = await admin
+    .from("usuarios")
+    .select("ativo")
+    .eq("id", String(usuarioId))
+    .maybeSingle();
+
+  if (usuarioApp && usuarioApp.ativo === false) {
+    return resposta(
+      {
+        ok: false,
+        erro:
+          "Seu acesso à empresa foi desativado. Entre em contato com o administrador.",
+        destino:
+          "/acesso-desativado",
+        codigo: "ACESSO_DESATIVADO",
+      },
+      403
     );
   }
 

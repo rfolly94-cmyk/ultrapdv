@@ -225,7 +225,8 @@ test("modo restrito libera assinatura, painel e empresa", () => {
   assert.equal(rotaOperacionalBloqueadaQuandoSuspensa("/estoque"), true);
   assert.equal(rotaOperacionalBloqueadaQuandoSuspensa("/vendas"), true);
   assert.equal(rotaOperacionalBloqueadaQuandoSuspensa("/fiscal/nfe/nova"), true);
-  assert.equal(rotaOperacionalBloqueadaQuandoSuspensa("/fiscal"), false);
+  assert.equal(rotaOperacionalBloqueadaQuandoSuspensa("/fiscal"), true);
+  assert.equal(rotaOperacionalBloqueadaQuandoSuspensa("/caixa"), true);
 });
 
 test("nova emissão fiscal é bloqueada; Master não usa email hardcoded", () => {
@@ -244,6 +245,17 @@ test("assinatura ausente não é bypass permanente", () => {
       message: "Could not find the table 'public.assinaturas_empresas' in the schema cache",
     }),
     false
+  );
+  assert.equal(
+    assinaturaBloqueiaOperacao(
+      null,
+      {
+        message: "Could not find the table 'public.assinaturas_empresas' in the schema cache",
+      },
+      new Date(),
+      { producao: true }
+    ),
+    true
   );
   assert.equal(
     assinaturaBloqueiaOperacao(null, { message: "permission denied for table assinaturas_empresas" }),

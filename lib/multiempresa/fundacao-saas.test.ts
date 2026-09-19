@@ -325,10 +325,10 @@ test("FASE 2C: /admin-plataforma não exige empresa ativa", () => {
   const helper = fonte("lib/plataforma/contexto.ts");
   const shell = fonte("components/app-shell.tsx");
 
-  assert.match(proxy, /rotaAdminPlataforma/);
+  assert.match(proxy, /ehRotaPlataforma/);
   assert.ok(
-    proxy.indexOf("rotaAdminPlataforma(pathname)") <
-      proxy.indexOf("usuarios_empresas")
+    proxy.indexOf("ehRotaPublicaIntencional(pathname) || ehRotaPlataforma(pathname)") <
+      proxy.indexOf("await carregarEstadoAcessoSessao")
   );
   assert.match(layout, /obterContextoAdminPlataforma/);
   assert.doesNotMatch(layout, /usuarios_empresas/);

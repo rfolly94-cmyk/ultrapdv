@@ -1,3 +1,5 @@
+import { ehRotaPublicaIntencional } from "@/lib/auth/gate-rotas";
+
 export function rotaMaster(pathname: string) {
   return pathname === "/master" || pathname.startsWith("/master/");
 }
@@ -11,6 +13,8 @@ export function rotaLivreNoModoRestrito(pathname: string) {
     pathname === "/login" ||
     pathname === "/logout" ||
     pathname === "/acesso-negado" ||
+    pathname === "/acesso-desativado" ||
+    pathname.startsWith("/acesso-desativado/") ||
     pathname === "/assinatura" ||
     pathname.startsWith("/assinatura/") ||
     pathname === "/painel" ||
@@ -33,19 +37,31 @@ export function rotaOperacionalBloqueadaQuandoSuspensa(pathname: string) {
     return false;
   }
 
+  if (ehRotaPublicaIntencional(pathname)) {
+    return false;
+  }
+
   const prefixos = [
     "/pdv",
+    "/caixa",
     "/produtos",
     "/clientes",
     "/estoque",
     "/cadastro",
     "/vendas",
+    "/fiscal",
+    "/contabilidade",
+    "/relatorios",
+    "/transportadoras",
     "/configuracoes/importar-dados",
     "/configuracoes/catalogo",
-    "/fiscal/nfe/nova",
+    "/configuracoes/financeiro",
+    "/configuracoes/fiscal",
+    "/configuracoes/caixa",
+    "/api/",
   ];
 
   return prefixos.some(
-    (prefixo) => pathname === prefixo || pathname.startsWith(`${prefixo}/`)
+    (prefixo) => pathname === prefixo || pathname.startsWith(prefixo)
   );
 }

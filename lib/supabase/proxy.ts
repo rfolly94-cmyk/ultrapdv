@@ -1,14 +1,59 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { carregarEstadoAcessoSessao } from "@/lib/auth/carregar-estado-acesso";
+import {
+  decidirGateSessao,
+  ehRotaApi,
+  ehRotaPlataforma,
+  ehRotaPublicaIntencional,
+  jsonSemPermissao,
+} from "@/lib/auth/gate-rotas";
+import { classificarEstadoAcesso } from "@/lib/auth/estado-acesso";
+import { extrairBearerAuthorization } from "@/lib/supabase/bearer";
 import { carregarPermissoesDoVinculo } from "@/lib/permissoes/carregar";
 import { decidirAcessoRota, rotaLivrePermissao } from "@/lib/permissoes/rotas";
-import { rotaAdminPlataforma } from "@/lib/plataforma/autorizacao";
 import { assinaturaBloqueiaOperacao } from "@/lib/assinatura/empresa-pode-operar";
-import {
-  rotaMaster,
-  rotaOperacionalBloqueadaQuandoSuspensa,
-} from "@/lib/assinatura/rotas-restritas";
+import { rotaOperacionalBloqueadaQuandoSuspensa } from "@/lib/assinatura/rotas-restritas";
+
+function aplicarCookiesSessao(
+  origem: NextResponse,
+  destino: NextResponse
+) {
+  origem.cookies.getAll().forEach((cookie) => {
+    destino.cookies.set(cookie);
+  });
+  return destino;
+}
+
+function responderGate(
+  origem: NextResponse,
+  request: NextRequest,
+  decisao: ReturnType<typeof decidirGateSessao>
+) {
+  if (decisao.tipo === "seguir") {
+    return null;
+  }
+
+  if (decisao.tipo === "json") {
+    return aplicarCookiesSessao(
+      origem,
+      NextResponse.json(
+        {
+          ok: false,
+          erro: decisao.erro,
+          codigo: decisao.codigo,
+        },
+        { status: decisao.status }
+      )
+    );
+  }
+
+  const url = request.nextUrl.clone();
+  url.pathname = decisao.destino;
+  url.search = "";
+  return aplicarCookiesSessao(origem, NextResponse.redirect(url));
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -45,56 +90,62 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Valida/renova o JWT da sessão.
-  const { data: claimsData } = await supabase.auth.getClaims();
+  const bearer = extrairBearerAuthorization(
+    request.headers.get("authorization")
+  );
+  const { data: claimsData } = bearer
+    ? await supabase.auth.getClaims(bearer)
+    : await supabase.auth.getClaims();
   const usuarioId = claimsData?.claims?.sub;
   const pathname = request.nextUrl.pathname;
 
-  // Admin da plataforma / Master não depende de tenant/empresa ativa.
-  if (rotaAdminPlataforma(pathname) || rotaMaster(pathname)) {
+  if (ehRotaPublicaIntencional(pathname) || ehRotaPlataforma(pathname)) {
     return supabaseResponse;
   }
 
-  if (usuarioId) {
-    const { data: vinculo } = await supabase
-      .from("usuarios_empresas")
-      .select("empresa_id, perfil")
-      .eq("usuario_id", String(usuarioId))
-      .eq("principal", true)
-      .eq("ativo", true)
+  const estado = usuarioId
+    ? await carregarEstadoAcessoSessao(supabase, String(usuarioId))
+    : classificarEstadoAcesso({});
+
+  let empresaOperacional: boolean | null = null;
+  if (estado.temVinculoOperacional && estado.empresaId) {
+    const { data: assinatura, error: erroAssinatura } = await supabase
+      .from("assinaturas_empresas")
+      .select("status, carencia_ate, liberado_ate")
+      .eq("empresa_id", estado.empresaId)
       .maybeSingle();
 
-    if (vinculo && !rotaLivrePermissao(pathname)) {
-      if (rotaOperacionalBloqueadaQuandoSuspensa(pathname)) {
-        const { data: assinatura, error: erroAssinatura } = await supabase
-          .from("assinaturas_empresas")
-          .select("status, carencia_ate, liberado_ate")
-          .eq("empresa_id", String(vinculo.empresa_id))
-          .maybeSingle();
+    empresaOperacional = !assinaturaBloqueiaOperacao(
+      assinatura
+        ? {
+            ...assinatura,
+            empresa_id: estado.empresaId,
+          }
+        : null,
+      erroAssinatura
+    );
+  }
 
-        if (
-          assinaturaBloqueiaOperacao(
-            assinatura
-              ? {
-                  ...assinatura,
-                  empresa_id: String(vinculo.empresa_id),
-                }
-              : null,
-            erroAssinatura
-          )
-        ) {
-          const url = request.nextUrl.clone();
-          url.pathname = "/assinatura";
-          url.search = "";
-          return NextResponse.redirect(url);
-        }
-      }
+  const decisao = decidirGateSessao({
+    pathname,
+    autenticado: Boolean(usuarioId),
+    estado,
+    empresaOperacional,
+    rotaOperacional: rotaOperacionalBloqueadaQuandoSuspensa(pathname),
+  });
 
+  const bloqueio = responderGate(supabaseResponse, request, decisao);
+  if (bloqueio) {
+    return bloqueio;
+  }
+
+  if (usuarioId && estado.temVinculoOperacional && estado.empresaId) {
+    if (!rotaLivrePermissao(pathname)) {
       const sessao = await carregarPermissoesDoVinculo({
         supabase,
         usuarioId: String(usuarioId),
-        empresaId: String(vinculo.empresa_id),
-        perfil: String(vinculo.perfil ?? ""),
+        empresaId: estado.empresaId,
+        perfil: String(estado.perfil ?? ""),
       });
 
       const acesso = decidirAcessoRota({
@@ -104,10 +155,28 @@ export async function updateSession(request: NextRequest) {
       });
 
       if (!acesso.ok) {
+        if (ehRotaApi(pathname)) {
+          const negado = jsonSemPermissao();
+          return aplicarCookiesSessao(
+            supabaseResponse,
+            NextResponse.json(
+              {
+                ok: false,
+                erro: negado.tipo === "json" ? negado.erro : "Acesso negado.",
+                codigo: "SEM_PERMISSAO",
+              },
+              { status: 403 }
+            )
+          );
+        }
+
         const url = request.nextUrl.clone();
         url.pathname = acesso.redirect;
         url.search = "";
-        return NextResponse.redirect(url);
+        return aplicarCookiesSessao(
+          supabaseResponse,
+          NextResponse.redirect(url)
+        );
       }
     }
   }

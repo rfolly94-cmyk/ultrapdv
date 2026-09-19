@@ -73,7 +73,7 @@ test("service_role: helpers resolvem tenant da sessão antes do admin", () => {
   const usuarios = fonte("lib/usuarios/contexto-administracao.ts");
   const arquivo = fonte("app/api/fiscal/emissoes/[id]/arquivo/route.ts");
 
-  assert.match(pix, /buscarVinculoEmpresaAtiva/);
+  assert.match(pix, /resolverContextoAutorizadoEmpresa/);
   assert.match(pix, /admin: createAdminClient\(\)/);
   assert.match(usuarios, /createAdminClient/);
   assert.match(arquivo, /vinculo\.empresa_id/);

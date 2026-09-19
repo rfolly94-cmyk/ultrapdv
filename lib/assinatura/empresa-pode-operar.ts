@@ -1,3 +1,4 @@
+import { ambienteProducao } from "@/lib/auth/ambiente";
 import type { AssinaturaEmpresa, StatusAssinatura } from "./tipos";
 import { STATUS_ASSINATURA } from "./tipos";
 
@@ -95,10 +96,12 @@ export function empresaPodeOperar(
 export function assinaturaBloqueiaOperacao(
   assinatura: AssinaturaParaOperar | null,
   error: { message?: string } | null | undefined,
-  agora = new Date()
+  agora = new Date(),
+  opcoes?: { producao?: boolean }
 ) {
+  const producao = opcoes?.producao ?? ambienteProducao();
   if (erroSchemaAssinaturaAusente(error?.message)) {
-    return false;
+    return producao;
   }
   if (error) {
     return true;

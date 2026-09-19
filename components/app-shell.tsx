@@ -46,6 +46,7 @@ export function AppShell({
     pathname.startsWith("/confirmar-email") ||
     pathname.startsWith("/recuperar-senha") ||
     pathname.startsWith("/nova-senha") ||
+    pathname.startsWith("/acesso-desativado") ||
     pathname.startsWith("/admin-plataforma") ||
     pathname.startsWith("/master") ||
     pathname.startsWith("/auth") ||

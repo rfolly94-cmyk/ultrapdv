@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { emailConfirmado } from "@/lib/auth/email";
+import { registrarEventoAcessoAuth } from "@/lib/auth/auditoria-acesso";
+import { carregarEstadoAcessoSessao } from "@/lib/auth/contexto-autorizado";
+import { destinoPosLogin } from "@/lib/auth/gate-rotas";
+import { MENSAGEM_LOGIN_INVALIDO } from "@/lib/auth/mensagens-acesso";
 import {
   COOKIE_RECUPERACAO_SENHA,
   MENSAGEM_RECUPERACAO_NEUTRA,
@@ -21,6 +25,8 @@ function mensagemUrl(
 }
 
 export async function entrar(formData: FormData) {
+  // Rate limit de força bruta: não usar Map em memória (serverless).
+  // Configurar no Supabase Auth (dashboard) e, se necessário, WAF/Vercel.
   const email = String(formData.get("email") ?? "")
     .trim()
     .toLowerCase();
@@ -46,8 +52,9 @@ export async function entrar(formData: FormData) {
       redirect("/confirmar-email");
     }
 
+    void registrarEventoAcessoAuth({ evento: "login_falha" });
     redirect(
-      mensagemUrl("/login", "erro", "E-mail ou senha inválidos.")
+      mensagemUrl("/login", "erro", MENSAGEM_LOGIN_INVALIDO)
     );
   }
 
@@ -58,28 +65,36 @@ export async function entrar(formData: FormData) {
 
   revalidatePath("/", "layout");
 
-  const { data: claimsData } = await supabase.auth.getClaims();
-  const usuarioId = claimsData?.claims?.sub;
+  const usuarioId = userData.user?.id;
+  const estado = usuarioId
+    ? await carregarEstadoAcessoSessao(supabase, String(usuarioId))
+    : null;
 
-  const { data: vinculo } = usuarioId
-    ? await supabase
-        .from("usuarios_empresas")
-        .select("perfil")
-        .eq("usuario_id", String(usuarioId))
-        .eq("principal", true)
-        .eq("ativo", true)
-        .maybeSingle()
-    : { data: null };
+  void registrarEventoAcessoAuth({
+    evento: "login_sucesso",
+    usuarioId: usuarioId ? String(usuarioId) : null,
+    empresaId: estado?.empresaId ?? null,
+  });
 
-  if (!vinculo) {
+  if (!estado) {
     redirect("/onboarding");
   }
 
-  if (String(vinculo.perfil ?? "").toLowerCase() === "contador") {
-    redirect("/contabilidade");
+  if (!estado.usuarioAtivo) {
+    void registrarEventoAcessoAuth({
+      evento: "acesso_bloqueado_usuario_inativo",
+      usuarioId: String(usuarioId),
+      empresaId: estado.empresaId,
+    });
+  } else if (estado.teveVinculo && !estado.temVinculoOperacional) {
+    void registrarEventoAcessoAuth({
+      evento: "acesso_bloqueado_empresa_inativa",
+      usuarioId: String(usuarioId),
+      empresaId: estado.empresaId,
+    });
   }
 
-  redirect("/painel");
+  redirect(destinoPosLogin(estado));
 }
 
 export async function solicitarRecuperacaoSenha(formData: FormData) {

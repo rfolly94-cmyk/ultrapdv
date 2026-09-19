@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ambienteProducao } from "@/lib/auth/ambiente";
 import { createClient } from "@/lib/supabase/server";
 import {
   empresaPodeOperar,
@@ -49,13 +50,31 @@ export async function resolverAssinaturaEmpresa(empresaId: string) {
 
   if (error) {
     if (erroSchemaAssinaturaAusente(error.message)) {
+      if (ambienteProducao()) {
+        console.error(
+          "[assinatura] schema ausente em produção; operação bloqueada"
+        );
+        return {
+          assinatura: null as AssinaturaEmpresa | null,
+          operacional: false,
+          empresaId,
+        };
+      }
       return {
         assinatura: null as AssinaturaEmpresa | null,
         operacional: true,
         empresaId,
       };
     }
-    throw new Error(error.message);
+    console.error(
+      "[assinatura] falha ao resolver; operação bloqueada",
+      error.message
+    );
+    return {
+      assinatura: null as AssinaturaEmpresa | null,
+      operacional: false,
+      empresaId,
+    };
   }
 
   const assinatura = linhaParaAssinatura(

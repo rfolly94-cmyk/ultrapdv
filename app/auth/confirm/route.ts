@@ -64,18 +64,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(urlApp(request, "/login"));
   }
 
-  const { data: vinculo } = await supabase
+  const { data: vinculos } = await supabase
     .from("usuarios_empresas")
-    .select("empresa_id")
-    .eq("usuario_id", String(usuarioId))
-    .eq("principal", true)
-    .eq("ativo", true)
-    .maybeSingle();
+    .select("empresa_id, principal, ativo")
+    .eq("usuario_id", String(usuarioId));
+
+  const lista = vinculos ?? [];
+  const principalAtivo = lista.some(
+    (item) => item.principal === true && item.ativo === true
+  );
 
   return NextResponse.redirect(
     urlApp(
       request,
-      destinoAposConfirmacaoAuth(type, Boolean(vinculo))
+      destinoAposConfirmacaoAuth(type, principalAtivo, lista.length > 0)
     )
   );
 }

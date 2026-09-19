@@ -1,6 +1,14 @@
-import { exigirEmpresaOperacional } from "@/lib/assinatura/exigir-empresa-operacional";
+import {
+  ErroAcessoSessao,
+  resolverContextoAutorizadoEmpresa,
+} from "@/lib/auth/contexto-autorizado";
+import {
+  CODIGO_ACESSO_DESATIVADO,
+  CODIGO_EMPRESA_NAO_OPERACIONAL,
+  CODIGO_NAO_AUTENTICADO,
+  CODIGO_SEM_EMPRESA,
+} from "@/lib/auth/mensagens-acesso";
 import { ErroAssinaturaRestrita } from "@/lib/assinatura/exigir-empresa-operacional";
-import { obterClaimsSessao } from "@/lib/supabase/claims";
 import { createClient } from "@/lib/supabase/server";
 import { extrairBearerAuthorization } from "@/lib/supabase/bearer";
 
@@ -15,8 +23,41 @@ export type ContextoEmpresaAtiva =
       ok: false;
       status: number;
       erro: string;
-      codigo?: "NAO_AUTENTICADO" | "SEM_EMPRESA";
+      codigo?:
+        | "NAO_AUTENTICADO"
+        | "SEM_EMPRESA"
+        | "ACESSO_DESATIVADO"
+        | "EMPRESA_NAO_OPERACIONAL";
     };
+
+function erroParaContexto(error: unknown): ContextoEmpresaAtiva {
+  if (error instanceof ErroAcessoSessao) {
+    const codigo =
+      error.codigo === CODIGO_ACESSO_DESATIVADO ||
+      error.codigo === CODIGO_EMPRESA_NAO_OPERACIONAL ||
+      error.codigo === CODIGO_SEM_EMPRESA ||
+      error.codigo === CODIGO_NAO_AUTENTICADO
+        ? error.codigo
+        : undefined;
+    return {
+      ok: false,
+      status: error.status,
+      erro: error.message,
+      codigo,
+    };
+  }
+
+  if (error instanceof ErroAssinaturaRestrita) {
+    return {
+      ok: false,
+      status: 403,
+      erro: error.message,
+      codigo: CODIGO_EMPRESA_NAO_OPERACIONAL,
+    };
+  }
+
+  throw error;
+}
 
 export async function resolverContextoEmpresaAtiva(
   authorization: string | null
@@ -26,54 +67,22 @@ export async function resolverContextoEmpresaAtiva(
       ok: false,
       status: 401,
       erro: "Não autenticado.",
-      codigo: "NAO_AUTENTICADO",
-    };
-  }
-
-  const supabase = await createClient();
-  const { data: claimsData, error: authError } =
-    await obterClaimsSessao(supabase);
-
-  if (authError || !claimsData?.claims?.sub) {
-    return {
-      ok: false,
-      status: 401,
-      erro: "Não autenticado.",
-      codigo: "NAO_AUTENTICADO",
-    };
-  }
-
-  const usuarioId = String(claimsData.claims.sub);
-  const { data: vinculo, error: vinculoError } = await supabase
-    .from("usuarios_empresas")
-    .select("empresa_id")
-    .eq("usuario_id", usuarioId)
-    .eq("principal", true)
-    .eq("ativo", true)
-    .maybeSingle();
-
-  if (vinculoError || !vinculo) {
-    return {
-      ok: false,
-      status: 403,
-      erro: "Empresa ativa não encontrada.",
-      codigo: "SEM_EMPRESA",
+      codigo: CODIGO_NAO_AUTENTICADO,
     };
   }
 
   try {
-    await exigirEmpresaOperacional(String(vinculo.empresa_id));
+    const ctx = await resolverContextoAutorizadoEmpresa({
+      authorization,
+      exigirBearer: true,
+    });
+    return {
+      ok: true,
+      supabase: ctx.supabase,
+      empresaId: ctx.empresaId,
+      usuarioId: ctx.usuarioId,
+    };
   } catch (error) {
-    if (error instanceof ErroAssinaturaRestrita) {
-      return { ok: false, status: 403, erro: error.message };
-    }
-    throw error;
+    return erroParaContexto(error);
   }
-
-  return {
-    ok: true,
-    supabase,
-    empresaId: String(vinculo.empresa_id),
-    usuarioId,
-  };
 }

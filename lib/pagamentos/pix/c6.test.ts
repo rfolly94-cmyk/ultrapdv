@@ -208,7 +208,7 @@ test("13. erro 502 não perde a venda e usa mensagem amigável", () => {
 test("14. empresa A não acessa credenciais B", () => {
   const vault = fonte(VAULT);
   assert.match(vault, /pix\/' \|\| p_empresa_id::text/);
-  assert.match(fonte("lib/pagamentos/pix/contexto.ts"), /buscarVinculoEmpresaAtiva/);
+  assert.match(fonte("lib/pagamentos/pix/contexto.ts"), /resolverContextoAutorizadoEmpresa/);
   assert.match(fonte("lib/pagamentos/pix/contexto.ts"), /p_empresa_id: params.empresaId/);
   assert.notEqual(empresaA, empresaB);
 });

@@ -22,7 +22,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { carregarDashboard } from "@/lib/dashboard/carregar-dashboard";
 import { periodoValido } from "@/lib/dashboard/periodo";
 import { temAcessoModulo } from "@/lib/permissoes/tem-permissao";
-import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
+import { obterDiagnosticoSessao } from "@/lib/permissoes/sessao";
 
 export const dynamic = "force-dynamic";
 
@@ -46,8 +46,17 @@ type PageProps = {
 };
 
 export default async function PainelPage({ searchParams }: PageProps) {
-  const sessao = await obterPermissoesSessao();
-  if (!temAcessoModulo(sessao?.permissoes, "inicio")) {
+  const diagnostico = await obterDiagnosticoSessao();
+  if (diagnostico.tipo === "nao_autenticado") {
+    redirect("/login");
+  }
+  if (diagnostico.tipo === "acesso_desativado") {
+    redirect("/acesso-desativado");
+  }
+  if (diagnostico.tipo !== "ok" || !diagnostico.sessao) {
+    redirect("/onboarding");
+  }
+  if (!temAcessoModulo(diagnostico.sessao.permissoes, "inicio")) {
     redirect("/acesso-negado");
   }
 

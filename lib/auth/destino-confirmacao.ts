@@ -1,6 +1,7 @@
 export function destinoAposConfirmacaoAuth(
   type: string | null | undefined,
-  temEmpresaPrincipal: boolean
+  temEmpresaPrincipal: boolean,
+  teveVinculo = false
 ) {
   if (String(type ?? "").toLowerCase() === "recovery") {
     return "/nova-senha";
@@ -8,6 +9,10 @@ export function destinoAposConfirmacaoAuth(
 
   if (temEmpresaPrincipal) {
     return "/painel";
+  }
+
+  if (teveVinculo) {
+    return "/acesso-desativado";
   }
 
   return "/onboarding";

@@ -1,117 +1,43 @@
-import {
-  redirect,
-} from "next/navigation";
+import { redirect } from "next/navigation";
 
-import {
-  createClient,
-} from "@/lib/supabase/server";
-
-import {
-  OnboardingEmpresaForm,
-} from "@/components/onboarding/onboarding-empresa-form";
+import { OnboardingEmpresaForm } from "@/components/onboarding/onboarding-empresa-form";
+import { carregarEstadoAcessoSessao } from "@/lib/auth/contexto-autorizado";
+import { podeUsarOnboarding } from "@/lib/auth/estado-acesso";
+import { emailConfirmado } from "@/lib/auth/email";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
-  title:
-    "Cadastrar empresa",
+  title: "Cadastrar empresa",
 };
 
-export default async function
-OnboardingPage() {
-  const supabase =
-    await createClient();
+export default async function OnboardingPage() {
+  const supabase = await createClient();
+  const { data: claimsData, error: authError } = await supabase.auth.getClaims();
+  const usuarioId = claimsData?.claims?.sub;
 
-  const {
-    data: claimsData,
-    error: authError,
-  } =
-    await supabase.auth.getClaims();
-
-  const usuarioId =
-    claimsData?.claims?.sub;
-
-  if (
-    authError ||
-    !usuarioId
-  ) {
-    redirect(
-      "/login"
-    );
+  if (authError || !usuarioId) {
+    redirect("/login");
   }
 
-  const {
-    data: userData,
-  } =
-    await supabase.auth.getUser();
+  const { data: userData } = await supabase.auth.getUser();
 
-  if (
-    !userData.user?.email_confirmed_at
-  ) {
-    redirect(
-      "/confirmar-email"
-    );
+  if (!emailConfirmado(userData.user)) {
+    redirect("/confirmar-email");
   }
 
-  const {
-    data: vinculo,
-  } =
-    await supabase
-      .from(
-        "usuarios_empresas"
-      )
-      .select(
-        "empresa_id"
-      )
-      .eq(
-        "usuario_id",
-        String(usuarioId)
-      )
-      .eq(
-        "principal",
-        true
-      )
-      .eq(
-        "ativo",
-        true
-      )
-      .maybeSingle();
+  const estado = await carregarEstadoAcessoSessao(supabase, String(usuarioId));
 
-  if (
-    vinculo
-  ) {
-    redirect(
-      "/painel"
-    );
+  if (estado.temVinculoOperacional) {
+    redirect("/painel");
   }
 
-  const email =
-    userData.user
-      ?.email ??
-    "";
+  if (!podeUsarOnboarding(estado)) {
+    redirect("/acesso-desativado");
+  }
 
-  const metadata =
-    (
-      userData.user
-        ?.user_metadata ??
-      {}
-    ) as Record<
-      string,
-      unknown
-    >;
+  const email = userData.user?.email ?? "";
+  const metadata = (userData.user?.user_metadata ?? {}) as Record<string, unknown>;
+  const nome = String(metadata.nome ?? "").trim();
 
-  const nome =
-    String(
-      metadata.nome ??
-      ""
-    ).trim();
-
-  return (
-    <OnboardingEmpresaForm
-      nomeInicial={
-        nome
-      }
-      email={
-        email
-      }
-    />
-  );
+  return <OnboardingEmpresaForm nomeInicial={nome} email={email} />;
 }

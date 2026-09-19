@@ -11,6 +11,7 @@ export const ROTAS_LIVRES_PERMISSAO = [
   "/recuperar-senha",
   "/nova-senha",
   "/acesso-negado",
+  "/acesso-desativado",
 ];
 
 export const PREFIXOS_LIVRES_PERMISSAO = [

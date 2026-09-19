@@ -1,8 +1,11 @@
-import { buscarVinculoEmpresaAtiva } from "@/lib/empresa/empresa-ativa";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { exigirPermissao } from "@/lib/permissoes/exigir-permissao";
 import { ErroPermissao } from "@/lib/permissoes/erro";
+import {
+  ErroAcessoSessao,
+  resolverContextoAutorizadoEmpresa,
+} from "@/lib/auth/contexto-autorizado";
+import { CODIGO_EMPRESA_NAO_OPERACIONAL } from "@/lib/auth/mensagens-acesso";
 import {
   filtrarCredenciaisDoProvedor,
   mesclarSegredosProvedor,
@@ -20,37 +23,27 @@ import { obterApiKeyGeranetPlataforma } from "@/lib/fiscal/geranet/credencial-pl
 export { ErroPixGeranet } from "./erro";
 
 export async function resolverEmpresaPix() {
-  const supabase = await createClient();
-  const {
-    data: claimsData,
-    error: authError,
-  } = await supabase.auth.getClaims();
-
-  if (authError || !claimsData?.claims?.sub) {
-    throw new ErroPixGeranet("Não autenticado.", 401);
+  try {
+    const ctx = await resolverContextoAutorizadoEmpresa();
+    return {
+      supabase: ctx.supabase,
+      admin: createAdminClient(),
+      empresaId: ctx.empresaId,
+      perfil: String(ctx.perfil ?? ""),
+      usuarioId: ctx.usuarioId,
+    };
+  } catch (error) {
+    if (error instanceof ErroAcessoSessao) {
+      throw new ErroPixGeranet(
+        error.message,
+        error.status,
+        error.codigo === CODIGO_EMPRESA_NAO_OPERACIONAL
+          ? CODIGO_EMPRESA_NAO_OPERACIONAL
+          : error.codigo
+      );
+    }
+    throw error;
   }
-
-  const { data: vinculo, error } = await buscarVinculoEmpresaAtiva<{
-    empresa_id: string;
-    perfil: string | null;
-    usuario_id: string;
-  }>(
-    supabase,
-    claimsData.claims.sub,
-    "empresa_id, perfil, usuario_id"
-  );
-
-  if (error || !vinculo) {
-    throw new ErroPixGeranet("Empresa ativa não encontrada.", 403);
-  }
-
-  return {
-    supabase,
-    admin: createAdminClient(),
-    empresaId: String(vinculo.empresa_id),
-    perfil: String(vinculo.perfil ?? ""),
-    usuarioId: String(vinculo.usuario_id ?? claimsData.claims.sub),
-  };
 }
 
 export async function exigirAdministradorPix() {

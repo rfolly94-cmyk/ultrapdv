@@ -202,5 +202,5 @@ test("helpers de sessão reutilizam buscarVinculoEmpresaAtiva", () => {
   const identidade = readFileSync(join(raiz, "lib/empresa/identidade-sessao.ts"), "utf8");
   const pix = readFileSync(join(raiz, "lib/pagamentos/pix/contexto.ts"), "utf8");
   assert.match(identidade, /buscarVinculoEmpresaAtiva/);
-  assert.match(pix, /buscarVinculoEmpresaAtiva/);
+  assert.match(pix, /resolverContextoAutorizadoEmpresa/);
 });
