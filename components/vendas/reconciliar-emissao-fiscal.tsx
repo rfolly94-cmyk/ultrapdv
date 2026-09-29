@@ -318,8 +318,7 @@ export function ReconciliarEmissaoFiscal({
               {apresentacao.texto}
             </p>
             <p className="mt-2 max-w-3xl text-[13px] text-amber-900">
-              Nenhuma nova NF-e será emitida. Esta ação só consulta a situação
-              da mesma chave e da mesma numeração.
+              O UltraPDV consultará a situação da mesma chave fiscal. Nenhuma nova NF-e será emitida.
             </p>
             {diagnosticoAberto ? (
               <pre className="mt-2 max-w-3xl whitespace-pre-wrap text-[12px] text-amber-900">
@@ -351,7 +350,7 @@ export function ReconciliarEmissaoFiscal({
               onClick={consultar}
               className="updv-btn updv-btn-primary shrink-0 bg-amber-800 hover:bg-amber-900"
             >
-              {enviando ? "Consultando..." : "Reconciliar"}
+              {enviando ? "Consultando situação fiscal..." : "Reconciliar"}
             </button>
           </div>
         </div>
@@ -430,8 +429,7 @@ export function ReconciliarEmissaoFiscal({
           {diagnosticoAberto ? "Ocultar diagnóstico" : "Ver diagnóstico"}
         </button>
         <p className="max-w-sm text-[12px] text-zinc-600">
-          Nenhuma nova NF-e será emitida. Esta ação só consulta a mesma chave
-          e a mesma numeração.
+          O UltraPDV consultará a situação da mesma chave fiscal. Nenhuma nova NF-e será emitida.
         </p>
         <button
           type="button"
@@ -439,7 +437,7 @@ export function ReconciliarEmissaoFiscal({
           onClick={consultar}
           className="updv-btn updv-btn-primary shrink-0 bg-amber-800 hover:bg-amber-900 disabled:opacity-50"
         >
-          {enviando ? "Consultando..." : "Reconciliar"}
+          {enviando ? "Consultando situação fiscal..." : "Reconciliar"}
         </button>
         {diagnosticoAberto ? (
           <pre className="max-w-sm whitespace-pre-wrap text-[12px] text-zinc-600">

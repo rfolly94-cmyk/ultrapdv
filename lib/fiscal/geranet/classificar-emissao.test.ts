@@ -879,7 +879,14 @@ test("HTTP 422 + cStat 539 é rejeição determinística, não processando e nã
     "utf8"
   );
   assert.match(uiReconciliar, /Nenhuma nova NF-e será emitida/);
-  assert.match(uiReconciliar, />\s*\{enviando \? "Consultando\.\.\." : "Reconciliar"\}/);
+  assert.match(
+    uiReconciliar,
+    /O UltraPDV consultará a situação da mesma chave fiscal/
+  );
+  assert.match(
+    uiReconciliar,
+    /\{enviando \? "Consultando situação fiscal\.\.\." : "Reconciliar"\}/
+  );
   assert.doesNotMatch(uiReconciliar, /Acompanhar reconciliação/);
   assert.doesNotMatch(reconciliarEmissao, /\/api\/v1\/nfe\/emitir/);
   assert.match(reconciliarEmissao, /consultarEmissaoGeranet/);

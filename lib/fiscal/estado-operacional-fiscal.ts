@@ -266,6 +266,7 @@ function montarEstado(params: {
   requerDiagnostico?: boolean;
   acaoPrincipal: AcaoPrincipalEmissaoFiscal;
   consultaGeranetSecundaria?: boolean;
+  bloqueiaRetransmissao?: boolean;
 }): EstadoOperacionalFiscalResolvido {
   const requerDiagnostico = Boolean(params.requerDiagnostico);
   const bloqueiaVendaComercial =
@@ -283,9 +284,10 @@ function montarEstado(params: {
     bloqueiaVendaComercial,
     requerDiagnostico,
     bloqueiaRetransmissao:
-      params.documentoFiscalAmbiguo ||
-      params.estado === "em_transmissao" ||
-      params.estado === "nao_classificada",
+      params.bloqueiaRetransmissao ??
+      (params.documentoFiscalAmbiguo ||
+        params.estado === "em_transmissao" ||
+        params.estado === "nao_classificada"),
     consultaGeranetSecundaria: Boolean(params.consultaGeranetSecundaria),
     acaoPrincipal: params.acaoPrincipal,
     titulo: params.titulo,
@@ -419,6 +421,28 @@ export function resolverEstadoOperacionalFiscal(
       documentoFiscalAmbiguo: true,
       documentoFiscalSensivel: true,
       acaoPrincipal: "reconciliar",
+    });
+  }
+
+  if (
+    status === "rejeitada" &&
+    resumoEmissao(emissao)?.estado_fiscal_definitivo === true
+  ) {
+    return montarEstado({
+      estado: "rejeitada_sefaz",
+      caso: "rejeitada",
+      documento,
+      titulo: `${documento} com situação fiscal definitiva`,
+      descricao:
+        "A SEFAZ registrou um estado fiscal definitivo para esta NF-e. A numeração não será retransmitida.",
+      podeRetry: false,
+      podeReconciliar: false,
+      podeConsultar: true,
+      podeEditarFiscal: false,
+      documentoFiscalAmbiguo: false,
+      documentoFiscalSensivel: true,
+      bloqueiaRetransmissao: true,
+      acaoPrincipal: "consultar_diagnostico",
     });
   }
 

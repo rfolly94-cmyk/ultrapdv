@@ -10,6 +10,8 @@ import {
 } from "@/lib/fiscal/geranet/classificar-emissao";
 import { classificacaoResumoDaEmissao } from "@/lib/fiscal/estado-operacional-fiscal";
 import { mensagemReconciliacaoInconclusiva } from "@/lib/fiscal/geranet/classificar-emissao";
+import { consultarSefazParaReconciliacao } from "@/lib/fiscal/sefaz/consultar-protocolo-nfe";
+import { deveConsultarSefazDireta } from "@/lib/fiscal/sefaz/consulta-protocolo";
 import {
   EmissaoParaConsulta,
   mensagemConsulta,
@@ -215,7 +217,10 @@ export async function reconciliarEmissaoFiscal({
 
   const posteriorAutorizada = (posterior?.length ?? 0) > 0;
 
-  const atualizacao = montarAtualizacaoEmissao({
+  let fonteResultado: "geranet" | "sefaz_direta" = "geranet";
+  let situacaoFinal = consulta.situacao;
+  let erroTecnicoFinal: string | null = consulta.erro ?? null;
+  let atualizacao = montarAtualizacaoEmissao({
     emissao: emissaoConsulta,
     situacao: consulta.situacao,
     log: consulta.log,
@@ -224,6 +229,51 @@ export async function reconciliarEmissaoFiscal({
     origem,
     posteriorAutorizada,
   });
+
+  if (
+    deveConsultarSefazDireta({
+      modelo: texto(emissao.modelo),
+      situacaoGeranet: consulta.situacao,
+    })
+  ) {
+    const segredos = objeto(segredosResult.data);
+    const direta = await consultarSefazParaReconciliacao({
+      emissao: emissaoConsulta,
+      certificadoHex: texto(segredos.certificado_a1),
+      senha: texto(segredos.senha_certificado),
+      origem,
+      posteriorAutorizada,
+    });
+
+    if (direta.ok) {
+      atualizacao = direta.atualizacao;
+      situacaoFinal = direta.situacao;
+      fonteResultado = "sefaz_direta";
+      erroTecnicoFinal = null;
+    } else {
+      fonteResultado = "sefaz_direta";
+      erroTecnicoFinal = direta.erroTecnico;
+      atualizacao.mensagem = direta.mensagem;
+      atualizacao.patch.motivo = direta.mensagem;
+      atualizacao.patch.erro_comunicacao = direta.erroTecnico;
+      atualizacao.patch.resposta_resumo = {
+        ...objeto(atualizacao.patch.resposta_resumo),
+        fonte_resultado: "sefaz_direta",
+        mensagem: direta.mensagem,
+        consulta_sefaz: {
+          tentada: true,
+          ok: false,
+          falha: direta.falha,
+          erro: direta.erroTecnico,
+        },
+      };
+    }
+  } else {
+    atualizacao.patch.resposta_resumo = {
+      ...objeto(atualizacao.patch.resposta_resumo),
+      fonte_resultado: "geranet",
+    };
+  }
 
   if (
     !texto(emissao.chave_acesso) &&
@@ -316,7 +366,7 @@ export async function reconciliarEmissaoFiscal({
         status: atualizacao.status_local,
         cstat: atualizacao.cstat,
         protocolo: atualizacao.protocolo,
-        situacao: consulta.situacao,
+        situacao: situacaoFinal,
       }
     );
 
@@ -324,9 +374,10 @@ export async function reconciliarEmissaoFiscal({
     const proximaSequencia = Number(ultimoEvento?.sequencia ?? 0) + 1;
     const agora = new Date().toISOString();
     const consultaInconclusiva =
-      consulta.situacao === "falha_consulta" ||
-      consulta.situacao === "inconclusiva" ||
-      consulta.situacao === "nao_encontrada";
+      situacaoFinal === "falha_consulta" ||
+      situacaoFinal === "inconclusiva" ||
+      situacaoFinal === "nao_encontrada" ||
+      situacaoFinal === "processando";
 
     const { error: eventoError } = await admin
       .from("fiscal_emissao_eventos")
@@ -343,14 +394,15 @@ export async function reconciliarEmissaoFiscal({
         payload_resumo: {
           acao: "reconciliar_nfe",
           origem,
+          fonte_resultado: fonteResultado,
           status_anterior: statusAnterior,
           status_retornado: atualizacao.status_local,
           estado_anterior: statusAnterior,
-          estado_encontrado: consulta.situacao,
+          estado_encontrado: situacaoFinal,
           cstat: atualizacao.cstat,
           xmotivo: atualizacao.motivo,
           protocolo: atualizacao.protocolo,
-          erro_tecnico: consulta.erro ?? null,
+          erro_tecnico: erroTecnicoFinal,
           posterior_autorizada: posteriorAutorizada,
           modelo: emissao.modelo,
           serie: emissao.serie,
@@ -382,21 +434,24 @@ export async function reconciliarEmissaoFiscal({
     ok: consulta.situacao !== "falha_consulta",
     emissao_id: emissaoId,
     modelo: texto(emissao.modelo),
-    situacao: consulta.situacao,
+    situacao: situacaoFinal,
     status_anterior: statusAnterior,
     status: atualizacao.status_local,
     mensagem:
-      consulta.situacao === "inconclusiva" ||
-      consulta.situacao === "nao_encontrada" ||
-      consulta.situacao === "falha_consulta"
-        ? mensagemReconciliacaoInconclusiva(texto(emissao.modelo))
-        : atualizacao.mensagem ||
-          mensagemConsulta(
-            texto(emissao.modelo),
-            consulta.situacao,
-            atualizacao.cstat,
-            atualizacao.motivo
-          ),
+      fonteResultado === "sefaz_direta" ||
+      erroTecnicoFinal?.startsWith("sefaz_direta:")
+        ? atualizacao.mensagem
+        : situacaoFinal === "inconclusiva" ||
+            situacaoFinal === "nao_encontrada" ||
+            situacaoFinal === "falha_consulta"
+          ? mensagemReconciliacaoInconclusiva(texto(emissao.modelo))
+          : atualizacao.mensagem ||
+            mensagemConsulta(
+              texto(emissao.modelo),
+              situacaoFinal,
+              atualizacao.cstat,
+              atualizacao.motivo
+            ),
     cstat: atualizacao.cstat,
     chave: atualizacao.chave,
     protocolo: atualizacao.protocolo,
