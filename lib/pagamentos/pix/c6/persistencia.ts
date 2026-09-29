@@ -47,11 +47,14 @@ export function flagsExistenciaCofreC6(
   };
 }
 
-export function erroReadBackC6(flags: FlagsExistenciaCofreC6) {
+export function erroReadBackC6(
+  flags: FlagsExistenciaCofreC6,
+  opcoes?: { chavePresenteNoCertificado?: boolean }
+) {
   if (!flags.certificadoPemHexadecimal) {
     return MENSAGEM_C6_CERTIFICADO_NAO_SALVO;
   }
-  if (!flags.chavePrivadaPemHexadecimal) {
+  if (!flags.chavePrivadaPemHexadecimal && !opcoes?.chavePresenteNoCertificado) {
     return MENSAGEM_C6_CHAVE_NAO_SALVA;
   }
   if (!flags.clienteId || !flags.clienteSegredo) {

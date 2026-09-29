@@ -305,7 +305,7 @@ test("E) após processando, timeout/500 permanece aguardando e não volta para e
 
   assert.equal(resultado.status_local, "aguardando_reconciliacao");
   assert.notEqual(resumo.classificacao, "erro_envio");
-  assert.equal(resumo.situacao_remota, "processando");
+  assert.equal(resumo.situacao_remota, "inconclusiva");
   assert.equal(estado.podeRetry, false);
   assert.equal(estado.podeReconciliar, true);
   assert.equal(

@@ -4,6 +4,11 @@ import { URL } from "node:url";
 
 import { ErroPixGeranet } from "../erro";
 import {
+  traduzirErroMtlsC6,
+  validarMaterialTlsC6,
+  type MaterialTlsC6,
+} from "./material-mtls";
+import {
   MENSAGEM_C6_INDISPONIVEL,
   MENSAGEM_C6_MTLS,
   TIMEOUT_C6_MS,
@@ -26,9 +31,21 @@ export type C6Http = (input: {
   method: string;
   headers: Record<string, string>;
   body?: string;
-  cert: string;
-  key: string;
-}) => Promise<C6RespostaHttp>;
+} & MaterialTlsC6) => Promise<C6RespostaHttp>;
+
+function opcoesTlsC6(params: MaterialTlsC6) {
+  if (params.pfx && params.pfx.byteLength > 0) {
+    return {
+      pfx: params.pfx,
+      ...(params.passphrase ? { passphrase: params.passphrase } : {}),
+    };
+  }
+
+  return {
+    cert: params.cert,
+    key: params.key,
+  };
+}
 
 function jsonSeguro(texto: string): Record<string, unknown> | null {
   if (!texto.trim()) {
@@ -62,9 +79,18 @@ function ehErroMtls(error: unknown) {
 }
 
 export const httpMtlsC6: C6Http = (input) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
+    try {
+      validarMaterialTlsC6(input);
+    } catch (error) {
+      reject(traduzirErroMtlsC6(error));
+      return;
+    }
+
     const url = new URL(input.url);
-    const req = https.request(
+    let req: ReturnType<typeof https.request>;
+    try {
+      req = https.request(
       {
         protocol: url.protocol,
         hostname: url.hostname,
@@ -72,8 +98,7 @@ export const httpMtlsC6: C6Http = (input) =>
         path: `${url.pathname}${url.search}`,
         method: input.method,
         headers: input.headers,
-        cert: input.cert,
-        key: input.key,
+        ...opcoesTlsC6(input),
       },
       (res) => {
         const partes: Buffer[] = [];
@@ -99,7 +124,17 @@ export const httpMtlsC6: C6Http = (input) =>
       });
     });
 
+    } catch (error) {
+      reject(traduzirErroMtlsC6(error));
+      return;
+    }
+
     req.on("error", (error) => {
+      const mensagem = error instanceof Error ? error.message : "";
+      if (/key values mismatch|05800074/i.test(mensagem)) {
+        reject(traduzirErroMtlsC6(error));
+        return;
+      }
       if (ehErroMtls(error)) {
         resolve({
           status: 0,
@@ -252,10 +287,8 @@ export async function autenticarC6(params: {
   ambiente: string;
   clientId: string;
   clientSecret: string;
-  cert: string;
-  key: string;
   http?: C6Http;
-}) {
+} & MaterialTlsC6) {
   const chave = chaveCacheTokenC6({
     empresaId: params.empresaId,
     ambiente: params.ambiente,
@@ -283,6 +316,8 @@ export async function autenticarC6(params: {
     body,
     cert: params.cert,
     key: params.key,
+    pfx: params.pfx,
+    passphrase: params.passphrase,
   });
 
   const auth = interpretarAuthC6(resposta);
@@ -295,14 +330,12 @@ export async function requisicaoC6Autenticada(params: {
   ambiente: string;
   clientId: string;
   clientSecret: string;
-  cert: string;
-  key: string;
   method: "GET" | "PUT" | "PATCH" | "DELETE";
   txid?: string;
   url?: string;
   json?: Record<string, unknown>;
   http?: C6Http;
-}) {
+} & MaterialTlsC6) {
   const token = await autenticarC6(params);
   const body = params.json ? JSON.stringify(params.json) : undefined;
   const headers: Record<string, string> = {
@@ -325,5 +358,7 @@ export async function requisicaoC6Autenticada(params: {
     body,
     cert: params.cert,
     key: params.key,
+    pfx: params.pfx,
+    passphrase: params.passphrase,
   });
 }

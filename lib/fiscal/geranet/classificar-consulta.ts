@@ -1,12 +1,14 @@
 import { documentoFiscalEhPlaceholder, hexDocumentoFiscalPersistivel } from "@/lib/fiscal/documento-fiscal";
 import {
   ehErroTecnicoAmbiguo,
+  ehFalhaComunicacaoInconclusiva,
   ehFalhaNfeConsulta4,
   ehRejeicaoFiscalConclusiva,
   ehRejeicaoFiscalReal,
   emissaoRejeicaoTecnicaRecuperavel,
   MENSAGEM_FALHA_TECNICA_CONSULTA,
   mensagemFalhaConsultaSefaz,
+  mensagemReconciliacaoInconclusiva,
 } from "./classificar-emissao";
 import {
   cstatNormalizado,
@@ -19,6 +21,8 @@ export type SituacaoConsultaFiscal =
   | "cancelada"
   | "processando"
   | "nao_encontrada"
+  | "nao_existe"
+  | "inconclusiva"
   | "falha_consulta";
 
 export type EmissaoParaConsulta = {
@@ -373,6 +377,23 @@ export function classificarLogEmitir(
     return "processando";
   }
 
+  const transporte = ehFalhaComunicacaoInconclusiva({
+    httpStatus: http,
+    mensagem,
+    situacao,
+  });
+  const inexistenciaConfirmada =
+    cstat === "217" ||
+    /n[aã]o consta na base de dados da sefaz/i.test(mensagem);
+
+  if (inexistenciaConfirmada && !transporte) {
+    return "nao_existe";
+  }
+
+  if (transporte) {
+    return "inconclusiva";
+  }
+
   if (
     ehRejeicaoFiscalReal({
       cstat,
@@ -481,6 +502,7 @@ export function decidirStatusLocal(
     geranet_http_status?: number | null;
     erro_comunicacao?: string | null;
     modelo?: string | null;
+    posteriorAutorizada?: boolean;
   }
 ) {
   if (statusAtual === "cancelada") {
@@ -501,6 +523,48 @@ export function decidirStatusLocal(
 
   if (situacao === "rejeitada") {
     return "rejeitada";
+  }
+
+  if (situacao === "nao_existe") {
+    if (
+      statusAtual === "autorizada" ||
+      statusAtual === "cancelada" ||
+      statusAtual === "inutilizada"
+    ) {
+      return statusAtual;
+    }
+
+    if (evidencia?.posteriorAutorizada) {
+      return "aguardando_inutilizacao";
+    }
+
+    return "rejeitada";
+  }
+
+  if (situacao === "inconclusiva") {
+    if (
+      statusAtual === "autorizada" ||
+      statusAtual === "cancelada" ||
+      statusAtual === "inutilizada" ||
+      statusAtual === "aguardando_inutilizacao"
+    ) {
+      return statusAtual;
+    }
+
+    if (
+      statusAtual === "rejeitada" &&
+      !emissaoRejeicaoTecnicaRecuperavel({
+        status: statusAtual,
+        cstat: evidencia?.cstat,
+        motivo: evidencia?.motivo,
+        geranet_http_status: evidencia?.geranet_http_status,
+        erro_comunicacao: evidencia?.erro_comunicacao,
+      })
+    ) {
+      return "rejeitada";
+    }
+
+    return "aguardando_reconciliacao";
   }
 
   if (
@@ -573,6 +637,28 @@ export function decidirStatusLocal(
   return statusAtual;
 }
 
+export function reconciliacaoMaterialmenteIgual(
+  anterior: {
+    status?: string | null;
+    cstat?: string | null;
+    protocolo?: string | null;
+    situacao?: string | null;
+  },
+  proximo: {
+    status?: string | null;
+    cstat?: string | null;
+    protocolo?: string | null;
+    situacao?: string | null;
+  }
+) {
+  return (
+    texto(anterior.status) === texto(proximo.status) &&
+    texto(anterior.cstat) === texto(proximo.cstat) &&
+    somenteDigitos(anterior.protocolo) === somenteDigitos(proximo.protocolo) &&
+    texto(anterior.situacao) === texto(proximo.situacao)
+  );
+}
+
 export function mensagemConsulta(
   modelo: string,
   situacao: SituacaoConsultaFiscal,
@@ -604,8 +690,16 @@ export function mensagemConsulta(
     return "Documento ainda está sendo processado.";
   }
 
-  if (situacao === "nao_encontrada") {
-    return "Documento ainda não localizado na Geranet. Tente consultar novamente antes de retransmitir.";
+  if (situacao === "nao_existe") {
+    return `${nome} não consta na base da SEFAZ. A numeração foi preservada. Nenhuma nova NF-e foi emitida.`;
+  }
+
+  if (
+    situacao === "inconclusiva" ||
+    situacao === "nao_encontrada" ||
+    situacao === "falha_consulta"
+  ) {
+    return mensagemReconciliacaoInconclusiva(modelo);
   }
 
   return (
@@ -621,6 +715,7 @@ export function montarAtualizacaoEmissao({
   xml,
   pdf,
   origem,
+  posteriorAutorizada = false,
 }: {
   emissao: EmissaoParaConsulta;
   situacao: SituacaoConsultaFiscal;
@@ -628,6 +723,7 @@ export function montarAtualizacaoEmissao({
   xml?: string | null;
   pdf?: string | null;
   origem: "manual" | "cron";
+  posteriorAutorizada?: boolean;
 }) {
   const agora = new Date().toISOString();
   const cstat =
@@ -642,6 +738,7 @@ export function montarAtualizacaoEmissao({
     geranet_http_status: log?.http_status ?? emissao.geranet_http_status,
     erro_comunicacao: emissao.erro_comunicacao,
     modelo: emissao.modelo,
+    posteriorAutorizada,
   };
   const statusLocal = decidirStatusLocal(
     emissao.status,
@@ -684,12 +781,10 @@ export function montarAtualizacaoEmissao({
   const historico = [...historicoAnterior];
   const classificacaoAnterior = texto(respostaAnterior.classificacao).toLowerCase();
   const situacaoRemotaAnterior = texto(respostaAnterior.situacao_remota).toLowerCase();
-  const mensagemSituacao = mensagemConsulta(
-    emissao.modelo,
-    situacao,
-    cstat,
-    motivo
-  );
+  const mensagemSituacao =
+    situacao === "nao_existe" && posteriorAutorizada
+      ? `${emissao.modelo === "65" ? "NFC-e" : "NF-e"} não consta na base da SEFAZ. Há numeração posterior já autorizada. Inutilize esta numeração; nenhuma nova NF-e foi emitida.`
+      : mensagemConsulta(emissao.modelo, situacao, cstat, motivo);
 
   if (
     emissao.status === "rejeitada" &&
@@ -718,10 +813,19 @@ export function montarAtualizacaoEmissao({
     historico,
   };
 
-  if (statusLocal === "autorizada") {
+  if (situacao === "nao_existe") {
+    respostaResumo.classificacao = "inexistencia_confirmada";
+    respostaResumo.origem_classificacao = "consulta_geranet";
+    respostaResumo.situacao_remota = "nao_existe";
+    respostaResumo.inexistencia_confirmada = true;
+    respostaResumo.quebra_sequencia = posteriorAutorizada;
+    respostaResumo.mensagem = mensagemSituacao;
+  } else if (statusLocal === "autorizada") {
     respostaResumo.classificacao = "autorizada";
     respostaResumo.origem_classificacao = "consulta_geranet";
     respostaResumo.situacao_remota = "autorizada";
+    respostaResumo.inexistencia_confirmada = false;
+    respostaResumo.quebra_sequencia = false;
   } else if (statusLocal === "rejeitada") {
     respostaResumo.classificacao = "rejeitada";
     respostaResumo.origem_classificacao = "consulta_geranet";
@@ -730,6 +834,24 @@ export function montarAtualizacaoEmissao({
     respostaResumo.classificacao = "cancelada";
     respostaResumo.origem_classificacao = "consulta_geranet";
     respostaResumo.situacao_remota = "cancelada";
+  } else if (statusLocal === "aguardando_inutilizacao") {
+    respostaResumo.classificacao = "inexistencia_confirmada";
+    respostaResumo.origem_classificacao = "consulta_geranet";
+    respostaResumo.situacao_remota = "nao_existe";
+    respostaResumo.inexistencia_confirmada = true;
+    respostaResumo.quebra_sequencia = posteriorAutorizada;
+    respostaResumo.mensagem = mensagemSituacao;
+  } else if (
+    situacao === "inconclusiva" ||
+    situacao === "falha_consulta" ||
+    situacao === "nao_encontrada"
+  ) {
+    respostaResumo.classificacao = "ambigua";
+    respostaResumo.origem_classificacao = "consulta_geranet";
+    respostaResumo.situacao_remota = "inconclusiva";
+    respostaResumo.inexistencia_confirmada = false;
+    respostaResumo.quebra_sequencia = posteriorAutorizada;
+    respostaResumo.mensagem = mensagemSituacao;
   } else if (statusLocal === "aguardando_reconciliacao") {
     if (
       !classificacaoAnterior ||
@@ -766,12 +888,15 @@ export function montarAtualizacaoEmissao({
         ? motivo || "Documento rejeitado."
         : statusLocal === "cancelada"
           ? motivo || "Documento cancelado."
-          : statusLocal === "aguardando_reconciliacao" && processamentoRemoto
+          : statusLocal === "aguardando_inutilizacao"
             ? mensagemSituacao
             : statusLocal === "aguardando_reconciliacao" &&
-                (situacao === "falha_consulta" || situacao === "nao_encontrada") &&
-                texto(emissao.motivo)
-              ? texto(emissao.motivo)
+                (situacao === "inconclusiva" ||
+                  situacao === "falha_consulta" ||
+                  situacao === "nao_encontrada")
+              ? mensagemSituacao
+          : statusLocal === "aguardando_reconciliacao" && processamentoRemoto
+            ? mensagemSituacao
               : texto(emissao.motivo) || motivo || mensagemSituacao;
 
   const patch: Record<string, unknown> = {
@@ -798,18 +923,24 @@ export function montarAtualizacaoEmissao({
   }
 
   if (statusLocal === "autorizada") {
-    if (chave) {
+    const chaveAtual = somenteDigitos(emissao.chave_acesso);
+    if (chave && (chaveAtual.length !== 44 || chaveAtual === chave)) {
       patch.chave_acesso = chave;
     }
 
-    if (protocolo) {
+    const protocoloAtual = somenteDigitos(emissao.protocolo);
+    if (protocolo && (!protocoloAtual || protocoloAtual === protocolo)) {
       patch.protocolo = protocolo;
     }
 
     patch.erro_comunicacao = null;
 
     if (!emissao.autorizada_at) {
-      patch.autorizada_at = agora;
+      const instanteLog = texto(log?.criado_em);
+      patch.autorizada_at =
+        instanteLog && !Number.isNaN(Date.parse(instanteLog))
+          ? new Date(instanteLog).toISOString()
+          : agora;
     }
 
     if (emissao.tipo_emissao === "contingencia_offline") {
@@ -832,26 +963,34 @@ export function montarAtualizacaoEmissao({
     }
   }
 
-  if (statusLocal === "rejeitada") {
+  if (statusLocal === "rejeitada" || statusLocal === "aguardando_inutilizacao") {
     patch.erro_comunicacao = null;
   }
 
   if (
     situacao === "processando" ||
     situacao === "nao_encontrada" ||
-    situacao === "falha_consulta"
+    situacao === "falha_consulta" ||
+    situacao === "inconclusiva"
   ) {
     patch.erro_comunicacao =
-      situacao === "falha_consulta"
-        ? motivo || "Falha ao consultar logs da Geranet."
-        : null;
+      motivo ||
+      texto(emissao.erro_comunicacao) ||
+      (situacao === "falha_consulta"
+        ? "Falha ao consultar logs da Geranet."
+        : null);
   }
 
-  if (xmlFinal && !texto(emissao.xml_hex)) {
+  const podeGravarDocumento =
+    statusLocal === "autorizada" ||
+    statusLocal === "cancelada" ||
+    statusLocal === "rejeitada";
+
+  if (podeGravarDocumento && xmlFinal && !texto(emissao.xml_hex)) {
     patch.xml_hex = xmlFinal;
   }
 
-  if (pdfFinal && !texto(emissao.pdf_hex)) {
+  if (podeGravarDocumento && pdfFinal && !texto(emissao.pdf_hex)) {
     patch.pdf_hex = pdfFinal;
   }
 

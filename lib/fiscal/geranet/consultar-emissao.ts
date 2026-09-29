@@ -250,6 +250,7 @@ function escolherMelhorLog(
     if (situacao === "autorizada") pontos += 50;
     if (situacao === "cancelada") pontos += 40;
     if (situacao === "rejeitada") pontos += 30;
+    if (situacao === "nao_existe") pontos += 20;
     if (somenteDigitos(log.chave).length === 44) pontos += 10;
     if (texto(log.protocolo)) pontos += 5;
     if (texto(log.codigo_numerico) === texto(emissao.codigo_numerico)) {

@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { renderizarQrBrCode } from "../brcode/qr";
 import {
   carregarIntegracaoPix,
+  carregarSegredosProvedor,
   ErroPixGeranet,
   montarCredenciaisGeranetPix,
   resolverEmpresaPix,
@@ -27,12 +28,14 @@ import type { AmbientePixGeranet, DevedorPix, StatusCobrancaPix } from "../types
 import {
   autenticarC6,
   lancarSeRespostaC6Falhou,
-  pemDeHexadecimal,
   requisicaoC6Autenticada,
   type C6Http,
   type C6RespostaHttp,
 } from "./http";
+import { resolverMaterialMtlsC6 } from "./material-mtls";
 import {
+  AMBIENTE_C6_PRODUCAO,
+  AMBIENTE_C6_SANDBOX,
   CODIGO_PROVEDOR_C6,
   EXPIRACAO_COBRANCA_C6_SEGUNDOS,
   MENSAGEM_C6_AGUARDANDO,
@@ -74,6 +77,13 @@ function decimalPix(valor: number) {
 function erroAmigavel(error: unknown): never {
   if (error instanceof ErroPixGeranet) {
     throw error;
+  }
+
+  const mensagem = error instanceof Error ? error.message : "";
+  if (/key values mismatch|05800074/i.test(mensagem)) {
+    throw new ErroPixGeranet(
+      "O certificado e a chave privada informados não pertencem ao mesmo par."
+    );
   }
 
   throw new ErroPixGeranet(
@@ -214,20 +224,27 @@ async function credenciaisMtlsC6(params: {
   const clientId = String(credenciais.clienteId ?? "").trim();
   const clientSecret = String(credenciais.clienteSegredo ?? "").trim();
   const chavePix = String(credenciais.chavePix ?? "").trim();
-  const cert = pemDeHexadecimal(
-    String(credenciais.certificadoPemHexadecimal ?? ""),
-    "Certificado C6"
-  );
-  const key = pemDeHexadecimal(
-    String(credenciais.chavePrivadaPemHexadecimal ?? ""),
-    "Chave privada C6"
-  );
+  const sandbox =
+    params.ambiente === AMBIENTE_C6_PRODUCAO
+      ? await carregarSegredosProvedor({
+          empresaId: params.empresaId,
+          provedor: CODIGO_PROVEDOR_C6,
+          ambiente: AMBIENTE_C6_SANDBOX,
+        })
+      : {};
+  const tls = resolverMaterialMtlsC6({
+    certificado: String(credenciais.certificadoPemHexadecimal ?? ""),
+    chavePrivada: String(credenciais.chavePrivadaPemHexadecimal ?? ""),
+    ambiente: params.ambiente,
+    certificadoSandbox: String(sandbox.certificadoPemHexadecimal ?? ""),
+    chaveSandbox: String(sandbox.chavePrivadaPemHexadecimal ?? ""),
+  });
 
   if (!clientId || !clientSecret || !chavePix) {
     throw new ErroPixGeranet(MENSAGEM_C6_NAO_CONFIGURADO);
   }
 
-  return { clientId, clientSecret, chavePix, cert, key };
+  return { clientId, clientSecret, chavePix, ...tls };
 }
 
 async function validarPreRequisitosC6(empresaId: string) {
@@ -492,6 +509,8 @@ export async function testarConexaoPixC6(
     clientSecret: pre.clientSecret,
     cert: pre.cert,
     key: pre.key,
+    pfx: pre.pfx,
+    passphrase: pre.passphrase,
     http,
   });
 

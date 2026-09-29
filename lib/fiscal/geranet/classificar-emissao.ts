@@ -62,7 +62,7 @@ const CSTAT_CANCELADA = new Set(["101", "135", "151", "155"]);
 const CSTAT_PROCESSANDO = new Set(["103", "104", "105", "204"]);
 
 const ERRO_TECNICO =
-  /nfeconsulta4|nferetautorizacao|network subsystem|timeout|etimedout|econnreset|econnrefused|socket|connection reset|connection refused|erro interno:\s*-2|http\s*50[0-4]|erro http:\s*50[0-4]|network is unreachable|subsystem is unusable/i;
+  /nfeconsulta4|nfeautorizacao4|nferetautorizacao|host not found|getaddrinfo|enotfound|eai_again|network subsystem|timeout|etimedout|econnreset|econnrefused|socket|connection reset|connection refused|erro interno:\s*-2|http\s*50[0-4]|erro http:\s*50[0-4]|network is unreachable|subsystem is unusable|bad gateway|service unavailable|gateway timeout/i;
 
 const REJEICAO_FISCAL_MENSAGEM =
   /rejei[cç][aã]o(?:\s+\d{3})?\s*:/i;
@@ -116,6 +116,31 @@ export function ehRejeicaoFiscalConclusiva(
   }
 
   return REJEICAO_FISCAL_MENSAGEM.test(textoEmissao(evidencia.mensagem));
+}
+
+/**
+ * Falha de transporte/DNS/HTTP 5xx na ida à SEFAZ ou à Geranet.
+ * Não prova autorização nem inexistência da chave.
+ * Não usa ehRejeicaoFiscalReal: um cStat citado junto de "Host not found"
+ * continua inconclusivo.
+ */
+export function ehFalhaComunicacaoInconclusiva(
+  evidencia: EvidenciaClassificacaoEmissao
+) {
+  const http = evidencia.httpStatus;
+  if (http != null && (Number(http) >= 500 || Number(http) === 0)) {
+    return true;
+  }
+
+  const mensagem = `${evidencia.mensagem ?? ""} ${evidencia.situacao ?? ""}`;
+  return ERRO_TECNICO.test(mensagem);
+}
+
+export function mensagemReconciliacaoInconclusiva(
+  modelo?: string | number | null
+) {
+  const nome = textoEmissao(modelo) === "65" ? "NFC-e" : "NF-e";
+  return `Ainda não foi possível confirmar a situação fiscal desta ${nome}. A numeração continua preservada. Tente reconciliar novamente.`;
 }
 
 export function ehErroTecnicoAmbiguo(

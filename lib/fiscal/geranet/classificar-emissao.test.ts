@@ -515,7 +515,7 @@ test("mensagem técnica sem cStat nunca é rejeição fiscal real", () => {
       }),
       emissao()
     ),
-    "processando"
+    "inconclusiva"
   );
   assert.equal(
     classificarLogEmitir(
@@ -878,7 +878,8 @@ test("HTTP 422 + cStat 539 é rejeição determinística, não processando e nã
     join(process.cwd(), "lib/fiscal/reconciliar-emissao.ts"),
     "utf8"
   );
-  assert.match(uiReconciliar, /Reconciliar agora/);
+  assert.match(uiReconciliar, /Nenhuma nova NF-e será emitida/);
+  assert.match(uiReconciliar, />\s*\{enviando \? "Consultando\.\.\." : "Reconciliar"\}/);
   assert.doesNotMatch(uiReconciliar, /Acompanhar reconciliação/);
   assert.doesNotMatch(reconciliarEmissao, /\/api\/v1\/nfe\/emitir/);
   assert.match(reconciliarEmissao, /consultarEmissaoGeranet/);

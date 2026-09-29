@@ -9,11 +9,13 @@ import {
   acoesEmissaoFiscalNfce65,
 } from "@/lib/fiscal/geranet/classificar-emissao";
 import { classificacaoResumoDaEmissao } from "@/lib/fiscal/estado-operacional-fiscal";
+import { mensagemReconciliacaoInconclusiva } from "@/lib/fiscal/geranet/classificar-emissao";
 import {
   EmissaoParaConsulta,
   mensagemConsulta,
   montarAtualizacaoEmissao,
   objeto,
+  reconciliacaoMaterialmenteIgual,
   sanitizarConsultaGeranet,
   texto,
 } from "@/lib/fiscal/geranet/classificar-consulta";
@@ -111,10 +113,26 @@ export async function reconciliarEmissaoFiscal({
     );
   }
 
-  if (
-    texto(emissao.status) === "aguardando_inutilizacao" ||
-    texto(emissao.status) === "inutilizada"
-  ) {
+  if (texto(emissao.status) === "inutilizada") {
+    return {
+      ok: true,
+      emissao_id: emissaoId,
+      modelo: texto(emissao.modelo),
+      situacao: "inutilizada",
+      status_anterior: "inutilizada",
+      status: "inutilizada",
+      mensagem:
+        "Numeração já inutilizada. Nenhuma nova inutilização foi enviada.",
+      cstat: texto(emissao.cstat) || null,
+      chave: texto(emissao.chave_acesso) || null,
+      protocolo: texto(emissao.protocolo) || null,
+      reenviou: false,
+      podeConsultarNovamente: false,
+      podeRetransmitir: false,
+    };
+  }
+
+  if (texto(emissao.status) === "aguardando_inutilizacao") {
     return reconciliarInutilizacaoFiscal({
       admin,
       empresaId,
@@ -183,6 +201,20 @@ export async function reconciliarEmissaoFiscal({
     emissao: emissaoConsulta,
   });
 
+  const { data: posterior } = await admin
+    .from("fiscal_emissoes")
+    .select("id")
+    .eq("empresa_id", empresaId)
+    .eq("modelo", texto(emissao.modelo))
+    .eq("serie", emissao.serie)
+    .eq("ambiente", emissao.ambiente)
+    .eq("status", "autorizada")
+    .gt("numero", emissao.numero)
+    .neq("id", emissaoId)
+    .limit(1);
+
+  const posteriorAutorizada = (posterior?.length ?? 0) > 0;
+
   const atualizacao = montarAtualizacaoEmissao({
     emissao: emissaoConsulta,
     situacao: consulta.situacao,
@@ -190,6 +222,7 @@ export async function reconciliarEmissaoFiscal({
     xml: consulta.xml,
     pdf: consulta.pdf,
     origem,
+    posteriorAutorizada,
   });
 
   if (
@@ -200,11 +233,19 @@ export async function reconciliarEmissaoFiscal({
     atualizacao.patch.chave_acesso = chaveXml;
   }
 
-  const { error: updateError } = await admin
+  let persistencia = admin
     .from("fiscal_emissoes")
     .update(atualizacao.patch)
     .eq("id", emissaoId)
     .eq("empresa_id", empresaId);
+
+  if (atualizacao.status_local !== statusAnterior) {
+    persistencia = persistencia.eq("status", statusAnterior);
+  }
+
+  const { data: linhasAtualizadas, error: updateError } = await persistencia.select(
+    "id"
+  );
 
   if (updateError) {
     throw new Error(
@@ -212,9 +253,38 @@ export async function reconciliarEmissaoFiscal({
     );
   }
 
+  if (
+    atualizacao.status_local !== statusAnterior &&
+    (linhasAtualizadas?.length ?? 0) === 0
+  ) {
+    const { data: vigente } = await admin
+      .from("fiscal_emissoes")
+      .select("status, cstat, protocolo, chave_acesso, motivo")
+      .eq("id", emissaoId)
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
+
+    return {
+      ok: true,
+      emissao_id: emissaoId,
+      modelo: texto(emissao.modelo),
+      situacao: "confirmada",
+      status_anterior: statusAnterior,
+      status: texto(vigente?.status) || statusAnterior,
+      mensagem:
+        "A reconciliação já foi aplicada. O estado atual foi confirmado, sem nova emissão.",
+      cstat: texto(vigente?.cstat) || atualizacao.cstat,
+      chave: texto(vigente?.chave_acesso) || atualizacao.chave,
+      protocolo: texto(vigente?.protocolo) || atualizacao.protocolo,
+      reenviou: false,
+      podeConsultarNovamente: texto(vigente?.status) === "aguardando_reconciliacao",
+      podeRetransmitir: false,
+    };
+  }
+
   const { data: eventosAnteriores } = await admin
     .from("fiscal_emissao_eventos")
-    .select("sequencia")
+    .select("sequencia, status, cstat, protocolo, payload_resumo")
     .eq("empresa_id", empresaId)
     .eq("emissao_id", emissaoId)
     .eq("tipo", "consulta_status")
@@ -230,51 +300,82 @@ export async function reconciliarEmissaoFiscal({
     .limit(1)
     .maybeSingle();
 
-  const proximaSequencia =
-    Number(eventosAnteriores?.[0]?.sequencia ?? 0) + 1;
-
-  const agora = new Date().toISOString();
-
-  const { error: eventoError } = await admin
-    .from("fiscal_emissao_eventos")
-    .insert({
-      empresa_id: empresaId,
-      emissao_id: emissaoId,
-      tipo: "consulta_status",
-      status:
-        consulta.situacao === "falha_consulta" ? "rejeitado" : "sucesso",
-      sequencia: proximaSequencia,
-      tentativas: 1,
-      cstat: atualizacao.cstat,
-      protocolo: atualizacao.protocolo,
-      motivo: atualizacao.mensagem,
-      payload_resumo: {
-        origem,
-        estado_anterior: statusAnterior,
-        estado_encontrado: consulta.situacao,
-        modelo: emissao.modelo,
-        serie: emissao.serie,
-        numero: String(emissao.numero),
-        geranet_log_id: consulta.log?.id ?? null,
-        tentativa_id: tentativaVigente?.id ?? null,
-        tentativa: tentativaVigente?.tentativa ?? null,
-        classificacao_inicial_tentativa:
-          tentativaVigente?.classificacao_inicial ?? null,
+  const ultimoEvento = eventosAnteriores?.[0];
+  const payloadUltimo = objeto(ultimoEvento?.payload_resumo);
+  const reconciliacaoRepetida =
+    texto(payloadUltimo.acao) === "reconciliar_nfe" &&
+    statusAnterior === atualizacao.status_local &&
+    reconciliacaoMaterialmenteIgual(
+      {
+        status: statusAnterior,
+        cstat: texto(ultimoEvento?.cstat),
+        protocolo: texto(ultimoEvento?.protocolo),
+        situacao: texto(payloadUltimo.estado_encontrado),
       },
-      resposta_resumo: sanitizarConsultaGeranet({
-        ...consulta.resumo_seguro,
-        snapshot: atualizacao.snapshot,
-      }),
-      enviado_at: agora,
-      respondido_at: agora,
-      concluido_at: agora,
-    });
+      {
+        status: atualizacao.status_local,
+        cstat: atualizacao.cstat,
+        protocolo: atualizacao.protocolo,
+        situacao: consulta.situacao,
+      }
+    );
 
-  if (eventoError) {
-    atualizacao.patch.resposta_resumo = {
-      ...objeto(atualizacao.patch.resposta_resumo),
-      historico_evento_erro: eventoError.message,
-    };
+  if (!reconciliacaoRepetida) {
+    const proximaSequencia = Number(ultimoEvento?.sequencia ?? 0) + 1;
+    const agora = new Date().toISOString();
+    const consultaInconclusiva =
+      consulta.situacao === "falha_consulta" ||
+      consulta.situacao === "inconclusiva" ||
+      consulta.situacao === "nao_encontrada";
+
+    const { error: eventoError } = await admin
+      .from("fiscal_emissao_eventos")
+      .insert({
+        empresa_id: empresaId,
+        emissao_id: emissaoId,
+        tipo: "consulta_status",
+        status: consultaInconclusiva ? "aguardando_reconciliacao" : "sucesso",
+        sequencia: proximaSequencia,
+        tentativas: 1,
+        cstat: atualizacao.cstat,
+        protocolo: atualizacao.protocolo,
+        motivo: atualizacao.mensagem,
+        payload_resumo: {
+          acao: "reconciliar_nfe",
+          origem,
+          status_anterior: statusAnterior,
+          status_retornado: atualizacao.status_local,
+          estado_anterior: statusAnterior,
+          estado_encontrado: consulta.situacao,
+          cstat: atualizacao.cstat,
+          xmotivo: atualizacao.motivo,
+          protocolo: atualizacao.protocolo,
+          erro_tecnico: consulta.erro ?? null,
+          posterior_autorizada: posteriorAutorizada,
+          modelo: emissao.modelo,
+          serie: emissao.serie,
+          numero: String(emissao.numero),
+          geranet_log_id: consulta.log?.id ?? null,
+          tentativa_id: tentativaVigente?.id ?? null,
+          tentativa: tentativaVigente?.tentativa ?? null,
+          classificacao_inicial_tentativa:
+            tentativaVigente?.classificacao_inicial ?? null,
+        },
+        resposta_resumo: sanitizarConsultaGeranet({
+          ...consulta.resumo_seguro,
+          snapshot: atualizacao.snapshot,
+        }),
+        enviado_at: agora,
+        respondido_at: agora,
+        concluido_at: agora,
+      });
+
+    if (eventoError) {
+      atualizacao.patch.resposta_resumo = {
+        ...objeto(atualizacao.patch.resposta_resumo),
+        historico_evento_erro: eventoError.message,
+      };
+    }
   }
 
   return {
@@ -285,8 +386,10 @@ export async function reconciliarEmissaoFiscal({
     status_anterior: statusAnterior,
     status: atualizacao.status_local,
     mensagem:
-      consulta.erro && consulta.situacao === "falha_consulta"
-        ? consulta.erro
+      consulta.situacao === "inconclusiva" ||
+      consulta.situacao === "nao_encontrada" ||
+      consulta.situacao === "falha_consulta"
+        ? mensagemReconciliacaoInconclusiva(texto(emissao.modelo))
         : atualizacao.mensagem ||
           mensagemConsulta(
             texto(emissao.modelo),

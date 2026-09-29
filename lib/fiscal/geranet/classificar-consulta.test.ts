@@ -157,10 +157,13 @@ test("D. documento não encontrado permanece seguro, sem emitir", () => {
 
   assert.equal(resultado.status_local, "aguardando_reconciliacao");
   assert.equal(resultado.patch.status, "aguardando_reconciliacao");
-  assert.equal(
+  assert.match(
     resultado.mensagem,
-    "Documento ainda não localizado na Geranet. Tente consultar novamente antes de retransmitir."
+    /Ainda não foi possível confirmar a situação fiscal desta NFC-e/
   );
+  assert.match(resultado.mensagem, /A numeração continua preservada/);
+  assert.match(resultado.mensagem, /Tente reconciliar novamente/);
+  assert.doesNotMatch(resultado.mensagem, /retransmitir/i);
   assert.equal(
     (resultado.patch.resposta_resumo as { consulta: { origem: string } })
       .consulta.origem,
@@ -194,10 +197,15 @@ test("NfeConsulta4 HTTP 500 permanece em reconciliação e não autoriza retrans
     origem: "manual",
   });
 
-  assert.equal(situacao, "processando");
+  assert.equal(situacao, "inconclusiva");
   assert.equal(resultado.status_local, "aguardando_reconciliacao");
-  assert.match(resultado.mensagem, /Não foi possível consultar a situação da NFC-e na SEFAZ-MT/);
-  assert.match(resultado.mensagem, /Tente consultar novamente antes de retransmitir/);
+  assert.match(
+    resultado.mensagem,
+    /Ainda não foi possível confirmar a situação fiscal desta NFC-e/
+  );
+  assert.doesNotMatch(resultado.mensagem, /retransmitir/i);
+  assert.equal(resultado.patch.numero, undefined);
+  assert.equal(resultado.patch.serie, undefined);
 });
 
 test("E. consultar nota já autorizada não altera status nem cria autorização nova", () => {

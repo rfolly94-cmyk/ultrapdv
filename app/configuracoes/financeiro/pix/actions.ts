@@ -6,7 +6,7 @@ import { gerarPixEstatico } from "@/lib/pagamentos/pix/brcode";
 import { gerarTxidPixLocal } from "@/lib/pagamentos/pix/brcode/txid";
 import { metaArquivoFormData } from "@/lib/pagamentos/pix/arquivo-formdata";
 import { coletarNovosSegredosDoFormulario } from "@/lib/pagamentos/pix/coletar-segredos";
-import { exigirAdministradorPix } from "@/lib/pagamentos/pix/contexto";
+import { exigirAdministradorPix, ErroPixGeranet } from "@/lib/pagamentos/pix/contexto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exigirPixIntegradoEmpresa } from "@/lib/pagamentos/pix/acesso-operacao";
 import { ErroEntitlement } from "@/lib/plataforma/entitlements/erro";
@@ -39,6 +39,10 @@ import {
   registrarWebhookPixC6,
   removerWebhookPixC6,
 } from "@/lib/pagamentos/pix/c6/adapter";
+import {
+  cofreC6IncluiChavePrivada,
+  resolverMaterialMtlsC6,
+} from "@/lib/pagamentos/pix/c6/material-mtls";
 
 function texto(valor: FormDataEntryValue | null) {
   return String(valor ?? "").trim();
@@ -294,6 +298,87 @@ export async function salvarConfiguracaoPix(formData: FormData) {
       coletados.diagnosticoArquivos.find(
         (item) => item.campo === "chavePrivadaPemHexadecimal"
       )?.motivoNaoIncluido ?? null;
+    if (!coletados.erro && provedor === "c6bank") {
+      const admin = createAdminClient();
+      const { data: lidosAntes } = await admin.rpc(
+        "obter_segredos_bancarios_provedor",
+        {
+          p_empresa_id: empresaId,
+          p_provedor: provedor,
+          p_ambiente: ambiente,
+        }
+      );
+      const existentes =
+        lidosAntes && typeof lidosAntes === "object"
+          ? (lidosAntes as Record<string, unknown>)
+          : {};
+      const sandbox =
+        ambiente === "1"
+          ? await admin.rpc("obter_segredos_bancarios_provedor", {
+              p_empresa_id: empresaId,
+              p_provedor: provedor,
+              p_ambiente: "2",
+            })
+          : { data: null };
+      const sandboxDados =
+        sandbox.data && typeof sandbox.data === "object"
+          ? (sandbox.data as Record<string, unknown>)
+          : {};
+      const certificadoSalvar = String(
+        coletados.novos.certificadoPemHexadecimal ??
+          existentes.certificadoPemHexadecimal ??
+          ""
+      );
+      const chaveSalvar = String(
+        coletados.novos.chavePrivadaPemHexadecimal ??
+          existentes.chavePrivadaPemHexadecimal ??
+          ""
+      );
+      if (certificadoSalvar || chaveSalvar) {
+        try {
+          resolverMaterialMtlsC6({
+            certificado: certificadoSalvar,
+            chavePrivada: chaveSalvar,
+            ambiente,
+            certificadoSandbox: String(
+              sandboxDados.certificadoPemHexadecimal ?? ""
+            ),
+            chaveSandbox: String(sandboxDados.chavePrivadaPemHexadecimal ?? ""),
+          });
+        } catch (error) {
+          if (error instanceof ErroPixGeranet) {
+            return respostaPublicaSalvarPixC6({
+              ok: false,
+              erro: error.message,
+              certificadoConfigurado: false,
+              chavePrivadaConfigurada: false,
+              diagnostico: {
+                certificado: diagnosticoSeguroArquivoC6({
+                  recebido: metaCertificado.existe,
+                  size: metaCertificado.size,
+                  temArrayBuffer: metaCertificado.temArrayBuffer,
+                  incluidoEmNovos: incluidoCertificado,
+                  rpcExecutada: false,
+                  readBackEncontrou: false,
+                  motivoNaoIncluido: motivoCertificado,
+                }),
+                chave: diagnosticoSeguroArquivoC6({
+                  recebido: metaChave.existe,
+                  size: metaChave.size,
+                  temArrayBuffer: metaChave.temArrayBuffer,
+                  incluidoEmNovos: incluidoChave,
+                  rpcExecutada: false,
+                  readBackEncontrou: false,
+                  motivoNaoIncluido: motivoChave,
+                }),
+              },
+            });
+          }
+          throw error;
+        }
+      }
+    }
+
     if (coletados.erro) {
       if (provedor === "c6bank") {
         return respostaPublicaSalvarPixC6({
@@ -367,6 +452,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
   }
 
   let readBack = flagsExistenciaCofreC6(null);
+  let chaveNoCertificado = false;
   if (provedor === "c6bank") {
     const admin = createAdminClient();
     const { data: lidos } = await admin.rpc(
@@ -377,10 +463,14 @@ export async function salvarConfiguracaoPix(formData: FormData) {
         p_ambiente: ambiente,
       }
     );
-    readBack = flagsExistenciaCofreC6(
+    const cofre =
       lidos && typeof lidos === "object"
         ? (lidos as Record<string, unknown>)
-        : {}
+        : {};
+    readBack = flagsExistenciaCofreC6(cofre);
+    chaveNoCertificado = cofreC6IncluiChavePrivada(
+      cofre.certificadoPemHexadecimal,
+      cofre.chavePrivadaPemHexadecimal
     );
     flagsAtuais.clienteId = readBack.clienteId || Boolean(flagsAtuais.clienteId);
     flagsAtuais.clienteSegredo =
@@ -388,7 +478,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
     flagsAtuais.certificadoPemHexadecimal =
       readBack.certificadoPemHexadecimal;
     flagsAtuais.chavePrivadaPemHexadecimal =
-      readBack.chavePrivadaPemHexadecimal;
+      readBack.chavePrivadaPemHexadecimal || chaveNoCertificado;
     flagsAtuais.chavePix = readBack.chavePix;
   }
 
@@ -408,7 +498,8 @@ export async function salvarConfiguracaoPix(formData: FormData) {
       temArrayBuffer: metaChave.temArrayBuffer,
       incluidoEmNovos: incluidoChave,
       rpcExecutada: rpcChave.executada,
-      readBackEncontrou: readBack.chavePrivadaPemHexadecimal,
+      readBackEncontrou:
+        readBack.chavePrivadaPemHexadecimal || chaveNoCertificado,
       motivoNaoIncluido: motivoChave,
     }),
   };
@@ -431,7 +522,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
   const certificadoConfigurado =
     provedor === "c6bank"
       ? readBack.certificadoPemHexadecimal &&
-        readBack.chavePrivadaPemHexadecimal
+        (readBack.chavePrivadaPemHexadecimal || chaveNoCertificado)
       : arquivos.length > 0 &&
         arquivos.every((campo) => flagsFinais[campo.chave]);
 
@@ -462,12 +553,15 @@ export async function salvarConfiguracaoPix(formData: FormData) {
   }
 
   if (provedor === "c6bank") {
-    const erroCofre = erroReadBackC6(readBack);
+    const erroCofre = erroReadBackC6(readBack, {
+      chavePresenteNoCertificado: chaveNoCertificado,
+    });
     const publico = respostaPublicaSalvarPixC6({
       ok: !erroCofre,
       erro: erroCofre ?? undefined,
       certificadoConfigurado: readBack.certificadoPemHexadecimal,
-      chavePrivadaConfigurada: readBack.chavePrivadaPemHexadecimal,
+      chavePrivadaConfigurada:
+        readBack.chavePrivadaPemHexadecimal || chaveNoCertificado,
       diagnostico: diagnosticoC6,
     });
     if (!publico.ok) {

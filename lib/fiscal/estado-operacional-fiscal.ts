@@ -3,6 +3,7 @@ import {
   evidenciaConsultaSefazFalhou,
   evidenciaDaEmissaoPersistida,
   emissaoRejeicaoTecnicaRecuperavel,
+  mensagemReconciliacaoInconclusiva,
   nfce65DeveApenasReconciliar,
   textoEmissao,
 } from "@/lib/fiscal/geranet/classificar-emissao";
@@ -149,10 +150,39 @@ function evidenciaProcessamentoRemotoPersistido(
   );
 }
 
+function resumoEmissao(emissao: EntradaEstadoOperacionalFiscal) {
+  return emissao.resposta_resumo && typeof emissao.resposta_resumo === "object"
+    ? (emissao.resposta_resumo as Record<string, unknown>)
+    : null;
+}
+
+export function quebraSequenciaBloqueiaRetransmissao(
+  emissao: EntradaEstadoOperacionalFiscal
+) {
+  const resumo = resumoEmissao(emissao);
+  if (resumo?.quebra_sequencia !== true) {
+    return false;
+  }
+
+  const status = textoEmissao(emissao.status);
+  return (
+    status !== "autorizada" &&
+    status !== "cancelada" &&
+    status !== "inutilizada"
+  );
+}
+
 function descricaoEstadoAmbiguo(
   emissao: EntradaEstadoOperacionalFiscal,
   ultimaTentativa?: TentativaFiscalParaEstado | null
 ) {
+  const situacaoRemota = textoEmissao(
+    resumoEmissao(emissao)?.situacao_remota
+  ).toLowerCase();
+  if (situacaoRemota === "inconclusiva") {
+    return mensagemReconciliacaoInconclusiva(emissao.modelo);
+  }
+
   if (evidenciaProcessamentoRemotoPersistido(emissao, ultimaTentativa)) {
     return "Documento ainda está sendo processado pela Geranet. Não retransmita este documento até que a situação fiscal seja confirmada.";
   }
@@ -439,6 +469,24 @@ export function resolverEstadoOperacionalFiscal(
       }))
   ) {
     if (status === "rejeitada" || cstatConclusivo) {
+      if (quebraSequenciaBloqueiaRetransmissao(emissao)) {
+        return montarEstado({
+          estado: "ambigua",
+          caso: "aguardando_reconciliacao",
+          documento,
+          titulo: "Emissão pendente de reconciliação",
+          descricao:
+            "Há NF-e posterior já autorizada. Não retransmita esta numeração enquanto a situação fiscal não estiver confirmada.",
+          podeRetry: false,
+          podeReconciliar: true,
+          podeConsultar: true,
+          podeEditarFiscal: false,
+          documentoFiscalAmbiguo: true,
+          documentoFiscalSensivel: true,
+          acaoPrincipal: "reconciliar",
+        });
+      }
+
       return montarEstado({
         estado: "rejeitada_sefaz",
         caso: "rejeitada",
@@ -497,6 +545,24 @@ export function resolverEstadoOperacionalFiscal(
         titulo: "Emissão pendente de reconciliação",
         descricao:
           "Não retransmita este documento até confirmar a situação fiscal.",
+        podeRetry: false,
+        podeReconciliar: true,
+        podeConsultar: true,
+        podeEditarFiscal: false,
+        documentoFiscalAmbiguo: true,
+        documentoFiscalSensivel: true,
+        acaoPrincipal: "reconciliar",
+      });
+    }
+
+    if (quebraSequenciaBloqueiaRetransmissao(emissao)) {
+      return montarEstado({
+        estado: "ambigua",
+        caso: "aguardando_reconciliacao",
+        documento,
+        titulo: "Emissão pendente de reconciliação",
+        descricao:
+          "Há NF-e posterior já autorizada. Não retransmita esta numeração enquanto a situação fiscal não estiver confirmada.",
         podeRetry: false,
         podeReconciliar: true,
         podeConsultar: true,

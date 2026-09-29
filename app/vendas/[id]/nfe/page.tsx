@@ -8,6 +8,7 @@ import {
 import {
   EmitirNfeVendaButton,
 } from "@/components/vendas/emitir-nfe-venda-button";
+import { InutilizarNumeracaoFiscal } from "@/components/vendas/inutilizar-numeracao-fiscal";
 import { ReconciliarEmissaoFiscal } from "@/components/vendas/reconciliar-emissao-fiscal";
 import { NaturezaOperacaoVendaForm } from "@/components/vendas/natureza-operacao-venda-form";
 import {
@@ -2023,6 +2024,25 @@ export default async function VendaNfePage({
             />
           )
         }
+
+        {emissoes
+          .filter((emissao) =>
+            ["aguardando_inutilizacao", "inutilizada"].includes(emissao.status)
+          )
+          .map((emissao) => (
+            <InutilizarNumeracaoFiscal
+              key={`inutilizar-${emissao.id}`}
+              emissaoId={emissao.id}
+              modelo={emissao.modelo}
+              serie={emissao.serie}
+              numero={emissao.numero}
+              ambiente={emissao.ambiente}
+              status={emissao.status}
+              motivo={emissao.motivo}
+              cstat={emissao.cstat}
+              protocolo={emissao.protocolo}
+            />
+          ))}
 
         {
           !autorizada && !emissaoPendenteConsulta && !emissaoNaoTransmitida && !emissaoNaoClassificada && (

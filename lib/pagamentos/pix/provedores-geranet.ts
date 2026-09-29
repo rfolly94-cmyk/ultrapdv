@@ -458,17 +458,22 @@ export const provedoresPixGeranet: Record<string, ProvedorPixGeranet> = {
       if (campo.chave === "certificadoPemHexadecimal") {
         return {
           ...campo,
-          label: "Certificado (.crt)",
-          formatoArquivo: [".crt", ".pem"],
-          formatosArquivo: [".crt", ".pem"],
+          label: "Certificado C6",
+          formatoArquivo: [".crt", ".pem", ".cer", ".zip", ".pfx", ".p12"],
+          formatosArquivo: [".crt", ".pem", ".cer", ".zip", ".pfx", ".p12"],
+          ajuda:
+            "Arquivo baixado no Web Banking, em Integrações via API: .crt, .pem, .zip ou .pfx deste ambiente. Se o arquivo já incluir a chave privada, use só este campo.",
         };
       }
       if (campo.chave === "chavePrivadaPemHexadecimal") {
         return {
           ...campo,
           label: "Chave privada (.key)",
-          formatoArquivo: [".key"],
-          formatosArquivo: [".key"],
+          formatoArquivo: [".key", ".pem"],
+          formatosArquivo: [".key", ".pem"],
+          obrigatorio: false,
+          ajuda:
+            "Arquivo .key da mesma geração do certificado. Deixe vazio se a chave já estiver no arquivo do certificado. Em produção, não envie a chave de sandbox.",
         };
       }
       return campo;
