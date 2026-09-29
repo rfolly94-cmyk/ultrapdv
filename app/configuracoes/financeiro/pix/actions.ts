@@ -41,7 +41,7 @@ import {
 } from "@/lib/pagamentos/pix/c6/adapter";
 import {
   cofreC6IncluiChavePrivada,
-  resolverMaterialMtlsC6,
+  planejarSubstituicaoMtlsC6,
 } from "@/lib/pagamentos/pix/c6/material-mtls";
 
 function texto(valor: FormDataEntryValue | null) {
@@ -273,6 +273,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
   let incluidoChave = false;
   let motivoCertificado: string | null = null;
   let motivoChave: string | null = null;
+  let segredosAnteriores: Record<string, unknown> = {};
 
   if (meta?.configuracaoDisponivel) {
     const coletados = await coletarNovosSegredosDoFormulario(
@@ -312,6 +313,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
         lidosAntes && typeof lidosAntes === "object"
           ? (lidosAntes as Record<string, unknown>)
           : {};
+      segredosAnteriores = existentes;
       const sandbox =
         ambiente === "1"
           ? await admin.rpc("obter_segredos_bancarios_provedor", {
@@ -324,27 +326,31 @@ export async function salvarConfiguracaoPix(formData: FormData) {
         sandbox.data && typeof sandbox.data === "object"
           ? (sandbox.data as Record<string, unknown>)
           : {};
-      const certificadoSalvar = String(
-        coletados.novos.certificadoPemHexadecimal ??
-          existentes.certificadoPemHexadecimal ??
-          ""
+      const certificadoNovo = String(
+        coletados.novos.certificadoPemHexadecimal ?? ""
       );
-      const chaveSalvar = String(
-        coletados.novos.chavePrivadaPemHexadecimal ??
-          existentes.chavePrivadaPemHexadecimal ??
-          ""
+      const chaveNova = String(
+        coletados.novos.chavePrivadaPemHexadecimal ?? ""
       );
-      if (certificadoSalvar || chaveSalvar) {
+      if (certificadoNovo || chaveNova) {
         try {
-          resolverMaterialMtlsC6({
-            certificado: certificadoSalvar,
-            chavePrivada: chaveSalvar,
+          const plano = planejarSubstituicaoMtlsC6({
+            certificadoNovo,
+            chaveNova,
+            certificadoAtual: String(existentes.certificadoPemHexadecimal ?? ""),
+            chaveAtual: String(existentes.chavePrivadaPemHexadecimal ?? ""),
             ambiente,
             certificadoSandbox: String(
               sandboxDados.certificadoPemHexadecimal ?? ""
             ),
             chaveSandbox: String(sandboxDados.chavePrivadaPemHexadecimal ?? ""),
           });
+          if (plano.substituir) {
+            coletados.novos.certificadoPemHexadecimal =
+              plano.certificadoPemHexadecimal;
+            coletados.novos.chavePrivadaPemHexadecimal =
+              plano.chavePrivadaPemHexadecimal;
+          }
         } catch (error) {
           if (error instanceof ErroPixGeranet) {
             return respostaPublicaSalvarPixC6({
@@ -411,6 +417,7 @@ export async function salvarConfiguracaoPix(formData: FormData) {
       return { ok: false as const, erro: coletados.erro };
     }
 
+    const gravados: { campo: string; anterior: string }[] = [];
     for (const [campo, valor] of Object.entries(coletados.novos)) {
       const { error } = await supabase.rpc("salvar_segredo_bancario_provedor", {
         p_empresa_id: empresaId,
@@ -426,8 +433,24 @@ export async function salvarConfiguracaoPix(formData: FormData) {
         rpcChave.executada = true;
       }
       if (error) {
+        for (const item of [...gravados].reverse()) {
+          if (!item.anterior) {
+            continue;
+          }
+          await supabase.rpc("salvar_segredo_bancario_provedor", {
+            p_empresa_id: empresaId,
+            p_provedor: provedor,
+            p_ambiente: ambiente,
+            p_campo: item.campo,
+            p_valor: item.anterior,
+          });
+        }
         return { ok: false as const, erro: error.message };
       }
+      gravados.push({
+        campo,
+        anterior: String(segredosAnteriores[campo] ?? "").trim(),
+      });
       flagsAtuais[campo] = true;
     }
   }

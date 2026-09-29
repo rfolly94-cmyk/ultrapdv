@@ -9,10 +9,13 @@ import tls from "node:tls";
 
 import { fonte } from "@/lib/multiempresa/fonte";
 import {
+  chaveSeparadaDoCofre,
   fingerprintChavePem,
+  MENSAGEM_ENVIAR_CHAVE_CORRESPONDENTE_C6,
   MENSAGEM_PAR_MTLS_C6,
   MENSAGEM_SANDBOX_EM_PRODUCAO_C6,
   MENSAGEM_SOMENTE_CERTIFICADO_PUBLICO_C6,
+  planejarSubstituicaoMtlsC6,
   resolverMaterialMtlsC6,
   usarMtlsC6,
 } from "./material-mtls";
@@ -364,9 +367,199 @@ test("PFX válido abre o contexto sem usar a chave antiga", () => {
 test("o agente de produção não aponta a chave de sandbox", () => {
   const adapter = fonte("lib/pagamentos/pix/c6/adapter.ts");
   assert.match(adapter, /resolverMaterialMtlsC6/);
+  assert.match(adapter, /chaveSeparadaDoCofre/);
   assert.match(adapter, /chaveSandbox/);
   assert.doesNotMatch(adapter, /pemDeHexadecimal/);
   assert.match(fonte("lib/pagamentos/pix/c6/http.ts"), /validarMaterialTlsC6/);
+  const actions = fonte("app/configuracoes/financeiro/pix/actions.ts");
+  const plano = actions.indexOf("planejarSubstituicaoMtlsC6");
+  const gravacao = actions.indexOf("salvar_segredo_bancario_provedor");
+  assert.ok(plano >= 0 && gravacao > plano);
+  assert.doesNotMatch(
+    actions,
+    /chavePrivadaPemHexadecimal \?\?\s*\n?\s*existentes\.chavePrivadaPemHexadecimal/
+  );
+});
+
+function pemDoPlano(valor: string) {
+  return Buffer.from(valor, "hex").toString("utf8");
+}
+
+function cofreDepoisDaTentativa(params: {
+  certificado: string;
+  chave: string;
+  certificadoNovo?: string;
+  chaveNova?: string;
+}) {
+  const antes = {
+    certificado: params.certificado,
+    chave: params.chave,
+    erro: null as string | null,
+  };
+  try {
+    const plano = planejarSubstituicaoMtlsC6({
+      certificadoNovo: params.certificadoNovo,
+      chaveNova: params.chaveNova,
+      certificadoAtual: antes.certificado,
+      chaveAtual: antes.chave,
+      ambiente: "1",
+    });
+    if (!plano.substituir) {
+      return antes;
+    }
+    return {
+      certificado: plano.certificadoPemHexadecimal,
+      chave: plano.chavePrivadaPemHexadecimal,
+      erro: null,
+    };
+  } catch (error) {
+    assert.ok(error instanceof Error);
+    return { ...antes, erro: error.message };
+  }
+}
+
+test("certificado novo com chave antiga do cofre é rejeitado", () => {
+  const resultado = cofreDepoisDaTentativa({
+    certificado: hex(lab.producao.cert),
+    chave: hex(lab.producao.key),
+    certificadoNovo: hex(lab.outro.cert),
+    chaveNova: hex(lab.producao.key),
+  });
+  assert.equal(resultado.erro, MENSAGEM_PAR_MTLS_C6);
+  assert.equal(resultado.certificado, hex(lab.producao.cert));
+  assert.equal(resultado.chave, hex(lab.producao.key));
+});
+
+test("certificado público novo não reaproveita a chave antiga", () => {
+  const resultado = cofreDepoisDaTentativa({
+    certificado: hex(lab.producao.cert),
+    chave: hex(lab.producao.key),
+    certificadoNovo: hex(lab.outro.cert),
+  });
+  assert.equal(resultado.erro, MENSAGEM_ENVIAR_CHAVE_CORRESPONDENTE_C6);
+  assert.equal(resultado.certificado, hex(lab.producao.cert));
+  assert.equal(resultado.chave, hex(lab.producao.key));
+  assert.equal(
+    chaveSeparadaDoCofre(hex(lab.outro.cert), hex(lab.producao.key)),
+    hex(lab.producao.key)
+  );
+});
+
+test("ZIP novo substitui certificado e chave antigos", () => {
+  const zip = zipArmazenado([
+    { nome: "certificado.crt", conteudo: Buffer.from(lab.outro.cert, "utf8") },
+    { nome: "chave.key", conteudo: Buffer.from(lab.outro.key, "utf8") },
+  ]);
+  const plano = planejarSubstituicaoMtlsC6({
+    certificadoNovo: hex(zip),
+    certificadoAtual: hex(lab.producao.cert),
+    chaveAtual: hex(lab.producao.key),
+    ambiente: "1",
+  });
+  assert.equal(plano.substituir, true);
+  if (!plano.substituir) {
+    return;
+  }
+  assert.equal(
+    fingerprintChavePem(pemDoPlano(plano.chavePrivadaPemHexadecimal)),
+    fingerprintChavePem(lab.outro.key)
+  );
+  assert.notEqual(
+    fingerprintChavePem(pemDoPlano(plano.chavePrivadaPemHexadecimal)),
+    fingerprintChavePem(lab.producao.key)
+  );
+  assert.equal(spki(pemDoPlano(plano.certificadoPemHexadecimal)), spki(lab.outro.cert));
+  assert.equal(
+    chaveSeparadaDoCofre(hex(zip), hex(lab.producao.key)),
+    ""
+  );
+});
+
+test("PEM combinado novo substitui o par antigo", () => {
+  const plano = planejarSubstituicaoMtlsC6({
+    certificadoNovo: hex(`${lab.outro.cert}\n${lab.outro.key}`),
+    chaveAtual: hex(lab.producao.key),
+    certificadoAtual: hex(lab.producao.cert),
+    ambiente: "1",
+  });
+  assert.equal(plano.substituir, true);
+  if (!plano.substituir) {
+    return;
+  }
+  assert.equal(
+    fingerprintChavePem(pemDoPlano(plano.chavePrivadaPemHexadecimal)),
+    fingerprintChavePem(lab.outro.key)
+  );
+  assert.equal(spki(pemDoPlano(plano.certificadoPemHexadecimal)), spki(lab.outro.cert));
+});
+
+test("PFX novo ignora o PEM antigo", () => {
+  const plano = planejarSubstituicaoMtlsC6({
+    certificadoNovo: hex(lab.pfx),
+    chaveAtual: hex(lab.outro.key),
+    certificadoAtual: hex(lab.outro.cert),
+    ambiente: "2",
+  });
+  assert.equal(plano.substituir, true);
+  if (!plano.substituir) {
+    return;
+  }
+  assert.equal(plano.chavePrivadaPemHexadecimal, hex(lab.pfx));
+  assert.notEqual(plano.chavePrivadaPemHexadecimal, hex(lab.outro.key));
+  const material = resolverMaterialMtlsC6({
+    certificado: plano.certificadoPemHexadecimal,
+    chavePrivada: chaveSeparadaDoCofre(
+      plano.certificadoPemHexadecimal,
+      hex(lab.outro.key)
+    ),
+    ambiente: "2",
+  });
+  assert.ok(material.pfx && material.pfx.byteLength > 0);
+  assert.equal(material.key, undefined);
+});
+
+test("par novo válido substitui os dois segredos", () => {
+  const plano = planejarSubstituicaoMtlsC6({
+    certificadoNovo: hex(lab.outro.cert),
+    chaveNova: hex(lab.outro.key),
+    certificadoAtual: hex(lab.producao.cert),
+    chaveAtual: hex(lab.producao.key),
+    ambiente: "1",
+  });
+  assert.equal(plano.substituir, true);
+  if (!plano.substituir) {
+    return;
+  }
+  assert.equal(
+    fingerprintChavePem(pemDoPlano(plano.chavePrivadaPemHexadecimal)),
+    fingerprintChavePem(lab.outro.key)
+  );
+  assert.equal(spki(pemDoPlano(plano.certificadoPemHexadecimal)), spki(lab.outro.cert));
+  assert.doesNotThrow(() =>
+    tls.createSecureContext({
+      cert: pemDoPlano(plano.certificadoPemHexadecimal),
+      key: pemDoPlano(plano.chavePrivadaPemHexadecimal),
+    })
+  );
+});
+
+test("erro no upload novo preserva o par antigo inteiro", () => {
+  const resultado = cofreDepoisDaTentativa({
+    certificado: hex(lab.producao.cert),
+    chave: hex(lab.producao.key),
+    certificadoNovo: hex(lab.outro.cert),
+    chaveNova: hex(lab.producao.key),
+  });
+  assert.equal(resultado.certificado, hex(lab.producao.cert));
+  assert.equal(resultado.chave, hex(lab.producao.key));
+  assert.equal(
+    planejarSubstituicaoMtlsC6({
+      certificadoAtual: hex(lab.producao.cert),
+      chaveAtual: hex(lab.producao.key),
+      ambiente: "1",
+    }).substituir,
+    false
+  );
 });
 
 after(() => {

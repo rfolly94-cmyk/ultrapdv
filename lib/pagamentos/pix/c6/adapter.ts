@@ -32,7 +32,10 @@ import {
   type C6Http,
   type C6RespostaHttp,
 } from "./http";
-import { resolverMaterialMtlsC6 } from "./material-mtls";
+import {
+  chaveSeparadaDoCofre,
+  resolverMaterialMtlsC6,
+} from "./material-mtls";
 import {
   AMBIENTE_C6_PRODUCAO,
   AMBIENTE_C6_SANDBOX,
@@ -232,9 +235,13 @@ async function credenciaisMtlsC6(params: {
           ambiente: AMBIENTE_C6_SANDBOX,
         })
       : {};
+  const certificado = String(credenciais.certificadoPemHexadecimal ?? "");
   const tls = resolverMaterialMtlsC6({
-    certificado: String(credenciais.certificadoPemHexadecimal ?? ""),
-    chavePrivada: String(credenciais.chavePrivadaPemHexadecimal ?? ""),
+    certificado,
+    chavePrivada: chaveSeparadaDoCofre(
+      certificado,
+      String(credenciais.chavePrivadaPemHexadecimal ?? "")
+    ),
     ambiente: params.ambiente,
     certificadoSandbox: String(sandbox.certificadoPemHexadecimal ?? ""),
     chaveSandbox: String(sandbox.chavePrivadaPemHexadecimal ?? ""),

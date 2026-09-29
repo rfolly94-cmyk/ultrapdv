@@ -17,6 +17,9 @@ export const MENSAGEM_PAR_MTLS_C6 =
 export const MENSAGEM_SOMENTE_CERTIFICADO_PUBLICO_C6 =
   "O arquivo do C6 contém apenas o certificado público. Falta a chave privada correspondente (.key), baixada uma única vez no Web Banking em Integrações via API, no mesmo download do certificado. A chave privada de sandbox não pode ser usada em produção.";
 
+export const MENSAGEM_ENVIAR_CHAVE_CORRESPONDENTE_C6 =
+  "Envie também a chave privada (.key) correspondente a este certificado.";
+
 export const MENSAGEM_SANDBOX_EM_PRODUCAO_C6 =
   "A produção do C6 não pode reutilizar o certificado ou a chave privada de sandbox.";
 
@@ -295,6 +298,90 @@ function validarPfx(pfx: Buffer, senha?: string) {
     pfx,
     ...(passphrase ? { passphrase } : {}),
   } satisfies MaterialTlsC6;
+}
+
+export type PlanoSubstituicaoMtlsC6 =
+  | { substituir: false }
+  | {
+      substituir: true;
+      certificadoPemHexadecimal: string;
+      chavePrivadaPemHexadecimal: string;
+    };
+
+function hexDeTexto(valor: string) {
+  return Buffer.from(valor, "utf8").toString("hex");
+}
+
+function materialTemChavePrivada(pecas: Pecas) {
+  return pecas.chaves.length > 0 || Boolean(pecas.pfx);
+}
+
+export function chaveSeparadaDoCofre(certificado: string, chavePrivada: string) {
+  const pecas = pecasDe(bytesDoCofre(certificado));
+  if (materialTemChavePrivada(pecas)) {
+    return "";
+  }
+  return chavePrivada;
+}
+
+export function planejarSubstituicaoMtlsC6(params: {
+  certificadoNovo?: string;
+  chaveNova?: string;
+  certificadoAtual?: string;
+  chaveAtual?: string;
+  ambiente: string;
+  certificadoSandbox?: string;
+  chaveSandbox?: string;
+  senhaPfx?: string;
+}): PlanoSubstituicaoMtlsC6 {
+  const certificadoNovo = String(params.certificadoNovo ?? "").trim();
+  const chaveNova = String(params.chaveNova ?? "").trim();
+  const certificadoAtual = String(params.certificadoAtual ?? "").trim();
+  void params.chaveAtual;
+
+  if (!certificadoNovo && !chaveNova) {
+    return { substituir: false };
+  }
+
+  const certificado = certificadoNovo || certificadoAtual;
+  const chaveInformada = chaveNova;
+
+  if (certificadoNovo) {
+    const pecasCert = pecasDe(bytesDoCofre(certificadoNovo));
+    const pecasChave = chaveNova
+      ? pecasDe(bytesDoCofre(chaveNova))
+      : pecasVazias();
+    if (
+      !materialTemChavePrivada(pecasCert) &&
+      !materialTemChavePrivada(pecasChave)
+    ) {
+      throw new ErroPixGeranet(MENSAGEM_ENVIAR_CHAVE_CORRESPONDENTE_C6);
+    }
+  }
+
+  const material = resolverMaterialMtlsC6({
+    certificado,
+    chavePrivada: chaveInformada,
+    ambiente: params.ambiente,
+    certificadoSandbox: params.certificadoSandbox,
+    chaveSandbox: params.chaveSandbox,
+    senhaPfx: params.senhaPfx,
+  });
+
+  if (material.pfx && material.pfx.byteLength > 0) {
+    const pfxHex = material.pfx.toString("hex");
+    return {
+      substituir: true,
+      certificadoPemHexadecimal: pfxHex,
+      chavePrivadaPemHexadecimal: pfxHex,
+    };
+  }
+
+  return {
+    substituir: true,
+    certificadoPemHexadecimal: hexDeTexto(String(material.cert ?? "")),
+    chavePrivadaPemHexadecimal: hexDeTexto(String(material.key ?? "")),
+  };
 }
 
 export function cofreC6IncluiChavePrivada(
