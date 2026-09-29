@@ -28,6 +28,14 @@ import { finalizarVendaPdv } from "../../app/pdv/actions";
 import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
 import { PdvConsumidorNota } from "@/components/pdv/pdv-consumidor-nota";
 import { CampoValor } from "@/components/ui/campo-valor";
+import {
+  aplicarDigitoMonetarioPdv,
+  aplicarValorFormaPdv,
+  escolherFormaDinheiroPdv,
+  formaAposNavegacaoPdv,
+  pagamentosAberturaPdv,
+  sincronizarDinheiroResidualPdv,
+} from "@/lib/pdv/distribuicao-pagamento-pdv";
 import { CaixaAvisoReabertoFaixa } from "@/components/caixa/caixa-aviso-reaberto";
 import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
 import {
@@ -616,6 +624,12 @@ export function PdvShell({
   ] = useState<
     PagamentoDigitado[]
   >([]);
+
+  const [dinheiroAutomatico, setDinheiroAutomatico] = useState(true);
+  const [formaSelecionadaId, setFormaSelecionadaId] = useState<string | null>(
+    null
+  );
+  const substituirDigitoRef = useRef(true);
 
   const [pixLocal, setPixLocal] =
     useState<PixLocalCheckoutState | null>(null);
@@ -1310,6 +1324,8 @@ export function PdvShell({
     setDescontoCentavos(0);
     setDescontoTexto("0,00");
     setPagamentos([]);
+    setDinheiroAutomatico(true);
+    setFormaSelecionadaId(null);
     buscaRef.current?.focus();
   }
 
@@ -1488,27 +1504,53 @@ export function PdvShell({
       null
     );
 
-    if (
-      pagamentos.length ===
-      0 &&
-      formasPagas.length >
-        0
-    ) {
-      setPagamentos([
-        {
-          formaPagamentoId:
-            formasPagas[0].id,
-          valorTexto:
-            centavosParaInput(
-              totalCentavos
-            ),
-        },
-      ]);
+    if (pagamentos.length === 0 && formasPagas.length > 0) {
+      const abertura = pagamentosAberturaPdv({
+        formas: formasPagas,
+        totalCentavos,
+      });
+      setPagamentos(abertura.pagamentos);
+      setDinheiroAutomatico(abertura.dinheiroAutomatico);
+      setFormaSelecionadaId(abertura.formaSelecionadaId);
+    } else {
+      const abertura = pagamentosAberturaPdv({
+        formas: formasPagas,
+        totalCentavos,
+      });
+      setFormaSelecionadaId(abertura.formaSelecionadaId);
+      if (dinheiroAutomatico) {
+        setPagamentos((atual) =>
+          sincronizarDinheiroResidualPdv({
+            formas: formasPagas,
+            pagamentos: atual,
+            totalCentavos,
+          })
+        );
+      }
     }
 
+    substituirDigitoRef.current = true;
     setModalPagamento(
       true
     );
+  }
+
+  function focarValorPagamento(formaId: string) {
+    const seguro =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(formaId)
+        : formaId;
+    const campo = document.querySelector<HTMLInputElement>(
+      `[data-pagamento-valor="${seguro}"]`
+    );
+    campo?.focus();
+    campo?.select();
+  }
+
+  function selecionarFormaPagamento(formaId: string) {
+    setFormaSelecionadaId(formaId);
+    substituirDigitoRef.current = true;
+    requestAnimationFrame(() => focarValorPagamento(formaId));
   }
 
   function alternarFiado(marcado: boolean) {
@@ -1590,37 +1632,27 @@ export function PdvShell({
 
     invalidarCheckout();
 
-    setPagamentos(
-      (atual) => {
-        const existe =
-          atual.some(
-            (pagamento) =>
-              pagamento.formaPagamentoId ===
-              formaPagamentoId
-          );
-
-        if (existe) {
-          return atual.map(
-            (pagamento) =>
-              pagamento.formaPagamentoId ===
-              formaPagamentoId
-                ? {
-                    ...pagamento,
-                    valorTexto,
-                  }
-                : pagamento
-          );
-        }
-
-        return [
-          ...atual,
-          {
-            formaPagamentoId,
-            valorTexto,
-          },
-        ];
-      }
+    const participaDoResidual = formasPagas.some(
+      (forma) => forma.id === formaPagamentoId
     );
+    setPagamentos((atual) => {
+      const distribuido = aplicarValorFormaPdv({
+        formas: formasPagas,
+        pagamentos: atual,
+        totalCentavos,
+        dinheiroAutomatico,
+        formaPagamentoId,
+        valorTexto,
+        ajustarDinheiro: participaDoResidual,
+      });
+      return distribuido.pagamentos;
+    });
+    if (
+      participaDoResidual &&
+      escolherFormaDinheiroPdv(formasPagas)?.id === formaPagamentoId
+    ) {
+      setDinheiroAutomatico(false);
+    }
   }
 
   function usarRestante(
@@ -2011,6 +2043,8 @@ export function PdvShell({
           "0,00"
         );
         setPagamentos([]);
+        setDinheiroAutomatico(true);
+        setFormaSelecionadaId(null);
         setPixLocal(null);
         resetarCheckoutPixGeranet();
         setUsarFiado(false);
@@ -2073,6 +2107,35 @@ export function PdvShell({
   }
 
   useEffect(() => {
+    if (!modalPagamento || !dinheiroAutomatico) {
+      return;
+    }
+
+    setPagamentos((atual) =>
+      sincronizarDinheiroResidualPdv({
+        formas: formasPagas,
+        pagamentos: atual,
+        totalCentavos,
+      })
+    );
+  }, [modalPagamento, dinheiroAutomatico, totalCentavos]);
+
+  useEffect(() => {
+    if (
+      !modalPagamento ||
+      modalDesconto ||
+      modalCliente ||
+      !formaSelecionadaId
+    ) {
+      return;
+    }
+
+    const formaId = formaSelecionadaId;
+    const frame = requestAnimationFrame(() => focarValorPagamento(formaId));
+    return () => cancelAnimationFrame(frame);
+  }, [modalPagamento, modalDesconto, modalCliente, formaSelecionadaId]);
+
+  useEffect(() => {
     function teclado(
       event: KeyboardEvent
     ) {
@@ -2086,6 +2149,82 @@ export function PdvShell({
           event.preventDefault();
         }
         return;
+      }
+
+      if (
+        modalPagamento &&
+        !modalDesconto &&
+        !modalCliente &&
+        !descartarGeranetAberto &&
+        event.key !== "F2" &&
+        event.key !== "F3" &&
+        event.key !== "F4" &&
+        event.key !== "F5" &&
+        event.key !== "Escape"
+      ) {
+        const alvo = event.target instanceof HTMLElement ? event.target : null;
+        const campoLivre =
+          Boolean(alvo?.closest("input, textarea, select")) &&
+          !alvo?.closest("[data-pagamento-formas]");
+        const noValor = Boolean(alvo?.closest("[data-pagamento-valor]"));
+        const ids = formasPagas.map((forma) => forma.id);
+
+        if (
+          !campoLivre &&
+          (event.key === "ArrowDown" ||
+            event.key === "ArrowUp" ||
+            event.key === "Tab")
+        ) {
+          event.preventDefault();
+          const proxima = formaAposNavegacaoPdv(
+            ids,
+            formaSelecionadaId,
+            event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)
+              ? "anterior"
+              : "proxima"
+          );
+          if (proxima) {
+            selecionarFormaPagamento(proxima);
+          }
+          return;
+        }
+
+        if (!campoLivre && event.key === "Enter") {
+          event.preventDefault();
+          if (formaSelecionadaId) {
+            selecionarFormaPagamento(formaSelecionadaId);
+          }
+          return;
+        }
+
+        if (
+          !campoLivre &&
+          !noValor &&
+          formaSelecionadaId &&
+          (/^\d$/.test(event.key) ||
+            event.key === "," ||
+            event.key === "." ||
+            event.key === "Backspace")
+        ) {
+          event.preventDefault();
+          const atual =
+            pagamentos.find(
+              (pagamento) => pagamento.formaPagamentoId === formaSelecionadaId
+            )?.valorTexto ?? "0,00";
+          if (event.key === "Backspace") {
+            substituirDigitoRef.current = true;
+            atualizarPagamento(formaSelecionadaId, "");
+            return;
+          }
+          const digitado = aplicarDigitoMonetarioPdv(
+            atual,
+            event.key,
+            substituirDigitoRef.current
+          );
+          substituirDigitoRef.current = digitado.substituir;
+          atualizarPagamento(formaSelecionadaId, digitado.texto);
+          return;
+        }
       }
 
       if (event.key === "F4") {
@@ -3044,17 +3183,29 @@ export function PdvShell({
               F3 Desconto
             </button>
 
-            <div className="mt-6 divide-y divide-zinc-200 border-y border-zinc-200">
+            <div
+              data-pagamento-formas
+              className="mt-6 divide-y divide-zinc-200 border-y border-zinc-200"
+            >
               {formasPagas.map((forma) => {
                 const atual = pagamentos.find(
                   (pagamento) => pagamento.formaPagamentoId === forma.id
                 );
-                const selecionada = Boolean(atual?.valorTexto);
+                const selecionada = forma.id === formaSelecionadaId;
                 const Icone = iconeFormaPagamento(forma);
+                const valorExibido = atual?.valorTexto
+                  ? atual.valorTexto
+                  : "0,00";
 
                 return (
                   <div
                     key={forma.id}
+                    onClick={() => {
+                      if (ehFormaPix(forma) && !pixHabilitado) {
+                        return;
+                      }
+                      selecionarFormaPagamento(forma.id);
+                    }}
                     className={`flex items-center gap-3 px-3 py-3 ${
                       selecionada ? "pdv-row-selected" : "bg-white"
                     }`}
@@ -3068,19 +3219,25 @@ export function PdvShell({
                       {rotuloFormaCheckout(forma)}
                     </span>
                     <CampoValor
-                      value={atual?.valorTexto ?? ""}
-                      onChange={(event) =>
-                        atualizarPagamento(forma.id, event.target.value)
-                      }
+                      data-pagamento-valor={forma.id}
+                      value={valorExibido}
+                      onChange={(event) => {
+                        substituirDigitoRef.current = false;
+                        atualizarPagamento(forma.id, event.target.value);
+                      }}
                       onFocus={() => {
-                        if (
-                          ehFormaPix(forma) &&
-                          !pixHabilitado
-                        ) {
+                        if (ehFormaPix(forma) && !pixHabilitado) {
                           return;
                         }
-                        if (!atual?.valorTexto && restanteCentavos > 0) {
-                          usarRestante(forma.id);
+                        setFormaSelecionadaId(forma.id);
+                        substituirDigitoRef.current = true;
+                      }}
+                      onBlur={(event) => {
+                        const formatado = centavosParaInput(
+                          textoParaCentavos(event.target.value)
+                        );
+                        if (event.target.value !== formatado) {
+                          atualizarPagamento(forma.id, formatado);
                         }
                       }}
                       inputMode="decimal"
