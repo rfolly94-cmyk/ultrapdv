@@ -197,7 +197,10 @@ test("emissão NFC-e usa documento do snapshot e isola empresa", () => {
   const builder = fonte("lib/fiscal/geranet/montar-payload-nfce.ts");
   const shell = fonte("components/pdv/pdv-shell.tsx");
   const consumidor = fonte("components/pdv/pdv-consumidor-nota.tsx");
-  const nfe = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const nfe = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+  ].join("\n");
   const mobile = fonte("app/api/pdv/finalizar/route.ts");
 
   assert.match(builder, /camposClienteNfceGeranet/);

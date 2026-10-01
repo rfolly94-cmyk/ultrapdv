@@ -302,7 +302,10 @@ test("fiado da Carteira nunca vira tPag 14", () => {
 });
 
 test("emissão da NF-e 55 mapeia 91 e não lê Carteira para duplicata", () => {
-  const emitir = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const emitir = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+  ].join("\n");
   const carregar = fonte("lib/fiscal/nfe55/carregar-formulario-nfe.ts");
   const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
   assert.match(emitir, /mapearDetalhamentoFiscalNfe55/);

@@ -8,6 +8,7 @@ import {
 import {
   EmitirNfeVendaButton,
 } from "@/components/vendas/emitir-nfe-venda-button";
+import { VisualizarNfeVendaButton } from "@/components/vendas/visualizar-nfe-venda-button";
 import { InutilizarNumeracaoFiscal } from "@/components/vendas/inutilizar-numeracao-fiscal";
 import { ReconciliarEmissaoFiscal } from "@/components/vendas/reconciliar-emissao-fiscal";
 import { NaturezaOperacaoVendaForm } from "@/components/vendas/natureza-operacao-venda-form";
@@ -2062,29 +2063,39 @@ export default async function VendaNfePage({
                   </p>
                 </div>
 
-                {
-                  pronta ? (
-                    <EmitirNfeVendaButton
-                      vendaId={venda.id}
-                      ambiente={
-                        ambienteAtual
-                      }
-                      serie={
-                        numeracoes.length === 1
-                          ? numeracoes[0].serie
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      disabled
-                      className="inline-flex h-10 items-center justify-center rounded-xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-500"
-                    >
-                      Emitir NF-e
-                    </button>
-                  )
-                }
+                <div className="flex flex-wrap items-center gap-2">
+                  <VisualizarNfeVendaButton
+                    vendaId={venda.id}
+                    serie={
+                      numeracoes.length === 1
+                        ? numeracoes[0].serie
+                        : undefined
+                    }
+                  />
+                  {
+                    pronta ? (
+                      <EmitirNfeVendaButton
+                        vendaId={venda.id}
+                        ambiente={
+                          ambienteAtual
+                        }
+                        serie={
+                          numeracoes.length === 1
+                            ? numeracoes[0].serie
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex h-10 items-center justify-center rounded-xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-500"
+                      >
+                        Emitir NF-e
+                      </button>
+                    )
+                  }
+                </div>
               </div>
             </div>
           )

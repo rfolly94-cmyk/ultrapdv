@@ -136,7 +136,9 @@ test("venda fiscal sem produto fiscal padrão é bloqueada", () => {
     "app/api/fiscal/geranet/nfe-emitir-venda/route.ts",
     "app/api/fiscal/geranet/nfce-contingencia-venda/route.ts",
   ]) {
-    const rota = fonte(arquivo);
+    const rota = arquivo.endsWith("nfe-emitir-venda/route.ts")
+      ? `${fonte(arquivo)}\n${fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts")}`
+      : fonte(arquivo);
     assert.match(rota, /mensagemEmissaoItemAvulsoSemFiscal/, arquivo);
     assert.match(rota, /MENSAGEM_ITEM_AVULSO_SEM_CONFIG_FISCAL|bloqueioAvulso/, arquivo);
   }

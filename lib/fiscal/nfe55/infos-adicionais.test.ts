@@ -83,11 +83,14 @@ test("1. infCpl informado aparece no payload da emissão", () => {
   assert.equal(payload.nfe.informacaoComplementar, textoUsuario);
 
   const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const prepararVenda = fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts");
+  const payloadVenda = fonte("lib/fiscal/nfe55/payload-nfe-venda.ts");
   const emitirOperacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
   const montar = fonte("lib/fiscal/geranet/montar-payload-nfe.ts");
-  assert.match(emitirVenda, /montarInformacaoComplementarNfe/);
-  assert.match(emitirVenda, /textoUsuarioInfCplNfe/);
-  assert.match(emitirVenda, /informacao_complementar_usuario/);
+  assert.match(payloadVenda, /montarInformacaoComplementarNfe/);
+  assert.match(payloadVenda, /textoUsuarioInfCplNfe/);
+  assert.match(prepararVenda, /informacao_complementar_usuario/);
+  assert.match(emitirVenda, /montarPayloadNfeVendaPreparada/);
   assert.match(emitirOperacao, /textoUsuarioInfCplNfe/);
   assert.match(montar, /informacaoComplementar:\s*\n\s*texto\(\s*\n\s*config\s*\n\s*\.informacaoComplementar/);
   assert.match(montar, /infAdic\.infCpl/);

@@ -178,7 +178,10 @@ test("NFC-e e NF-e usam o mesmo snapshot; interestadual escolhe CFOP congelado 6
 
 test("destinatário da venda permanece no snapshot da operação após alteração cadastral", () => {
   const nfce = fonte("app/api/fiscal/geranet/nfce-emitir-venda/route.ts");
-  const nfe = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const nfe = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+  ].join("\n");
   const paginaNfe = fonte("app/vendas/[id]/nfe/page.tsx");
   assert.match(nfce, /snapshotFiscal: venda\.snapshot_fiscal/);
   assert.match(nfe, /resolverDestinatarioFiscalDaOrigem/);

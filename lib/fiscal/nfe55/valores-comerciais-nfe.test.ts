@@ -522,9 +522,13 @@ test("pagamento corrigido no snapshot substitui vendas_pagamentos na nova tentat
     assert.equal(semRascunho.overlay, false);
     assert.equal(Number(semRascunho.pagamentos[0]?.valor), 300);
   }
-  assert.match(emitirVenda, /aplicarPagamentosRascunhoNaEmissaoNfeVenda/);
-  assert.match(emitirVenda, /pagamentosRascunhoDoSnapshot/);
-  assert.match(emitirVenda, /totalParaConferencia/);
+  const motorVenda = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+  ].join("\n");
+  assert.match(motorVenda, /aplicarPagamentosRascunhoNaEmissaoNfeVenda/);
+  assert.match(motorVenda, /pagamentosRascunhoDoSnapshot/);
+  assert.match(motorVenda, /totalParaConferencia/);
   assert.doesNotMatch(
     fonte("app/fiscal/nfe/operacoes-actions.ts"),
     /A venda comercial já foi finalizada\./

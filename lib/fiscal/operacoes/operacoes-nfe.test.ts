@@ -463,9 +463,11 @@ test("identidade fiscal ausente bloqueia em vez de assumir 1", () => {
 });
 
 test("fluxo de venda resolve natureza, tpNF, finNFe e não hardcodifica 1 no payload", () => {
-  const emitirVenda = fonte(
-    "app/api/fiscal/geranet/nfe-emitir-venda/route.ts"
-  );
+  const emitirVenda = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-venda.ts"),
+  ].join("\n");
   assert.match(emitirVenda, /MENSAGEM_NATUREZA_VENDA_AUSENTE/);
   assert.match(emitirVenda, /identidadeEmissao\.tpNf/);
   assert.match(emitirVenda, /identidadeEmissao\.finNfe/);

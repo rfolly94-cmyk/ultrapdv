@@ -600,9 +600,14 @@ test("Nova NF-e emite venda pelo motor do PDV e não avisa PDV", () => {
   assert.doesNotMatch(editor, /defaultConsumidorFinalVisivel/);
   assert.doesNotMatch(actions, /Esta venda será emitida como NFC-e/);
   assert.match(editor, /verificarOperacaoFiscalAction/);
-  assert.match(emitirVenda, /resolverDestinatarioFiscalDaOrigem/);
-  assert.match(emitirVenda, /lerSnapshotDestinatarioFiscal/);
-  assert.match(emitirVenda, /from\("fiscal_operacoes"\)/);
+  const motorVenda = [
+    emitirVenda,
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-venda.ts"),
+  ].join("\n");
+  assert.match(motorVenda, /resolverDestinatarioFiscalDaOrigem/);
+  assert.match(motorVenda, /lerSnapshotDestinatarioFiscal/);
+  assert.match(motorVenda, /from\("fiscal_operacoes"\)/);
   const identidadeFn = actions.slice(
     actions.indexOf("export async function atualizarIdentidadeDestinatarioOperacao"),
     actions.indexOf("export async function salvarPagamentosOperacaoVenda")
@@ -742,8 +747,8 @@ test("Informações complementares: Validar e Emitir leem o mesmo infCpl do snap
   assert.match(emitir, /textoUsuarioInfCplNfe/);
   assert.match(editor, /informacaoComplementarUsuario: infoUsuario/);
   assert.match(editor, /persistirCabecalhoSeSujo/);
-  const emitirVendaInfCpl = emitirVenda.slice(
-    emitirVenda.lastIndexOf("informacaoComplementar:")
+  const emitirVendaInfCpl = fonte("lib/fiscal/nfe55/payload-nfe-venda.ts").slice(
+    fonte("lib/fiscal/nfe55/payload-nfe-venda.ts").lastIndexOf("informacaoComplementar:")
   );
   assert.match(emitirVendaInfCpl, /montarInformacaoComplementarNfe/);
   assert.doesNotMatch(

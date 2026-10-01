@@ -236,7 +236,11 @@ test("CSOSN do contrato Geranet permanece 500, sem converter para CST", () => {
 test("payloads NF-e/NFC-e validam ICMS antes do POST e CRT vem da empresa da emissão", () => {
   const nfe = fonte("lib/fiscal/geranet/montar-payload-nfe.ts");
   const nfce = fonte("lib/fiscal/geranet/montar-payload-nfce.ts");
-  const venda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const venda = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-venda.ts"),
+  ].join("\n");
   const nfceVenda = fonte("app/api/fiscal/geranet/nfce-emitir-venda/route.ts");
   const contingencia = fonte(
     "app/api/fiscal/geranet/nfce-contingencia-venda/route.ts"

@@ -136,7 +136,11 @@ test("carregar transporte da emissão filtra empresa_id e prioriza a operação"
 });
 
 test("NF-e 55 envia nfe.frete e transportador/volumes persistidos", () => {
-  const venda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
+  const venda = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-venda.ts"),
+  ].join("\n");
   const operacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
   assert.match(venda, /transporteNfeParaPayloadGeranet/);
   assert.match(operacao, /transporteNfeParaPayloadGeranet/);
