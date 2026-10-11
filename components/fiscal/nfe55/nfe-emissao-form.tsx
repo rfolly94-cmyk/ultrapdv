@@ -37,6 +37,7 @@ import {
   nfeSelect,
   nfeSomenteLeitura,
 } from "@/components/fiscal/nfe55/nfe-form-primitives";
+import { VisualizarNfeOperacaoButton } from "@/components/fiscal/nfe55/visualizar-nfe-operacao-button";
 import { CampoValor } from "@/components/ui/campo-valor";
 import {
   NfePagamentoVenda,
@@ -1333,6 +1334,31 @@ export function NfeEmissaoForm({
     router.push(HREF_RASCUNHOS_NFE);
   }
 
+  async function salvarAntesDaPrevia() {
+    const id = await garantirOperacao();
+    if (!id) {
+      return { ok: false as const, erro: "Não foi possível salvar o rascunho." };
+    }
+    for (const item of itens) {
+      const ajuste = ajusteItens[item.id];
+      if (!ajuste) continue;
+      if (
+        ajuste.quantidade === item.quantidade &&
+        ajuste.valorUnitario === item.valorUnitario
+      ) {
+        continue;
+      }
+      const salvo = await atualizarItemOperacaoFiscal({
+        operacaoId: id,
+        itemId: item.id,
+        quantidade: ajuste.quantidade,
+        valorUnitario: ajuste.valorUnitario,
+      });
+      if (!salvo.ok) return salvo;
+    }
+    return persistirRascunho();
+  }
+
   function emitir() {
     if (emitindo.current || pending) return;
     if (bloqueiaRetransmissao) {
@@ -1667,6 +1693,13 @@ export function NfeEmissaoForm({
                 >
                   Salvar como rascunho
                 </button>
+                {operacao.id ? (
+                  <VisualizarNfeOperacaoButton
+                    operacaoId={operacao.id}
+                    disabled={pending}
+                    antesDePreview={salvarAntesDaPrevia}
+                  />
+                ) : null}
                 <button
                   type="button"
                   className={

@@ -26,6 +26,10 @@ export function mensagemErroFinalizacaoPublica(erro: unknown) {
     return limpo;
   }
 
+  if (/estoque_movimentacoes_saldos_check/i.test(limpo)) {
+    return "Não foi possível concluir a venda porque o estoque ficaria negativo. O histórico de movimentações exige saldo anterior e posterior maiores ou iguais a zero.";
+  }
+
   if (
     /rpc_|postgres|permission denied|jwt|stack|function public\./i.test(limpo)
   ) {

@@ -158,7 +158,10 @@ test("payload Geranet usa nfe.autorizadosXml só quando há registros", () => {
 test("form, action e emissão isolam por empresa e não alteram destinatário, entrega ou transporte", () => {
   const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
   const action = fonte("app/fiscal/nfe/operacoes-actions.ts");
-  const emitirOp = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const emitirOp = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+  ].join("\n");
   const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
   const payload = fonte("lib/fiscal/geranet/montar-payload-nfe.ts");
   assert.match(form, /Autorizados a acessar o XML/);

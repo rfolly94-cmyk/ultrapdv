@@ -80,6 +80,14 @@ import {
   snapshotItensDaTransmissao,
 } from "@/lib/fiscal/emissao-tentativas";
 import {
+  detalhePagamentoGeranet,
+} from "@/lib/fiscal/tef/dados-fiscais-cartao";
+import {
+  bloqueioTefHomologacaoNaNfce,
+  prepararPagamentosNfceTef,
+} from "@/lib/fiscal/tef/preparar-pagamentos-nfce";
+import { normalizarConsultaAmbienteTef } from "@/lib/fiscal/tef/ambiente-tef-nfce";
+import {
   validarPagamentosEletronicosParaEmissao,
 } from "@/lib/fiscal/validar-pagamentos-eletronicos";
 import { filtrarPagamentosFinanceiros } from "@/lib/vendas/pagamentos-financeiros";
@@ -107,6 +115,11 @@ type PayloadNfceMutavel = {
           indicadorPagamento:
             | "0"
             | "1";
+          cnpjCredenciadora?: string;
+          tipoBandeira?: string;
+          autorizacao?: string;
+          tipoIntegracao?: "1";
+          cnpjReceb?: string;
         }>;
     };
     contingencia?: string;
@@ -1039,10 +1052,41 @@ export async function POST(
       }
     }
 
+    const fiscalTef = await prepararPagamentosNfceTef(
+      empresaId,
+      vendaId,
+      pagamentosConfirmados
+    );
+    if (fiscalTef.erro) {
+      return erro(fiscalTef.erro);
+    }
+    const bloqueioAmbienteTef = await bloqueioTefHomologacaoNaNfce(async () => {
+      const operacoesTef = await supabase
+        .from("tef_operacoes")
+        .select("id")
+        .eq("empresa_id", empresaId)
+        .eq("venda_id", vendaId)
+        .limit(1);
+      const configTef = await supabase
+        .from("tef_configuracoes")
+        .select("ambiente")
+        .eq("empresa_id", empresaId)
+        .maybeSingle();
+      return normalizarConsultaAmbienteTef({
+        erro: Boolean(operacoesTef.error || configTef.error),
+        quantidade: operacoesTef.data?.length ?? 0,
+        ambienteTef: configTef.data?.ambiente ? String(configTef.data.ambiente) : null,
+      });
+    }, fiscal?.ambiente);
+    if (bloqueioAmbienteTef) {
+      return erro(bloqueioAmbienteTef);
+    }
+    const pagamentosFiscais = fiscalTef.pagamentos;
+
     const bloqueioEletronico =
       validarPagamentosEletronicosParaEmissao({
         modelo: "65",
-        pagamentos: pagamentosConfirmados,
+        pagamentos: pagamentosFiscais,
       });
 
     if (bloqueioEletronico) {
@@ -2108,26 +2152,12 @@ export async function POST(
     payload.nfe.pagamento = {
       troco,
       detalhamento:
-        pagamentosConfirmados.map(
-          (pagamento) => ({
-            tipo:
-              texto(
-                pagamento
-                  .codigo_fiscal
-              ),
-            valor:
-              numero(
-                pagamento.valor
-              ),
-            indicadorPagamento:
-              texto(
-                pagamento
-                  .indicador_pagamento
-              ) ===
-                "1"
-                ? "1"
-                : "0",
-          })
+        pagamentosFiscais.map((pagamento) =>
+          detalhePagamentoGeranet(
+            pagamento,
+            numero(pagamento.valor),
+            texto(pagamento.indicador_pagamento) === "1" ? "1" : "0"
+          )
         ),
     };
 

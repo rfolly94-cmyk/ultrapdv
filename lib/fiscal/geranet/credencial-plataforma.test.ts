@@ -129,7 +129,9 @@ test("certificado e CSC da empresa usam a empresa da sessão, não um empresa_id
 
 test("emissão, consulta, cancelamento e reconciliação leem a credencial global", () => {
   for (const arquivo of ROTAS_EMISSAO) {
-    const conteudo = fonte(arquivo);
+    const conteudo = arquivo.endsWith("nfe-emitir-operacao/route.ts")
+      ? `${fonte(arquivo)}\n${fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts")}`
+      : fonte(arquivo);
     assert.match(conteudo, /obterSegredosFiscaisEmissao/, arquivo);
     assert.doesNotMatch(conteudo, /admin\.rpc\(\s*"obter_segredos_fiscais"/, arquivo);
   }

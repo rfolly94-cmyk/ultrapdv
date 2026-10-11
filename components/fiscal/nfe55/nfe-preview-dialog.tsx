@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 const moeda = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -149,7 +150,24 @@ export function NfePreviewDialog({
   resposta,
   onFechar,
 }: Props) {
-  if (!aberto) return null;
+  const fecharRef = useRef(onFechar);
+  fecharRef.current = onFechar;
+
+  useEffect(() => {
+    if (!aberto) return;
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function aoTeclar(event: KeyboardEvent) {
+      if (event.key === "Escape") fecharRef.current();
+    }
+    document.addEventListener("keydown", aoTeclar);
+    return () => {
+      document.body.style.overflow = overflowAnterior;
+      document.removeEventListener("keydown", aoTeclar);
+    };
+  }, [aberto]);
+
+  if (!aberto || typeof document === "undefined") return null;
 
   const nfe = resposta?.payload?.nfe ?? null;
   const empresa = registro(nfe?.empresa);
@@ -173,31 +191,47 @@ export function NfePreviewDialog({
   const soma = (campo: string) =>
     itens.reduce((total, item) => total + numero(item[campo]), 0);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-zinc-950/70 p-3 md:p-6">
-      <div className="w-full max-w-6xl rounded-xl bg-zinc-200 shadow-2xl">
-        <div className="sticky top-0 z-10 flex flex-wrap items-start justify-between gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3">
-          <div>
-            <p className="text-sm font-bold tracking-wide text-amber-950">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[240] flex items-center justify-center bg-black/60 p-2 sm:p-4"
+      onClick={() => fecharRef.current()}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="nfe-preview-titulo"
+        className="flex max-h-[min(92vh,calc(100dvh-1rem))] w-[min(1400px,96vw)] min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-amber-300 bg-amber-50 px-4 py-3 sm:px-5">
+          <div className="min-w-0">
+            <h2
+              id="nfe-preview-titulo"
+              className="text-sm font-bold tracking-wide text-amber-950 sm:text-base"
+            >
               PRÉ-VISUALIZAÇÃO DA NF-e
+            </h2>
+            <p className="mt-1 inline-flex rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-950">
+              Sem valor fiscal
             </p>
-            <p className="text-sm font-semibold text-amber-900">
-              SEM VALOR FISCAL · NÃO TRANSMITIDA À SEFAZ
+            <p className="mt-1 text-xs text-amber-900 sm:text-sm">
+              Documento não transmitido à SEFAZ.
             </p>
-            <p className="mt-1 max-w-3xl text-xs text-amber-800">
-              {resposta?.mensagem ||
-                "Espelho para conferência. Nenhum número foi reservado."}
-            </p>
+            {resposta?.mensagem ? (
+              <p className="mt-1 max-w-3xl text-xs text-amber-800">{resposta.mensagem}</p>
+            ) : null}
           </div>
           <button
             type="button"
-            onClick={onFechar}
-            className="inline-flex h-9 items-center rounded-lg border border-amber-300 bg-white px-3 text-sm font-semibold text-zinc-800"
+            onClick={() => fecharRef.current()}
+            className="inline-flex h-9 shrink-0 items-center rounded-lg border border-amber-300 bg-white px-3 text-sm font-semibold text-zinc-800"
           >
             Fechar
           </button>
-        </div>
+        </header>
 
+        <div className="min-h-0 flex-1 overflow-y-auto bg-zinc-50">
         <div className="space-y-3 p-3 md:p-4">
           {carregando ? (
             <p className="rounded-lg bg-white px-4 py-8 text-center text-sm text-zinc-600">
@@ -222,44 +256,7 @@ export function NfePreviewDialog({
           ) : null}
 
           {!carregando && resposta?.ok && nfe ? (
-            <div className="space-y-3 bg-white p-3 shadow-sm md:p-4">
-              <div className="grid gap-3 lg:grid-cols-2">
-                <Bloco titulo="Dados do emitente">
-                  <p className="font-semibold">{texto(empresa?.razaoSocial) || "—"}</p>
-                  {texto(empresa?.nomeFantasia) ? (
-                    <p className="text-zinc-600">{texto(empresa?.nomeFantasia)}</p>
-                  ) : null}
-                  <p className="mt-1">
-                    CNPJ {texto(empresa?.cnpj) || "—"} · IE{" "}
-                    {texto(empresa?.inscricaoEstadual) || "—"}
-                  </p>
-                  <p>
-                    CRT{" "}
-                    {ROTULOS_CRT[texto(empresa?.codigoRegimeTributario)] ||
-                      texto(empresa?.codigoRegimeTributario) ||
-                      "—"}
-                  </p>
-                  <p className="mt-1 text-zinc-700">{endereco(empresa)}</p>
-                </Bloco>
-
-                <Bloco titulo="Destinatário">
-                  <p className="font-semibold">{texto(cliente?.razaoSocial) || "—"}</p>
-                  {texto(cliente?.nomeFantasia) ? (
-                    <p className="text-zinc-600">{texto(cliente?.nomeFantasia)}</p>
-                  ) : null}
-                  <p className="mt-1">
-                    {texto(cliente?.cnpj)
-                      ? `CNPJ ${texto(cliente?.cnpj)}`
-                      : texto(cliente?.cpf)
-                        ? `CPF ${texto(cliente?.cpf)}`
-                        : "CPF/CNPJ —"}
-                    {" · "}
-                    IE {texto(cliente?.inscricaoEstadual) || "Não informada"}
-                  </p>
-                  <p className="mt-1 text-zinc-700">{endereco(cliente)}</p>
-                </Bloco>
-              </div>
-
+            <div className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3 shadow-sm md:p-4">
               <Bloco titulo="Dados da NF-e">
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   <p>
@@ -309,8 +306,45 @@ export function NfePreviewDialog({
                 </div>
               </Bloco>
 
+              <div className="grid gap-3 lg:grid-cols-2">
+                <Bloco titulo="Emitente">
+                  <p className="font-semibold">{texto(empresa?.razaoSocial) || "—"}</p>
+                  {texto(empresa?.nomeFantasia) ? (
+                    <p className="text-zinc-600">{texto(empresa?.nomeFantasia)}</p>
+                  ) : null}
+                  <p className="mt-1">
+                    CNPJ {texto(empresa?.cnpj) || "—"} · IE{" "}
+                    {texto(empresa?.inscricaoEstadual) || "—"}
+                  </p>
+                  <p>
+                    CRT{" "}
+                    {ROTULOS_CRT[texto(empresa?.codigoRegimeTributario)] ||
+                      texto(empresa?.codigoRegimeTributario) ||
+                      "—"}
+                  </p>
+                  <p className="mt-1 text-zinc-700">{endereco(empresa)}</p>
+                </Bloco>
+
+                <Bloco titulo="Destinatário">
+                  <p className="font-semibold">{texto(cliente?.razaoSocial) || "—"}</p>
+                  {texto(cliente?.nomeFantasia) ? (
+                    <p className="text-zinc-600">{texto(cliente?.nomeFantasia)}</p>
+                  ) : null}
+                  <p className="mt-1">
+                    {texto(cliente?.cnpj)
+                      ? `CNPJ ${texto(cliente?.cnpj)}`
+                      : texto(cliente?.cpf)
+                        ? `CPF ${texto(cliente?.cpf)}`
+                        : "CPF/CNPJ —"}
+                    {" · "}
+                    IE {texto(cliente?.inscricaoEstadual) || "Não informada"}
+                  </p>
+                  <p className="mt-1 text-zinc-700">{endereco(cliente)}</p>
+                </Bloco>
+              </div>
+
               <Bloco titulo="Itens">
-                <div className="overflow-x-auto">
+                <div className="max-w-full overflow-x-auto">
                   <table className="w-full min-w-[980px] border-collapse text-left text-[12px]">
                     <thead>
                       <tr className="border-b border-zinc-300 text-[10px] uppercase tracking-wide text-zinc-500">
@@ -466,7 +500,7 @@ export function NfePreviewDialog({
                   <p className="mt-2">Troco: {reais(pagamento?.troco)}</p>
                 </Bloco>
 
-                <Bloco titulo="Fatura e duplicatas">
+                <Bloco titulo="Fatura / duplicatas">
                   {fatura ? (
                     <>
                       <p>
@@ -493,15 +527,17 @@ export function NfePreviewDialog({
                 </Bloco>
               </div>
 
-              {referencias.length > 0 ? (
-                <Bloco titulo="Documentos referenciados">
+              <Bloco titulo="Documentos referenciados">
+                {referencias.length > 0 ? (
                   <ul className="space-y-1 break-all">
                     {referencias.map((chave) => (
                       <li key={chave}>{chave}</li>
                     ))}
                   </ul>
-                </Bloco>
-              ) : null}
+                ) : (
+                  <p className="text-zinc-500">Nenhum documento referenciado.</p>
+                )}
+              </Bloco>
 
               <Bloco titulo="Informações adicionais">
                 <p>
@@ -518,7 +554,9 @@ export function NfePreviewDialog({
             </div>
           ) : null}
         </div>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

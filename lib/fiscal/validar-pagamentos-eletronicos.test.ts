@@ -102,6 +102,27 @@ test("4. PIX dinâmico sem dados bloqueia", () => {
   assert.match(erro, /PIX Dinâmico/);
 });
 
+test("PIX com campos de cartão preenchidos não passa como integração", () => {
+  const erro = validarPagamentosEletronicosParaEmissao({
+    modelo: "65",
+    pagamentos: [
+      pagamento({
+        codigo_fiscal: "17",
+        valor: 1,
+        forma_pagamento_nome: "PIX",
+        tipo_integracao: "1",
+        cnpj_credenciadora: "31872495000172",
+        bandeira: "99",
+        autorizacao: "E2E",
+        cnpj_receb: "42741754000142",
+      }),
+    ],
+  });
+  assert.ok(erro);
+  assert.match(erro, /Pagamento eletrônico sem integração fiscal/);
+  assert.match(erro, /PIX/);
+});
+
 test("PIX estático tPag 20 não herda a regra do 17", () => {
   assert.equal(POLITICA_PIX_ESTATICO_TPAG_20, "nao_exigir_vinculacao_ainda");
 

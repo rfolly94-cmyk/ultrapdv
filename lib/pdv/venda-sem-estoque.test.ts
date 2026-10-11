@@ -259,3 +259,12 @@ test("engrenagem do PDV web expõe a opção da empresa e o carrinho valida esto
   assert.match(prefs, /gravarPermitirVendaSemEstoqueSessao/);
   assert.doesNotMatch(fonte("components/pdv/pdv-edicao-shell.tsx"), /permitirVendaSemEstoque/);
 });
+
+test("migration nova alinha a edição com a baixa e não altera a migration antiga", () => {
+  const nova = fonte("supabase/migrations/20261011120000_editar_venda_estoque_permitido.sql");
+  const antiga = fonte("supabase/migrations/20260910121000_pdv_item_avulso_edicao.sql");
+  assert.match(nova, /v_permitir IS NOT TRUE/);
+  assert.match(nova, /permitir_venda_sem_estoque/);
+  assert.match(nova, /Não aplicar automaticamente/);
+  assert.doesNotMatch(antiga, /v_permitir/);
+});

@@ -1,4 +1,4 @@
-; UltraPDV Connector — instalador NSIS
+; UltraPDV Connector â€” instalador NSIS
 Unicode True
 SetCompressor /SOLID lzma
 RequestExecutionLevel admin
@@ -26,14 +26,14 @@ VIAddVersionKey "CompanyName" "${PRODUCT_PUBLISHER}"
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Instalar o UltraPDV Connector"
-!define MUI_WELCOMEPAGE_TEXT "Este assistente instala o UltraPDV Connector neste computador.$\r$\n$\r$\nEle permite que o UltraPDV online imprima neste Windows. Você não precisa instalar Node.js nem SumatraPDF.$\r$\n$\r$\nClique em Avançar para continuar."
-!define MUI_LICENSEPAGE_TEXT_TOP "Revise a licença e os avisos de software de terceiros."
+!define MUI_WELCOMEPAGE_TEXT "Este assistente instala o UltraPDV Connector neste computador.$\r$\n$\r$\nEle permite que o UltraPDV online imprima neste Windows. VocÃª nÃ£o precisa instalar Node.js nem SumatraPDF.$\r$\n$\r$\nClique em AvanÃ§ar para continuar."
+!define MUI_LICENSEPAGE_TEXT_TOP "Revise a licenÃ§a e os avisos de software de terceiros."
 !define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "UltraPDV Conector instalado com sucesso."
 !define MUI_FINISHPAGE_TITLE "UltraPDV Conector instalado com sucesso."
-!define MUI_FINISHPAGE_TEXT "O UltraPDV Connector está pronto neste computador.$\r$\n$\r$\nAbra o UltraPDV na web e vá em Configurações → Impressão."
+!define MUI_FINISHPAGE_TEXT "O UltraPDV Connector estÃ¡ pronto neste computador.$\r$\n$\r$\nAbra o UltraPDV na web e vÃ¡ em ConfiguraÃ§Ãµes â†’ ImpressÃ£o."
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchTestPage
-!define MUI_FINISHPAGE_RUN_TEXT "Abrir página de teste do Conector"
+!define MUI_FINISHPAGE_RUN_TEXT "Abrir pÃ¡gina de teste do Conector"
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
 
 !insertmacro MUI_PAGE_WELCOME
@@ -88,6 +88,9 @@ Section "UltraPDV Connector" SecPrincipal
   File "${STAGING_DIR}\app\*.html"
   File "${STAGING_DIR}\app\version.json"
 
+  SetOutPath "$INSTDIR\bin\tef"
+  File "${STAGING_DIR}\bin\tef\UltraPDVTef_NOVO.exe"
+
   SetOutPath "$INSTDIR\print-engine"
   File "${STAGING_DIR}\print-engine\SumatraPDF.exe"
   File "${STAGING_DIR}\print-engine\libmupdf.dll"
@@ -108,6 +111,8 @@ Section "UltraPDV Connector" SecPrincipal
 
   CreateDirectory "$INSTDIR\data"
   nsExec::ExecToLog 'icacls "$INSTDIR\data" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
+  ; Atualizacao: cria ProgramData se faltar e nao apaga configuracao,
+  ; chave Ed25519, journal, prova, vinculo nem pareamento.
   ReadEnvStr $1 PROGRAMDATA
   CreateDirectory "$1\UltraPDV"
   nsExec::ExecToLog 'icacls "$1\UltraPDV" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
@@ -141,7 +146,7 @@ Section "UltraPDV Connector" SecPrincipal
     Sleep 400
     Goto verify_loop
   verify_fail:
-    MessageBox MB_OK|MB_ICONEXCLAMATION "O UltraPDV Connector foi instalado, mas ainda não respondeu no teste local. Tente abrir Configurações → Impressão no UltraPDV ou reiniciar o Windows."
+    MessageBox MB_OK|MB_ICONEXCLAMATION "O UltraPDV Connector foi instalado, mas ainda nÃ£o respondeu no teste local. Tente abrir ConfiguraÃ§Ãµes â†’ ImpressÃ£o no UltraPDV ou reiniciar o Windows."
     Goto verify_done
   verify_ok:
   verify_done:
@@ -154,6 +159,8 @@ Section "Uninstall"
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "UltraPDVConnector"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\UltraPDVConnector"
   DeleteRegKey HKLM "Software\UltraPDV\Connector"
+  ; A desinstalacao nao apaga tef-chave.json, tef-pendencia.json,
+  ; tef-recuperacao.json, tef-vinculo.json nem tef-pareamento.json.
   ReadEnvStr $1 PROGRAMDATA
   Delete "$1\UltraPDV\print-agent.json"
   Delete "$1\UltraPDV\print-agent.log"

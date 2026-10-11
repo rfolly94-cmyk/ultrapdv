@@ -71,7 +71,10 @@ test("rateio de frete fecha no último item", () => {
 test("Nova NF-e persiste e emite totais editáveis", () => {
   const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
   const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
-  const emitirOperacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const emitirOperacao = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+  ].join("\n");
   const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
   assert.match(form, /Valor do Frete \(R\$\)/);
   assert.match(form, /salvarTotaisOperacaoFiscal/);

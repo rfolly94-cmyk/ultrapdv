@@ -13,7 +13,8 @@ export function ConfiguracoesModuleTabs() {
   const permissoes = usePermissoesUi();
   const recursosLiberados = useRecursosLiberados();
   const tabs = ABAS_CONFIGURACOES_PERMISSAO.filter((aba) => {
-    if (!temPermissao(permissoes, aba.modulo, aba.acao)) {
+    const acoes = "acoes" in aba && aba.acoes ? aba.acoes : [aba.acao];
+    if (!acoes.some((acao) => temPermissao(permissoes, aba.modulo, acao))) {
       return false;
     }
     const recurso = "recurso" in aba ? aba.recurso : null;

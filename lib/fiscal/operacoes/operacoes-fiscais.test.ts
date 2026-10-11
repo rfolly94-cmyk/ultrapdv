@@ -43,7 +43,11 @@ const migracaoVenda = fonte(
   "supabase/migrations/20260818010000_fiscal_operacoes_venda_rascunho.sql"
 );
 const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
-const emitir = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+const emitir = [
+  fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+  fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+  fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+].join("\n");
 const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
 const emitirDevolucao = fonte(
   "app/api/fiscal/geranet/nfe-emitir-devolucao-fornecedor/route.ts"
@@ -522,8 +526,13 @@ test("anti-retransmissão da operação herda o mesmo motor e não altera venda/
   assert.match(emitir, /tipo: "90"/);
   const corpoEmitir = emitir.slice(emitir.indexOf("export async function POST"));
   assert.ok(
-    corpoEmitir.indexOf("montarPayloadNfeGeranet") <
-      corpoEmitir.indexOf("claimTentativaEmissaoFiscal")
+    corpoEmitir.indexOf("montarPayloadNfeOperacaoPreparada") >= 0 &&
+      corpoEmitir.indexOf("montarPayloadNfeOperacaoPreparada") <
+        corpoEmitir.indexOf("claimTentativaEmissaoFiscal")
+  );
+  assert.match(
+    fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+    /montarPayloadNfeGeranet/
   );
   assert.match(emitirVenda, /claimTentativaEmissaoFiscal/);
   assert.match(emitirVenda, /p_origem_tipo:\s*"venda"/);

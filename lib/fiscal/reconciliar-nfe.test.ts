@@ -12,10 +12,12 @@ import {
 import {
   classificarLogEmitir,
   decidirStatusLocal,
-  EmissaoParaConsulta,
-  LogGeranetResumo,
   montarAtualizacaoEmissao,
   reconciliacaoMaterialmenteIgual,
+} from "@/lib/fiscal/geranet/classificar-consulta";
+import type {
+  EmissaoParaConsulta,
+  LogGeranetResumo,
 } from "@/lib/fiscal/geranet/classificar-consulta";
 import { motivoBloqueioInutilizacao } from "@/lib/fiscal/geranet/classificar-inutilizacao";
 

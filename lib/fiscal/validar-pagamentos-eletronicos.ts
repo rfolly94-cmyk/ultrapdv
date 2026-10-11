@@ -32,6 +32,8 @@ export type PagamentoParaProntidaoEletronica = {
   tipo_integracao?: string | null;
   cnpj_credenciadora?: string | null;
   cnpj_receb?: string | null;
+  nsu?: string | null;
+  pix_tef_comprovado?: boolean;
 };
 
 function texto(valor: unknown) {
@@ -111,6 +113,24 @@ export function pagamentoEletronicoTemDadosReais(
   );
 }
 
+/**
+ * PIX TEF não usa o grupo card. A prova é o NSU real, sem bandeira,
+ * autorização ou CNPJ de credenciadora fabricados.
+ */
+export function pagamentoPixTefComprovado(
+  pagamento: PagamentoParaProntidaoEletronica
+) {
+  return (
+    texto(pagamento.codigo_fiscal) === TPAG_PIX_DINAMICO &&
+    pagamento.pix_tef_comprovado === true &&
+    texto(pagamento.nsu).length > 0 &&
+    texto(pagamento.bandeira).length === 0 &&
+    texto(pagamento.autorizacao).length === 0 &&
+    texto(pagamento.tipo_integracao).length === 0 &&
+    somenteDigitos(pagamento.cnpj_credenciadora).length === 0
+  );
+}
+
 export function validarPagamentosEletronicosParaEmissao(input: {
   pagamentos: PagamentoParaProntidaoEletronica[];
   modelo: "55" | "65";
@@ -119,6 +139,21 @@ export function validarPagamentosEletronicosParaEmissao(input: {
     const tPag = texto(pagamento.codigo_fiscal);
 
     if (tPag === TPAG_PIX_ESTATICO) {
+      continue;
+    }
+
+    if (tPag === TPAG_PIX_DINAMICO) {
+      if (!pagamentoPixTefComprovado(pagamento)) {
+        const nome = nomeForma(pagamento, tPag);
+        const valor = formatarReais(numero(pagamento.valor));
+        const documento = nomeDocumento(input.modelo);
+        return [
+          "Pagamento eletrônico sem integração fiscal.",
+          `A venda possui ${nome}, mas os dados da transação necessários para a ${documento} não estão disponíveis.`,
+          "Nenhum número fiscal foi reservado.",
+          `${nome} — ${valor}`,
+        ].join("\n");
+      }
       continue;
     }
 

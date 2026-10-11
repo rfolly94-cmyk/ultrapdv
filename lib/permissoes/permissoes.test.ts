@@ -350,4 +350,77 @@ test("caixa emite PIX no PDV sem configurar_pix e não acessa a configuração",
     modulo: "financeiro",
     acao: "configurar_pix",
   });
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro",
+      permissoes: caixa,
+    }).ok,
+    false
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro/tef",
+      permissoes: caixa,
+    }).ok,
+    false
+  );
+});
+
+test("financeiro mostra PIX e TEF conforme a permissão já existente", () => {
+  const gerente = presetDoPerfil("gerente");
+  const administrador = presetDoPerfil("administrador");
+  assert.equal(temPermissao(gerente, "financeiro", "editar"), true);
+  assert.equal(temPermissao(gerente, "financeiro", "configurar_pix"), false);
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro",
+      permissoes: gerente,
+    }).ok,
+    true
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro/tef",
+      permissoes: gerente,
+    }).ok,
+    true
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro/pix",
+      permissoes: gerente,
+    }).ok,
+    false
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro/tef",
+      permissoes: administrador,
+    }).ok,
+    true
+  );
+  assert.equal(
+    decidirAcessoRota({
+      pathname: "/configuracoes/financeiro/pix",
+      permissoes: administrador,
+    }).ok,
+    true
+  );
+
+  const menu = fonte("lib/permissoes/menu.ts");
+  const abas = fonte("components/configuracoes/configuracoes-module-tabs.tsx");
+  const pagina = fonte("app/configuracoes/financeiro/page.tsx");
+  const tef = fonte("app/configuracoes/financeiro/tef/page.tsx");
+  const next = fonte("next.config.ts");
+  assert.match(menu, /href: "\/configuracoes\/financeiro"/);
+  assert.match(abas, /ABAS_CONFIGURACOES_PERMISSAO/);
+  assert.match(pagina, /TEF — PayGoWeb/);
+  assert.match(pagina, /Instalação, pinpad e terminais/);
+  assert.match(pagina, /\/configuracoes\/financeiro\/tef/);
+  assert.match(pagina, /\/configuracoes\/financeiro\/pix/);
+  assert.doesNotMatch(pagina, /habilitado/);
+  assert.match(tef, /href: "\/configuracoes\/financeiro"/);
+  assert.match(tef, /planoPermiteRecursoEmpresa/);
+  assert.match(tef, /"pdv"/);
+  assert.doesNotMatch(next, /source: "\/configuracoes\/financeiro"/);
 });

@@ -12,6 +12,10 @@ import {
   type ReciboVendaCompleto,
 } from "./recibo-layout";
 import { urlLogoReciboPersonalizada } from "./logo-recibo-personalizada";
+import {
+  apresentarReciboVenda,
+  type ItemReciboFiscal,
+} from "./recibo-apresentacao-fiscal";
 import { resolverLogoReciboEmpresa } from "./resolver-logo-recibo";
 
 type SupabaseServidor = Awaited<ReturnType<typeof createClient>>;
@@ -54,7 +58,7 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
   const { data: venda } = await supabase
     .from("vendas")
     .select(
-      "id, empresa_id, numero, cliente_id, usuario_id, valor_produtos, valor_total, desconto, acrescimo, troco, observacao, finalizada_at, created_at"
+      "id, empresa_id, numero, cliente_id, usuario_id, valor_produtos, valor_total, desconto, acrescimo, frete, troco, observacao, finalizada_at, created_at"
     )
     .eq("empresa_id", empresaId)
     .eq("id", vendaId)
@@ -109,7 +113,7 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
     supabase
       .from("vendas_itens")
       .select(
-        "produto_codigo, produto_nome, quantidade, valor_unitario, desconto, valor_total, empresa_id"
+        "produto_id, produto_codigo, produto_nome, quantidade, valor_unitario, desconto, valor_total, empresa_id"
       )
       .eq("empresa_id", empresaId)
       .eq("venda_id", vendaId)
@@ -224,6 +228,78 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
     logoPersonalizadaUrl,
   };
 
+  const itensComerciais = (itensResult.data ?? [])
+    .filter((item) => item.empresa_id === empresaId)
+    .map((item) => ({
+      produtoId: texto(item.produto_id) || null,
+      codigo: texto(item.produto_codigo),
+      nome: texto(item.produto_nome) || "Item",
+      quantidade: numero(item.quantidade),
+      valorUnitario: numero(item.valor_unitario),
+      desconto: numero(item.desconto),
+      total: numero(item.valor_total),
+    }));
+
+  const operacaoResult = await supabase
+    .from("fiscal_operacoes")
+    .select("id, empresa_id, tipo_operacao_interno")
+    .eq("empresa_id", empresaId)
+    .eq("venda_id", vendaId)
+    .eq("tipo_operacao_interno", "venda")
+    .maybeSingle();
+
+  let itensFiscais: ItemReciboFiscal[] | null = null;
+  let diagnosticoConsulta: string | null = null;
+  const operacao =
+    operacaoResult.data && operacaoResult.data.empresa_id === empresaId
+      ? operacaoResult.data
+      : null;
+  if (operacaoResult.error) {
+    diagnosticoConsulta =
+      "Não foi possível ler a operação fiscal da venda. O recibo usou os valores comerciais.";
+  } else if (operacao) {
+    const itensOperacaoResult = await supabase
+      .from("fiscal_operacoes_itens")
+      .select(
+        "produto_id, quantidade, valor_unitario, valor_total, empresa_id, created_at"
+      )
+      .eq("empresa_id", empresaId)
+      .eq("operacao_id", operacao.id)
+      .order("created_at", { ascending: true });
+    if (itensOperacaoResult.error) {
+      diagnosticoConsulta =
+        "Não foi possível ler os itens da operação fiscal. O recibo usou os valores comerciais.";
+    } else {
+      itensFiscais = (itensOperacaoResult.data ?? [])
+        .filter((item) => item.empresa_id === empresaId)
+        .map((item) => ({
+          produtoId: texto(item.produto_id),
+          quantidade: numero(item.quantidade),
+          valorUnitario: numero(item.valor_unitario),
+          total: numero(item.valor_total),
+        }));
+    }
+  }
+
+  const apresentacao = apresentarReciboVenda({
+    itensComerciais,
+    itensFiscais,
+    valorProdutos: numero(venda.valor_produtos ?? venda.valor_total),
+    desconto: numero(venda.desconto),
+    acrescimo: numero(venda.acrescimo),
+    frete: numero(venda.frete),
+    total: numero(venda.valor_total),
+  });
+  const diagnosticoComposicao =
+    diagnosticoConsulta ?? apresentacao.diagnosticoComposicao;
+  if (diagnosticoComposicao) {
+    console.warn("[recibo] composição", {
+      vendaId,
+      empresaId,
+      diagnostico: diagnosticoComposicao,
+    });
+  }
+
   return {
     vendaId: String(venda.id),
     numero: String(venda.numero ?? "—"),
@@ -237,21 +313,14 @@ export async function carregarReciboVendaDaEmpresaAtiva(args: {
       ...empresaRecibo,
       logoUrl: urlLogoReciboEfetiva(layoutRecibo, empresaRecibo),
     },
-    itens: (itensResult.data ?? [])
-      .filter((item) => item.empresa_id === empresaId)
-      .map((item) => ({
-        codigo: texto(item.produto_codigo),
-        nome: texto(item.produto_nome) || "Item",
-        quantidade: numero(item.quantidade),
-        valorUnitario: numero(item.valor_unitario),
-        desconto: numero(item.desconto),
-        total: numero(item.valor_total),
-      })),
+    itens: apresentacao.itens,
     pagamentos,
-    valorProdutos: numero(venda.valor_produtos ?? venda.valor_total),
-    desconto: numero(venda.desconto),
-    acrescimo: numero(venda.acrescimo),
-    total: numero(venda.valor_total),
+    valorProdutos: apresentacao.valorProdutos,
+    desconto: apresentacao.desconto,
+    acrescimo: apresentacao.acrescimo,
+    frete: apresentacao.frete,
+    total: apresentacao.total,
+    diagnosticoComposicao,
     troco: numero(venda.troco),
     carteira: temFiado
       ? {

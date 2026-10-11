@@ -59,7 +59,8 @@ export default async function PixGeranetPage() {
       description="Recebimento PIX da empresa."
       breadcrumb={[
         { label: "Configurações", href: "/configuracoes" },
-        { label: "Financeiro" },
+        { label: "Financeiro", href: "/configuracoes/financeiro" },
+        { label: "PIX" },
       ]}
       tabs={<ConfiguracoesModuleTabs />}
     >

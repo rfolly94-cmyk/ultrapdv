@@ -33,7 +33,10 @@ function fonte(relativo: string) {
 }
 
 const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
-const emitirOperacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+const emitirOperacao = [
+  fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+  fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+].join("\n");
 const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
 const editor = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
 const atualizar = actions.slice(

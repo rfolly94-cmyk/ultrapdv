@@ -210,7 +210,10 @@ test("payload Geranet usa nfe.cliente.entrega só com a opção ligada", () => {
 test("form, action e emissão isolam por empresa e não alteram o cadastro do cliente", () => {
   const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
   const action = fonte("app/fiscal/nfe/operacoes-actions.ts");
-  const emitirOp = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const emitirOp = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+  ].join("\n");
   const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
   const payload = fonte("lib/fiscal/geranet/montar-payload-nfe.ts");
   assert.match(form, /Endereço de entrega diferente do destinatário/);

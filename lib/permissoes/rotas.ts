@@ -24,7 +24,11 @@ export const PREFIXOS_LIVRES_PERMISSAO = [
 export type ExigenciaRota =
   | { tipo: "livre" }
   | { tipo: "autenticado" }
-  | { tipo: "permissao"; modulo: keyof PermissoesEfetivas; acao: string };
+  | { tipo: "permissao"; modulo: keyof PermissoesEfetivas; acao: string }
+  | {
+      tipo: "permissao_qualquer";
+      alternativas: Array<{ modulo: keyof PermissoesEfetivas; acao: string }>;
+    };
 
 const PREFIXOS_AUTENTICADOS = ["/api/auth", "/api/cadastro"];
 
@@ -92,6 +96,14 @@ export function resolverExigenciaRota(
 
   if (pathname.startsWith("/api/pdv/finalizar")) {
     return { tipo: "autenticado" };
+  }
+
+  if (pathname.startsWith("/api/pdv/tef")) {
+    return { tipo: "permissao", modulo: "pdv", acao: "finalizar_venda" };
+  }
+
+  if (pathname.startsWith("/api/configuracoes/tef")) {
+    return { tipo: "permissao", modulo: "financeiro", acao: "editar" };
   }
 
   if (pathname.startsWith("/api/impressao/recibo")) {
@@ -241,6 +253,20 @@ export function resolverExigenciaRota(
     return { tipo: "permissao", modulo: "usuarios", acao: "acessar" };
   }
 
+  if (pathname.startsWith("/configuracoes/financeiro/tef")) {
+    return { tipo: "permissao", modulo: "financeiro", acao: "editar" };
+  }
+
+  if (pathname === "/configuracoes/financeiro") {
+    return {
+      tipo: "permissao_qualquer",
+      alternativas: [
+        { modulo: "financeiro", acao: "configurar_pix" },
+        { modulo: "financeiro", acao: "editar" },
+      ],
+    };
+  }
+
   if (pathname.startsWith("/configuracoes/financeiro") || pathname.startsWith("/api/pagamentos/pix")) {
     return { tipo: "permissao", modulo: "financeiro", acao: "configurar_pix" };
   }
@@ -367,6 +393,19 @@ export function decidirAcessoRota(input: {
 
   if (exigencia.tipo === "autenticado") {
     return { ok: true };
+  }
+
+  if (exigencia.tipo === "permissao_qualquer") {
+    const permitido = exigencia.alternativas.some((item) =>
+      temPermissao(input.permissoes, item.modulo, item.acao as never)
+    );
+    if (permitido) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      redirect: primeiraRotaPermitida(input.permissoes),
+    };
   }
 
   if (

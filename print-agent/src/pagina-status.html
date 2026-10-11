@@ -115,6 +115,21 @@
           <button type="button" id="btnGaveta">Testar abertura da gaveta</button>
         </div>
       </section>
+      <section class="secao" id="secaoTef">
+        <h2>Pareamento TEF</h2>
+        <p class="muted">Digite este código na configuração TEF da empresa, neste estabelecimento. Ele não aparece para outras páginas.</p>
+        <div class="row">
+          <span class="muted">Código</span>
+          <strong id="codigoPareamento">—</strong>
+        </div>
+        <div class="row">
+          <span class="muted">Chave</span>
+          <span id="chaveTef">—</span>
+        </div>
+        <div class="acoes">
+          <button type="button" id="btnNovaChave">Gerar nova chave neste computador</button>
+        </div>
+      </section>
       <div class="acoes">
         <button type="button" class="primario" id="btnSalvar">Salvar configuração</button>
         <button type="button" id="btnTeste">Testar impressão</button>
@@ -315,8 +330,35 @@
         msg.textContent = "Conector encerrado.";
       };
 
+      async function atualizarPareamento() {
+        try {
+          const pareamento = await api("/tef/pareamento");
+          document.getElementById("codigoPareamento").textContent =
+            pareamento.data && pareamento.data.codigo ? pareamento.data.codigo : "Indisponível";
+          const identidade = await api("/tef/identidade");
+          document.getElementById("chaveTef").textContent =
+            identidade.data && identidade.data.chaveId ? identidade.data.chaveId : "—";
+        } catch {
+          document.getElementById("codigoPareamento").textContent = "Indisponível";
+        }
+      }
+
+      document.getElementById("btnNovaChave").onclick = async () => {
+        msg.textContent = "Gerando nova chave…";
+        const { data } = await api("/tef/chave/rotacionar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        msg.textContent = data.ok
+          ? "Nova chave gerada. Autorize de novo o terminal na empresa e revogue a chave anterior."
+          : (data.erro || "Não foi possível gerar a chave.");
+        atualizarPareamento();
+      };
+
       atualizar(true);
-      setInterval(function () { atualizar(); }, 8000);
+      atualizarPareamento();
+      setInterval(function () { atualizar(); atualizarPareamento(); }, 8000);
     </script>
   </body>
 </html>

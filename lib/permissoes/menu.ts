@@ -53,9 +53,10 @@ export const ABAS_CONFIGURACOES_PERMISSAO = [
   },
   {
     label: "Financeiro",
-    href: "/configuracoes/financeiro/pix",
+    href: "/configuracoes/financeiro",
     modulo: "financeiro" as const,
     acao: "configurar_pix" as const,
+    acoes: ["configurar_pix", "editar"] as const,
   },
   {
     label: "Contabilidade",

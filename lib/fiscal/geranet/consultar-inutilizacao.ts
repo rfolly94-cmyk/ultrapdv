@@ -11,8 +11,10 @@ import {
 import {
   anoFiscalDaEmissao,
   classificarLogInutilizacao,
-  EmissaoParaInutilizacao,
   logInutilizacaoCompativel,
+} from "@/lib/fiscal/geranet/classificar-inutilizacao";
+import type {
+  EmissaoParaInutilizacao,
   LogInutilizacao,
   SituacaoInutilizacao,
 } from "@/lib/fiscal/geranet/classificar-inutilizacao";

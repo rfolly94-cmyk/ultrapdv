@@ -50,6 +50,12 @@ test("erros internos da RPC não vazam para o cliente", () => {
     ),
     "O caixa foi fechado. Abra um caixa para continuar."
   );
+  assert.equal(
+    mensagemErroFinalizacaoPublica(
+      'new row for relation "estoque_movimentacoes" violates check constraint "estoque_movimentacoes_saldos_check"'
+    ),
+    "Não foi possível concluir a venda porque o estoque ficaria negativo. O histórico de movimentações exige saldo anterior e posterior maiores ou iguais a zero."
+  );
 });
 
 test("API mobile não exige caixa aberto nesta fase; PDV web exige", () => {

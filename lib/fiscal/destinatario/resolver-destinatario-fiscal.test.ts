@@ -263,7 +263,10 @@ test("flag e IE para payload", () => {
 test("Validar e Emitir compartilham o mesmo resolver e persistência de snapshot", () => {
   const actions = fonte("app/fiscal/nfe/operacoes-actions.ts");
   const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
-  const emitirOp = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const emitirOp = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+  ].join("\n");
   const conferir = fonte("lib/fiscal/operacoes/verificar-operacao.ts");
   const form = fonte("components/fiscal/nfe55/nfe-emissao-form.tsx");
   const paginaVenda = fonte("app/vendas/[id]/nfe/page.tsx");

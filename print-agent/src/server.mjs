@@ -49,6 +49,46 @@ import {
 } from "./portas.mjs";
 import { gerarPdfTesteConector } from "./pdf-teste.mjs";
 import { pastaDados, resolverRaizAgente } from "./raiz.mjs";
+import {
+  MENSAGEM_TEF_NAO_INSTALADO,
+  GerenciadorTefNativo,
+  apresentarStatusTef,
+  autorizacaoDoVinculo,
+  validarPayloadHttpTef,
+} from "./tef.mjs";
+import {
+  apresentarVinculoTef,
+  arquivoVinculoTef,
+  gravarVinculoTef,
+  lerVinculoTef,
+  removerVinculoTef,
+  validarVinculoTef,
+  vinculoConfere,
+} from "./tef-vinculo.mjs";
+import {
+  arquivoChaveTef,
+  assinarIdentidadeTef,
+  assinarPareamentoTef,
+  assinarProvaTef,
+  dadosFiscaisProvaTef,
+  hashCodigoPareamento,
+  lerOuCriarChaveTef,
+} from "./tef-prova.mjs";
+import {
+  arquivoPareamentoTef,
+  conferirCodigoPareamento,
+  consumirPareamento,
+  garantirPareamento,
+  gravarPareamentoTef,
+  lerPareamentoTef,
+} from "./tef-pareamento.mjs";
+import {
+  arquivoRecuperacaoTef,
+  gravarRecuperacaoTef,
+  lerRecuperacaoTef,
+  registroRecuperacaoTef,
+  removerRecuperacaoTef,
+} from "./tef-recuperacao.mjs";
 import { iniciarTray } from "./tray.mjs";
 import { APP_CONECTOR, carregarVersao, NOME_CONECTOR, SERVICO_CONECTOR } from "./versao.mjs";
 
@@ -68,6 +108,35 @@ function aplicarCors(headers, origem, origens) {
     headers["Access-Control-Allow-Private-Network"] = "true";
   }
   return headers;
+}
+
+function respostaOperacaoTef(resultado) {
+  const corpo = {
+    ok: resultado?.ok === true,
+    tef: apresentarStatusTef(resultado?.tef),
+  };
+  if (resultado?.codigo && resultado.codigo !== "ok") {
+    corpo.codigo = resultado.codigo;
+  }
+  if (!corpo.ok) {
+    corpo.erro = resultado?.erro || MENSAGEM_TEF_NAO_INSTALADO;
+  }
+  if (
+    resultado?.resultado &&
+    typeof resultado.resultado === "object" &&
+    !Array.isArray(resultado.resultado)
+  ) {
+    corpo.resultado = resultado.resultado;
+  }
+  if (resultado && Object.prototype.hasOwnProperty.call(resultado, "evidencia")) {
+    corpo.evidencia = resultado.evidencia && typeof resultado.evidencia === "object"
+      ? resultado.evidencia
+      : null;
+  }
+  return {
+    status: Number(resultado?.statusHttp) || (corpo.ok ? 200 : 503),
+    corpo,
+  };
 }
 
 function json(res, status, corpo, origem, origens) {
@@ -228,6 +297,115 @@ export function criarServidor(deps = {}) {
       drawerEnabled: false,
       drawerPin: 0,
     }));
+  const gerenciadorTef =
+    deps.gerenciadorTef ??
+    new GerenciadorTefNativo({
+      localizar: deps.localizarTefNativo,
+      spawn: deps.spawnTef,
+      registrarLog: deps.registrarLogTef,
+      criarId: deps.criarIdTef,
+      agendar: deps.agendarTef,
+      cancelarAgendamento: deps.cancelarAgendamentoTef,
+      limiteEncerramentoMs: deps.limiteEncerramentoTefMs,
+      arquivoPendencia: deps.arquivoPendenciaTef,
+    });
+  const consultarStatusTef = deps.statusTef ?? (() => gerenciadorTef.consultar());
+  const executarTesteTef = deps.testarTef ?? (() => gerenciadorTef.testar());
+  const diagnosticarPinpadTef =
+    deps.diagnosticarPinpadTef ??
+    ((testar) => gerenciadorTef.diagnosticarPinpad(testar));
+  const executarInicializacaoTef =
+    deps.inicializarTef ??
+    (async () => {
+      const vinculo = await lerVinculo();
+      const dispositivoLocal = String(await obterId());
+      return gerenciadorTef.inicializar(autorizacaoDoVinculo(vinculo, dispositivoLocal));
+    });
+  const executarInstalacaoTef =
+    deps.instalarTef ??
+    (async () => {
+      const vinculo = await lerVinculo();
+      const dispositivoLocal = String(await obterId());
+      const chave = await lerChave();
+      return gerenciadorTef.instalar(
+        autorizacaoDoVinculo(vinculo, dispositivoLocal, chave?.privada)
+      );
+    });
+  const executarPagamentoTef =
+    deps.pagarTef ?? ((dados) => gerenciadorTef.pagar(dados));
+  const executarConfirmacaoTef =
+    deps.confirmarTef ?? ((dados) => gerenciadorTef.confirmar(dados));
+  const executarDesfazimentoTef =
+    deps.desfazerTef ?? ((dados) => gerenciadorTef.desfazer(dados));
+  const arquivoVinculo = deps.arquivoVinculoTef ?? arquivoVinculoTef();
+  const lerVinculo =
+    deps.lerVinculoTef ?? (() => lerVinculoTef(arquivoVinculo));
+  const gravarVinculo =
+    deps.gravarVinculoTef ??
+    ((vinculo) => gravarVinculoTef(arquivoVinculo, vinculo));
+  const removerVinculo =
+    deps.removerVinculoTef ?? (() => removerVinculoTef(arquivoVinculo));
+  const exigirVinculoTef = deps.exigirVinculoTef !== false;
+  const lerChave =
+    deps.lerChaveTef ??
+    (() => lerOuCriarChaveTef(deps.arquivoChaveTef ?? arquivoChaveTef()));
+  const arquivoPareamento = deps.arquivoPareamentoTef ?? arquivoPareamentoTef();
+  const lerPareamento =
+    deps.lerPareamentoTef ?? (() => lerPareamentoTef(arquivoPareamento));
+  const gravarPareamento =
+    deps.gravarPareamentoTef ??
+    ((pareamento) => gravarPareamentoTef(arquivoPareamento, pareamento));
+  const arquivoRecuperacao = deps.arquivoRecuperacaoTef ?? arquivoRecuperacaoTef();
+  const lerRecuperacao =
+    deps.lerRecuperacaoTef ?? (() => lerRecuperacaoTef(arquivoRecuperacao));
+  const gravarRecuperacao =
+    deps.gravarRecuperacaoTef ??
+    ((registro) => gravarRecuperacaoTef(arquivoRecuperacao, registro));
+  const removerRecuperacao =
+    deps.removerRecuperacaoTef ?? (() => removerRecuperacaoTef(arquivoRecuperacao));
+  function origemLoopback(origem) {
+    if (!origem) {
+      return true;
+    }
+    try {
+      const endereco = new URL(origem);
+      return endereco.hostname === "127.0.0.1" || endereco.hostname === "localhost";
+    } catch {
+      return false;
+    }
+  }
+  function headerTef(req, nome) {
+    const valor = req.headers[nome];
+    return String(Array.isArray(valor) ? valor[0] ?? "" : valor ?? "").trim();
+  }
+  async function contextoFinanceiroTef(req) {
+    const vinculo = await lerVinculo();
+    const conferencia = vinculoConfere(vinculo, req.headers);
+    if (!conferencia.ok) {
+      return conferencia;
+    }
+    if (exigirVinculoTef && !vinculo) {
+      return { ok: false, erro: "Terminal TEF não vinculado." };
+    }
+    const desafio = headerTef(req, "x-ultrapdv-desafio");
+    if (exigirVinculoTef && !/^[a-f0-9]{32,128}$/i.test(desafio)) {
+      return { ok: false, erro: "Desafio TEF ausente." };
+    }
+    return { ok: true, desafio };
+  }
+  async function anexarProvaTef(corpo, campos) {
+    if (!campos.desafio) {
+      return corpo;
+    }
+    const chave = await lerChave();
+    if (!chave?.privada) {
+      return corpo;
+    }
+    return {
+      ...corpo,
+      prova: assinarProvaTef(chave.privada, campos),
+    };
+  }
   const aoTestarImpressao = deps.aoTestarImpressao ?? (async (input) => {
     const motor = await localizar();
     const impressoras = await listar();
@@ -289,7 +467,8 @@ export function criarServidor(deps = {}) {
       const headers = aplicarCors(
         {
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Cache-Control, Pragma",
+          "Access-Control-Allow-Headers":
+            "Content-Type, Cache-Control, Pragma, x-ultrapdv-empresa, x-ultrapdv-terminal, x-ultrapdv-desafio, x-ultrapdv-identificador, x-ultrapdv-valor-centavos, x-ultrapdv-autorizacao, x-ultrapdv-estabelecimento",
           "Access-Control-Max-Age": "600",
         },
         origemCheck.origem,
@@ -693,6 +872,738 @@ export function criarServidor(deps = {}) {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/tef/status") {
+        const tef = apresentarStatusTef(await consultarStatusTef());
+        const vinculo = apresentarVinculoTef(await lerVinculo());
+        json(res, 200, { ok: true, tef, vinculo }, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/tef/identidade") {
+        const chave = await lerChave();
+        const dispositivoId = String(await obterId());
+        json(
+          res,
+          200,
+          {
+            ok: true,
+            dispositivoId,
+            chavePublica: chave.publica,
+            chaveId: chave.id,
+            assinatura: assinarIdentidadeTef(chave.privada, dispositivoId),
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/tef/pareamento") {
+        if (!origemLoopback(origemCheck.origem)) {
+          json(
+            res,
+            403,
+            { ok: false, erro: "O código de pareamento só aparece neste computador." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const emitido = garantirPareamento(await lerPareamento());
+        await gravarPareamento(emitido);
+        json(
+          res,
+          200,
+          { ok: true, codigo: emitido.codigo, expiraEm: emitido.expiraEm },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/pareamento/apresentar") {
+        let dadosCodigo;
+        try {
+          dadosCodigo = JSON.parse((await lerBody(req)).toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        if (
+          !dadosCodigo ||
+          Array.isArray(dadosCodigo) ||
+          typeof dadosCodigo !== "object" ||
+          Object.keys(dadosCodigo).some((chave) => chave !== "codigo")
+        ) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const conferenciaCodigo = conferirCodigoPareamento(
+          await lerPareamento(),
+          dadosCodigo.codigo
+        );
+        if (!conferenciaCodigo.ok) {
+          if (conferenciaCodigo.atual) {
+            await gravarPareamento(conferenciaCodigo.atual);
+          }
+          json(
+            res,
+            403,
+            { ok: false, erro: conferenciaCodigo.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const chaveApresentacao = await lerChave();
+        const dispositivoApresentacao = String(await obterId());
+        json(
+          res,
+          200,
+          {
+            ok: true,
+            dispositivoId: dispositivoApresentacao,
+            chavePublica: chaveApresentacao.publica,
+            chaveId: chaveApresentacao.id,
+            assinaturaPareamento: assinarPareamentoTef(
+              chaveApresentacao.privada,
+              hashCodigoPareamento(dadosCodigo.codigo),
+              dispositivoApresentacao
+            ),
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/chave/rotacionar") {
+        if (!origemLoopback(origemCheck.origem)) {
+          json(
+            res,
+            403,
+            { ok: false, erro: "A chave só pode ser substituída neste computador." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        await gerenciadorTef.garantirPendencia?.();
+        const statusRotacao = await consultarStatusTef();
+        if (statusRotacao?.transacaoPendenteConfirmacao === true) {
+          json(
+            res,
+            409,
+            { ok: false, erro: "Há transação TEF pendente. Resolva antes de substituir a chave." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const { gerarChaveTef } = await import("./tef-prova.mjs");
+        const novaChave = gerarChaveTef();
+        const arquivoChave = deps.arquivoChaveTef ?? arquivoChaveTef();
+        const fsChave = await import("node:fs/promises");
+        await fsChave.mkdir(path.dirname(arquivoChave), { recursive: true });
+        await fsChave.writeFile(arquivoChave, JSON.stringify(novaChave), {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+        json(
+          res,
+          200,
+          { ok: true, chaveId: novaChave.id },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/tef/recuperacao") {
+        const vinculoRecuperacao = await lerVinculo();
+        const conferenciaRecuperacao = vinculoConfere(vinculoRecuperacao, req.headers);
+        if (!vinculoRecuperacao || !conferenciaRecuperacao.ok) {
+          json(
+            res,
+            403,
+            { ok: false, erro: "Terminal TEF não vinculado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const recuperacao = await lerRecuperacao();
+        json(
+          res,
+          200,
+          { ok: true, recuperacao },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/tef/menu") {
+        json(res, 200, { ok: true, menu: gerenciadorTef.consultarMenuInterativo() }, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/menu/responder") {
+        // O menu jamais confirma uma transacao: apenas escolhe a opcao do provedor.
+        let dados;
+        try {
+          const body = await lerBody(req);
+          dados = JSON.parse(body.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload invalido." }, origemCheck.origem, origens);
+          return;
+        }
+        if (!dados || Array.isArray(dados) || typeof dados !== "object" ||
+            Object.keys(dados).some((k) => !["id", "solicitacaoId", "indice"].includes(k))) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const resultado = gerenciadorTef.responderMenuInterativo(dados);
+        json(res, resultado.ok ? 200 : 409, resultado, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/teste") {
+        const brutoTef = await lerBody(req);
+        let payloadTef;
+        try {
+          payloadTef = JSON.parse(brutoTef.toString("utf8") || "{}");
+        } catch {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload inválido." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validacaoTef = validarPayloadHttpTef(payloadTef);
+        if (!validacaoTef.ok) {
+          json(
+            res,
+            400,
+            { ok: false, erro: validacaoTef.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const resultadoTef = await executarTesteTef();
+        const httpTef = respostaOperacaoTef(resultadoTef);
+        json(res, httpTef.status, httpTef.corpo, origemCheck.origem, origens);
+        return;
+      }
+
+      if (
+        (req.method === "GET" && url.pathname === "/tef/pinpad/diagnostico") ||
+        (req.method === "POST" && url.pathname === "/tef/pinpad/testar-comunicacao")
+      ) {
+        const testarComunicacao = req.method === "POST";
+        if (testarComunicacao) {
+          const brutoPinpad = await lerBody(req);
+          let payloadPinpad;
+          try {
+            payloadPinpad = JSON.parse(brutoPinpad.toString("utf8") || "{}");
+          } catch {
+            json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+            return;
+          }
+          const validacaoPinpad = validarPayloadHttpTef(
+            payloadPinpad,
+            "pinpad-testar-comunicacao"
+          );
+          if (!validacaoPinpad.ok) {
+            json(res, 400, { ok: false, erro: validacaoPinpad.erro }, origemCheck.origem, origens);
+            return;
+          }
+          if (
+            Object.keys(payloadPinpad).some(
+              (chave) => chave !== "acao"
+            )
+          ) {
+            json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+            return;
+          }
+        }
+        const bloqueioPinpad = await contextoFinanceiroTef(req);
+        if (!bloqueioPinpad.ok) {
+          json(res, 403, { ok: false, erro: bloqueioPinpad.erro }, origemCheck.origem, origens);
+          return;
+        }
+        const resultadoPinpad = await diagnosticarPinpadTef(testarComunicacao);
+        const httpPinpad = respostaOperacaoTef(resultadoPinpad);
+        json(res, httpPinpad.status, httpPinpad.corpo, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/inicializar") {
+        const brutoInicio = await lerBody(req);
+        let payloadInicio;
+        try {
+          payloadInicio = JSON.parse(brutoInicio.toString("utf8") || "{}");
+        } catch {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload inválido." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validacaoInicio = validarPayloadHttpTef(payloadInicio, "inicializar");
+        if (!validacaoInicio.ok) {
+          json(
+            res,
+            400,
+            { ok: false, erro: validacaoInicio.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const resultadoInicio = await executarInicializacaoTef();
+        const httpInicio = respostaOperacaoTef(resultadoInicio);
+        json(res, httpInicio.status, httpInicio.corpo, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/instalar") {
+        const brutoInstalacao = await lerBody(req);
+        let payloadInstalacao;
+        try {
+          payloadInstalacao = JSON.parse(brutoInstalacao.toString("utf8") || "{}");
+        } catch {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload inválido." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validacaoInstalacao = validarPayloadHttpTef(payloadInstalacao, "instalar");
+        if (!validacaoInstalacao.ok) {
+          json(
+            res,
+            400,
+            { ok: false, erro: validacaoInstalacao.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (Object.keys(payloadInstalacao).some((chave) => chave !== "acao")) {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload recusado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const resultadoInstalacao = await executarInstalacaoTef();
+        const httpInstalacao = respostaOperacaoTef(resultadoInstalacao);
+        json(
+          res,
+          httpInstalacao.status,
+          httpInstalacao.corpo,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/pagamento") {
+        const brutoPagamento = await lerBody(req);
+        let payloadPagamento;
+        try {
+          payloadPagamento = JSON.parse(brutoPagamento.toString("utf8") || "{}");
+        } catch {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload inválido." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validacaoPagamento = validarPayloadHttpTef(payloadPagamento, "pagamento");
+        if (!validacaoPagamento.ok) {
+          json(
+            res,
+            400,
+            { ok: false, erro: validacaoPagamento.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (
+          Object.keys(payloadPagamento).some(
+            (chave) => chave !== "acao" && chave !== "identificador" && chave !== "valor"
+          )
+        ) {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload recusado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const bloqueioVinculoPagamento = await contextoFinanceiroTef(req);
+        if (!bloqueioVinculoPagamento.ok) {
+          json(
+            res,
+            403,
+            { ok: false, erro: bloqueioVinculoPagamento.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const resultadoPagamento = await executarPagamentoTef({
+          identificador: payloadPagamento.identificador,
+          valor: payloadPagamento.valor,
+        });
+        const httpPagamento = respostaOperacaoTef(resultadoPagamento);
+        const resultadoBruto = httpPagamento.corpo.resultado ?? {};
+        const valorResultado = Number(resultadoBruto.valor);
+        const fiscalPagamento = dadosFiscaisProvaTef(resultadoBruto);
+        httpPagamento.corpo = await anexarProvaTef(httpPagamento.corpo, {
+          acao: "pagamento",
+          desafio: bloqueioVinculoPagamento.desafio,
+          identificador: payloadPagamento.identificador,
+          valorCentavos: Number.isFinite(valorResultado)
+            ? Math.round(valorResultado * 100)
+            : Math.round(Number(payloadPagamento.valor) * 100),
+          nsu: resultadoBruto.nsu,
+          autorizacao: resultadoBruto.codigoAutorizacao || resultadoBruto.autorizacao,
+          rede: resultadoBruto.rede,
+          finalizacao: resultadoBruto.codigoFinalizacao || resultadoBruto.finalizacao,
+          sucesso: resultadoBruto.sucessoTransacao === true,
+          codigo: httpPagamento.corpo.codigo || "",
+          ...fiscalPagamento,
+        });
+        if (httpPagamento.corpo.prova) {
+          const recuperacao = registroRecuperacaoTef({
+            identificador: payloadPagamento.identificador,
+            prova: httpPagamento.corpo.prova,
+            nsu: resultadoBruto.nsu,
+            autorizacao: resultadoBruto.codigoAutorizacao || resultadoBruto.autorizacao,
+            rede: resultadoBruto.rede,
+            finalizacao: resultadoBruto.codigoFinalizacao || resultadoBruto.finalizacao,
+            valor: Number.isFinite(valorResultado) ? valorResultado : Number(payloadPagamento.valor),
+            sucessoTransacao: resultadoBruto.sucessoTransacao === true,
+            codigo: httpPagamento.corpo.codigo || "",
+            bandeira: fiscalPagamento.bandeira,
+            cnpjCredenciadora: fiscalPagamento.cnpjCredenciadora,
+            cnpjRecebedor: fiscalPagamento.cnpjRecebedor,
+            instituicao: fiscalPagamento.instituicao,
+            confirmar: resultadoBruto.confirmar === true,
+            precisaConfirmacao: resultadoBruto.precisaConfirmacao === true,
+            transacaoPendenteConfirmacao: resultadoBruto.transacaoPendenteConfirmacao === true,
+            cancelada: resultadoBruto.cancelada === true,
+          });
+          if (recuperacao) {
+            await gravarRecuperacao(recuperacao).catch(() => {});
+          }
+        }
+        json(
+          res,
+          httpPagamento.status,
+          httpPagamento.corpo,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/confirmar") {
+        const brutoConfirmacao = await lerBody(req);
+        let payloadConfirmacao;
+        try {
+          payloadConfirmacao = JSON.parse(brutoConfirmacao.toString("utf8") || "{}");
+        } catch {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload inválido." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validacaoConfirmacao = validarPayloadHttpTef(payloadConfirmacao, "confirmar");
+        if (!validacaoConfirmacao.ok) {
+          json(
+            res,
+            400,
+            { ok: false, erro: validacaoConfirmacao.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (
+          Object.keys(payloadConfirmacao).some(
+            (chave) =>
+              chave !== "acao" &&
+              chave !== "rede" &&
+              chave !== "nsu" &&
+              chave !== "finalizacao"
+          )
+        ) {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload recusado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const bloqueioVinculoConfirmacao = await contextoFinanceiroTef(req);
+        if (!bloqueioVinculoConfirmacao.ok) {
+          json(
+            res,
+            403,
+            { ok: false, erro: bloqueioVinculoConfirmacao.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const resultadoConfirmacao = await executarConfirmacaoTef({
+          rede: payloadConfirmacao.rede,
+          nsu: payloadConfirmacao.nsu,
+          finalizacao: payloadConfirmacao.finalizacao,
+        });
+        const httpConfirmacao = respostaOperacaoTef(resultadoConfirmacao);
+        httpConfirmacao.corpo = await anexarProvaTef(httpConfirmacao.corpo, {
+          acao: "confirmar",
+          desafio: bloqueioVinculoConfirmacao.desafio,
+          identificador: headerTef(req, "x-ultrapdv-identificador"),
+          valorCentavos: Number(headerTef(req, "x-ultrapdv-valor-centavos")),
+          nsu: payloadConfirmacao.nsu,
+          autorizacao: headerTef(req, "x-ultrapdv-autorizacao"),
+          rede: payloadConfirmacao.rede,
+          finalizacao: payloadConfirmacao.finalizacao,
+          sucesso: httpConfirmacao.corpo.ok === true,
+          codigo: "",
+        });
+        if (httpConfirmacao.corpo.ok === true) {
+          await removerRecuperacao().catch(() => {});
+        }
+        json(
+          res,
+          httpConfirmacao.status,
+          httpConfirmacao.corpo,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/desfazer") {
+        const brutoDesfazimento = await lerBody(req);
+        let payloadDesfazimento;
+        try {
+          payloadDesfazimento = JSON.parse(brutoDesfazimento.toString("utf8") || "{}");
+        } catch {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload inválido." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validacaoDesfazimento = validarPayloadHttpTef(payloadDesfazimento, "desfazer");
+        if (!validacaoDesfazimento.ok) {
+          json(
+            res,
+            400,
+            { ok: false, erro: validacaoDesfazimento.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (
+          Object.keys(payloadDesfazimento).some(
+            (chave) =>
+              chave !== "acao" &&
+              chave !== "rede" &&
+              chave !== "nsu" &&
+              chave !== "finalizacao"
+          )
+        ) {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Payload recusado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const bloqueioVinculoDesfazimento = await contextoFinanceiroTef(req);
+        if (!bloqueioVinculoDesfazimento.ok) {
+          json(
+            res,
+            403,
+            { ok: false, erro: bloqueioVinculoDesfazimento.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
+        const resultadoDesfazimento = await executarDesfazimentoTef({
+          rede: payloadDesfazimento.rede,
+          nsu: payloadDesfazimento.nsu,
+          finalizacao: payloadDesfazimento.finalizacao,
+        });
+        const httpDesfazimento = respostaOperacaoTef(resultadoDesfazimento);
+        httpDesfazimento.corpo = await anexarProvaTef(httpDesfazimento.corpo, {
+          acao: "desfazer",
+          desafio: bloqueioVinculoDesfazimento.desafio,
+          identificador: headerTef(req, "x-ultrapdv-identificador"),
+          valorCentavos: Number(headerTef(req, "x-ultrapdv-valor-centavos")),
+          nsu: payloadDesfazimento.nsu,
+          autorizacao: headerTef(req, "x-ultrapdv-autorizacao"),
+          rede: payloadDesfazimento.rede,
+          finalizacao: payloadDesfazimento.finalizacao,
+          sucesso: httpDesfazimento.corpo.ok === true,
+          codigo: "",
+        });
+        if (httpDesfazimento.corpo.ok === true) {
+          await removerRecuperacao().catch(() => {});
+        }
+        json(
+          res,
+          httpDesfazimento.status,
+          httpDesfazimento.corpo,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/vincular") {
+        let dadosVinculo;
+        try {
+          dadosVinculo = JSON.parse((await lerBody(req)).toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const codigoVinculo = typeof dadosVinculo?.codigo === "string" ? dadosVinculo.codigo : "";
+        const restanteVinculo = { ...dadosVinculo };
+        delete restanteVinculo.codigo;
+        const conferenciaCodigoVinculo = conferirCodigoPareamento(
+          await lerPareamento(),
+          codigoVinculo
+        );
+        if (!conferenciaCodigoVinculo.ok) {
+          if (conferenciaCodigoVinculo.atual) {
+            await gravarPareamento(conferenciaCodigoVinculo.atual);
+          }
+          json(
+            res,
+            403,
+            { ok: false, erro: conferenciaCodigoVinculo.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const validadoVinculo = validarVinculoTef(restanteVinculo);
+        if (!validadoVinculo.ok) {
+          json(res, 400, { ok: false, erro: validadoVinculo.erro }, origemCheck.origem, origens);
+          return;
+        }
+        if (!validadoVinculo.vinculo.estabelecimento || !validadoVinculo.vinculo.pontoCaptura) {
+          json(
+            res,
+            400,
+            { ok: false, erro: "Informe o estabelecimento e o ponto de captura autorizados." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const dispositivoLocal = String(await obterId());
+        if (validadoVinculo.vinculo.dispositivoId !== dispositivoLocal) {
+          json(
+            res,
+            403,
+            { ok: false, erro: "Este Connector não é o terminal informado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const atual = await lerVinculo();
+        if (atual && atual.empresaId !== validadoVinculo.vinculo.empresaId) {
+          json(
+            res,
+            409,
+            { ok: false, erro: "Terminal TEF já vinculado a outra empresa." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        await gravarVinculo(validadoVinculo.vinculo);
+        await gravarPareamento(consumirPareamento(conferenciaCodigoVinculo.atual));
+        json(
+          res,
+          200,
+          { ok: true, vinculo: apresentarVinculoTef(validadoVinculo.vinculo) },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/desvincular") {
+        const atualDesvinculo = await lerVinculo();
+        const conferenciaDesvinculo = vinculoConfere(atualDesvinculo, req.headers);
+        if (!atualDesvinculo || !conferenciaDesvinculo.ok) {
+          json(
+            res,
+            403,
+            { ok: false, erro: "Somente a empresa vinculada pode liberar o terminal." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        await removerVinculo();
+        json(res, 200, { ok: true, vinculo: { vinculado: false } }, origemCheck.origem, origens);
+        return;
+      }
+
       json(
         res,
         404,
@@ -760,6 +1671,10 @@ async function iniciar() {
   let servidorAtual = null;
   let trayProc = null;
   let mutexSrv = null;
+  const gerenciadorTef = new GerenciadorTefNativo({
+    registrarLog: (evento, detalhe, opcoes) =>
+      registrarLog(evento, detalhe, opcoes),
+  });
 
   function montarDeps() {
     return {
@@ -767,6 +1682,7 @@ async function iniciar() {
       nome: VERSAO_INFO.name,
       versao: VERSAO_INFO.version,
       estado,
+      gerenciadorTef,
       obterDispositivoId: () => obterOuCriarDispositivoId({ pasta: dados }),
       encerrarProcesso: () => {
         estado.status = "erro";
@@ -778,12 +1694,14 @@ async function iniciar() {
             // ignore
           }
         }
-        void removerPid({ pasta: dados }).finally(() => {
-          if (mutexSrv) {
-            mutexSrv.close();
-          }
-          void fecharServidor(servidorAtual).finally(() => process.exit(0));
-          setTimeout(() => process.exit(0), 1500);
+        void gerenciadorTef.encerrar().finally(() => {
+          void removerPid({ pasta: dados }).finally(() => {
+            if (mutexSrv) {
+              mutexSrv.close();
+            }
+            void fecharServidor(servidorAtual).finally(() => process.exit(0));
+            setTimeout(() => process.exit(0), 1500);
+          });
         });
       },
       aoImpressaoOk: async ({ impressora, papel }) => {
@@ -842,6 +1760,7 @@ async function iniciar() {
         return { ok: true, impressora, papel };
       },
       aoReiniciar: async () => {
+        await gerenciadorTef.encerrar();
         await registrarLog("reinicio", `porta=${estado.porta}`);
         estado.status = "reiniciando";
         const porta = estado.porta;

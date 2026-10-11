@@ -4,6 +4,15 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { validarPixNaFinalizacaoComercial } from "@/lib/pagamentos/pix/modo-ativo-servidor";
+import {
+  validarTefNaFinalizacao,
+  vincularTefNaVenda,
+} from "@/lib/pdv/tef/finalizacao";
+import {
+  ErroTef,
+  listarDadosFiscaisTefPorIds,
+  reservarOperacoesTefParaVenda,
+} from "@/lib/pdv/tef/persistencia";
 import { avaliarTetoPagamentosNoServidor } from "@/lib/pdv/validar-teto-servidor";
 import { validarEstoqueNaFinalizacaoPdv } from "@/lib/pdv/venda-sem-estoque-servidor";
 import { obterClaimsSessao } from "@/lib/supabase/claims";
@@ -56,6 +65,9 @@ export type FinalizarVendaPdvInput = {
     formaPagamentoId: string;
     valorCentavos: number;
     pixLocalRecebimentoId?: string | null;
+    tefOperacaoId?: string | null;
+    tefVinculoSegredo?: string | null;
+    cartaoManual?: boolean | null;
   }>;
   cpfNaNota?: string | null;
   usarDocumentoClienteNaNota?: boolean;
@@ -67,6 +79,7 @@ export type FinalizarVendaPdvResultado =
       vendaId: string;
       numero: number;
       valorTotalCentavos: number;
+      tefConfirmacaoLiberada?: boolean;
     }
   | {
       ok: false;
@@ -349,6 +362,17 @@ export async function executarFinalizacaoVendaPdv(
             throw new Error("Recebimento PIX Local inválido.");
           }
 
+          if (
+            pagamento.tefOperacaoId &&
+            !uuidValido(pagamento.tefOperacaoId)
+          ) {
+            throw new Error("Operação TEF inválida.");
+          }
+
+          if (pagamento.tefOperacaoId && pagamento.pixLocalRecebimentoId) {
+            throw new Error("Um pagamento não pode ser PIX e TEF ao mesmo tempo.");
+          }
+
           return {
             forma_pagamento_id:
               pagamento.formaPagamentoId,
@@ -473,6 +497,60 @@ export async function executarFinalizacaoVendaPdv(
         ok: false,
         erro: pixModo.erro,
       };
+    }
+
+    const tef = await validarTefNaFinalizacao({
+      supabase,
+      empresaId: String(vinculo.empresa_id),
+      usuarioId: String(claimsData.claims.sub),
+      pagamentos: input.pagamentos,
+    });
+
+    if (!tef.ok) {
+      return {
+        ok: false,
+        erro: tef.erro,
+      };
+    }
+
+    if (tef.operacaoIds.length > 0) {
+      try {
+        await reservarOperacoesTefParaVenda({
+          empresaId: String(vinculo.empresa_id),
+          usuarioId: String(claimsData.claims.sub),
+          idempotencyKey: input.idempotencyKey,
+          operacaoIds: tef.operacaoIds,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          erro: error instanceof ErroTef ? error.message : "Não foi possível reservar o TEF.",
+        };
+      }
+      try {
+        const fiscais = await listarDadosFiscaisTefPorIds(
+          String(vinculo.empresa_id),
+          tef.operacaoIds
+        );
+        input.pagamentos.forEach((origem, indice) => {
+          const fiscal = fiscais.find((item) => item.id === origem.tefOperacaoId);
+          const linha = pagamentos[indice] as {
+            autorizacao?: string;
+            bandeira?: string;
+          };
+          if (!fiscal || !linha) {
+            return;
+          }
+          if (fiscal.autorizacao) {
+            linha.autorizacao = fiscal.autorizacao;
+          }
+          if (fiscal.bandeiraNome) {
+            linha.bandeira = fiscal.bandeiraNome;
+          }
+        });
+      } catch {
+        // A venda segue. A NFC-e bloqueia se a credenciadora ou a bandeira não estiverem gravadas.
+      }
     }
 
     const fluxoExigeCaixa = opcoes?.exigirCaixaAberto === true;
@@ -723,6 +801,14 @@ export async function executarFinalizacaoVendaPdv(
       }
     }
 
+    const vinculoTef = await vincularTefNaVenda({
+      empresaId: String(vinculo.empresa_id),
+      vendaId: String(registro.venda_id),
+      usuarioId: String(claimsData.claims.sub),
+      operacaoIds: tef.operacaoIds,
+      segredos: tef.segredos,
+    });
+
     return {
       ok: true,
       vendaId:
@@ -740,6 +826,10 @@ export async function executarFinalizacaoVendaPdv(
               0
           ) * 100
         ),
+      tefConfirmacaoLiberada:
+        tef.operacaoIds.length === 0
+          ? undefined
+          : vinculoTef.confirmacaoLiberada,
     };
   } catch (error) {
     console.error(

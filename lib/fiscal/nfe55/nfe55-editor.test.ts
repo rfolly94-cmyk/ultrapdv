@@ -179,7 +179,10 @@ test("veículo: grupo não é transmitido ao Geranet", () => {
     resolverGrupoVeiculoNfe({ modFrete: "0" }).transmitirGeranet,
     false
   );
-  const emitirOperacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const emitirOperacao = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+  ].join("\n");
   const emitirVenda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
   assert.match(emitirOperacao, /transporteNfeParaPayloadGeranet/);
   assert.match(emitirVenda, /transporteNfeParaPayloadGeranet/);

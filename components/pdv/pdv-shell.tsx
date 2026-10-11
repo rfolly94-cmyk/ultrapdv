@@ -144,7 +144,23 @@ import {
 import { PdvPreferenciasModal } from "@/components/pdv/pdv-preferencias-modal";
 import { PdvItemAvulsoModal } from "@/components/pdv/pdv-item-avulso-modal";
 import { PdvBuscaResultados } from "@/components/pdv/pdv-busca-resultados";
+import { TefMenuPdv } from "@/components/pdv/tef-menu-pdv";
 import { avaliarQuantidadeEstoquePdv } from "@/lib/pdv/venda-sem-estoque";
+import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
+import {
+  confirmarTefAposVenda,
+  desfazerCobrancasTef,
+  executarCobrancasTef,
+  reenviarProvaLocal,
+} from "@/lib/pdv/tef/fluxo-cliente";
+import {
+  MENSAGEM_CONSULTA_TEF_FALHOU,
+  MENSAGEM_TEF_FALHA_SEM_FALLBACK,
+  avaliarCartaoAntesDaCobranca,
+  mensagemPainelCartao,
+  type PoliticaCartaoTef,
+} from "@/lib/pdv/tef/cartao-checkout";
+import { classificarFormaTef } from "@/lib/pdv/tef/regras";
 import { executarAberturaGaveta } from "@/lib/caixa/abrir-gaveta-cliente";
 import { deveAbrirGavetaAposVenda } from "@/lib/caixa/gaveta";
 import {
@@ -485,6 +501,8 @@ export function PdvShell({
   );
 
   const pedidoCarregadoRef = useRef(false);
+  const tefLockRef = useRef(false);
+  const retomadaTefRef = useRef("");
 
   const [
     clienteSelecionadoId,
@@ -636,6 +654,29 @@ export function PdvShell({
 
   const [pixGeranet, setPixGeranet] =
     useState<PixGeranetCheckoutState | null>(null);
+
+  const [tefHabilitado, setTefHabilitado] = useState(false);
+  const [politicaCartao, setPoliticaCartao] = useState<PoliticaCartaoTef>({
+    plataformaHabilitada: false,
+    empresaHabilitada: false,
+    permitirOperacaoManual: false,
+  });
+  const [consultaTefFalhou, setConsultaTefFalhou] = useState(false);
+  const [consultaTefPendente, setConsultaTefPendente] = useState(false);
+  const [cartaoManualConfirmado, setCartaoManualConfirmado] = useState(false);
+  const [conectorOrigem, setConectorOrigem] = useState<string | null>(null);
+  const [tefPendencias, setTefPendencias] = useState<
+    Array<{
+      id: string;
+      status?: string;
+      identificador?: string;
+      valorCentavos?: number;
+      empresaId?: string;
+      terminalCodigo?: string;
+    }>
+  >([]);
+  const [tefEmpresaId, setTefEmpresaId] = useState<string | null>(null);
+  const [tefEstabelecimento, setTefEstabelecimento] = useState("");
 
   const [descartarGeranetAberto, setDescartarGeranetAberto] =
     useState(false);
@@ -1046,6 +1087,124 @@ export function PdvShell({
       : "";
 
   const pixHabilitado = pixLocalAtivo || pixGeranetAtivo;
+
+  useEffect(() => {
+    if (!modalPagamento) {
+      setConsultaTefPendente(false);
+      return;
+    }
+    let ativo = true;
+    setConsultaTefPendente(true);
+    void fetch("/api/pdv/tef/config")
+      .then(async (resposta) => {
+        const dados = (await resposta.json()) as {
+          habilitado?: boolean;
+          empresaHabilitada?: boolean;
+          plataformaHabilitada?: boolean;
+          permitirOperacaoManual?: boolean;
+          empresaId?: string;
+          estabelecimento?: string;
+          pendencias?: Array<{ id: string; terminalCodigo?: string }>;
+        };
+        if (!ativo) {
+          return;
+        }
+        setConsultaTefPendente(false);
+        if (!resposta.ok) {
+          setTefHabilitado(false);
+          setConsultaTefFalhou(true);
+          setPoliticaCartao({
+            plataformaHabilitada: false,
+            empresaHabilitada: false,
+            permitirOperacaoManual: false,
+          });
+          return;
+        }
+        const politica = {
+          plataformaHabilitada: dados.plataformaHabilitada === true,
+          empresaHabilitada: dados.empresaHabilitada === true,
+          permitirOperacaoManual: dados.permitirOperacaoManual === true,
+        };
+        setConsultaTefFalhou(false);
+        setPoliticaCartao(politica);
+        if (!politica.permitirOperacaoManual) {
+          setCartaoManualConfirmado(false);
+        }
+        setTefHabilitado(dados.habilitado === true);
+        setTefEmpresaId(dados.empresaId ?? null);
+        setTefEstabelecimento(dados.estabelecimento ?? "");
+        setTefPendencias(Array.isArray(dados.pendencias) ? dados.pendencias : []);
+      })
+      .catch(() => {
+        if (ativo) {
+          setConsultaTefPendente(false);
+          setTefHabilitado(false);
+          setConsultaTefFalhou(true);
+          setPoliticaCartao({
+            plataformaHabilitada: false,
+            empresaHabilitada: false,
+            permitirOperacaoManual: false,
+          });
+        }
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [modalPagamento]);
+
+  useEffect(() => {
+    if (!modalPagamento) {
+      retomadaTefRef.current = "";
+      setCartaoManualConfirmado(false);
+      return;
+    }
+    const vinculadas = tefPendencias.filter((item) => item.status === "vinculada");
+    const provas = tefPendencias.filter(
+      (item) => item.status === "iniciada" || item.status === "desconhecida"
+    );
+    if (!tefHabilitado || (vinculadas.length === 0 && provas.length === 0)) {
+      return;
+    }
+    const chave = [...vinculadas, ...provas].map((item) => item.id).join(",");
+    if (retomadaTefRef.current === chave) {
+      return;
+    }
+    retomadaTefRef.current = chave;
+    void (async () => {
+      const descoberta = await descobrirUltraPdvConector();
+      if (!descoberta.ok) {
+        retomadaTefRef.current = "";
+        return;
+      }
+      const terminalCodigo = vinculadas[0]?.terminalCodigo || tefPendencias[0]?.terminalCodigo || "";
+      await reenviarProvaLocal({
+        origem: descoberta.origem,
+        empresaId: tefEmpresaId ?? "",
+        terminalCodigo,
+        estabelecimento: tefEstabelecimento,
+        pendencias: tefPendencias,
+      });
+      if (vinculadas.length === 0) {
+        return;
+      }
+      await desfazerCobrancasTef({
+        origem: descoberta.origem,
+        idempotencyKeyVenda: null,
+        operacoes: vinculadas.map((pendencia) => ({
+          formaPagamentoId: "",
+          operacaoId: pendencia.id,
+          valorCentavos: pendencia.valorCentavos ?? 0,
+          identificador: "",
+          empresaId: tefEmpresaId ?? "",
+          terminalCodigo: pendencia.terminalCodigo ?? "",
+          desafio: "",
+          vinculoSegredo: "",
+          autorizacao: "",
+          estabelecimento: tefEstabelecimento,
+        })),
+      });
+    })();
+  }, [modalPagamento, tefHabilitado, tefPendencias, tefEmpresaId, tefEstabelecimento]);
 
   const formasPagas =
     formasPagamento.filter(
@@ -1910,6 +2069,34 @@ export function PdvShell({
       }
     }
 
+    const parcelasCartao = pagamentosCalculados.flatMap((pagamento) => {
+      const modalidade = classificarFormaTef(pagamento.forma);
+      if (!modalidade) {
+        return [];
+      }
+      return [{ modalidade, operacaoManual: cartaoManualConfirmado }];
+    });
+    if (parcelasCartao.length > 0 && consultaTefPendente) {
+      setErroPagamento("A disponibilidade do TEF ainda está sendo consultada.");
+      return;
+    }
+    if (parcelasCartao.length > 0 && consultaTefFalhou) {
+      setErroPagamento(MENSAGEM_CONSULTA_TEF_FALHOU);
+      return;
+    }
+    const decisaoCartao = avaliarCartaoAntesDaCobranca(politicaCartao, parcelasCartao);
+    if (!decisaoCartao.ok) {
+      setErroPagamento(decisaoCartao.erro);
+      return;
+    }
+    if (tefHabilitado && tefPendencias.length > 0 && parcelasCartao.length > 0) {
+      setErroPagamento(
+        "Existe transação TEF pendente nesta empresa. Resolva antes de uma nova cobrança."
+      );
+      return;
+    }
+    const cobrarNoPinpad = decisaoCartao.cobrarNoPinpad;
+
     if (
       !idempotencyRef.current
     ) {
@@ -1920,8 +2107,60 @@ export function PdvShell({
     const idempotencyKey =
       idempotencyRef.current;
 
+    if (tefLockRef.current) {
+      return;
+    }
+    tefLockRef.current = true;
+
     startTransition(
       async () => {
+        try {
+        const parcelasTef = cobrarNoPinpad
+          ? pagamentosCalculados.flatMap((pagamento) => {
+              const modalidade = classificarFormaTef(pagamento.forma);
+              if (!modalidade) {
+                return [];
+              }
+              return [
+                {
+                  formaPagamentoId: pagamento.formaPagamentoId,
+                  modalidade,
+                  valorCentavos: pagamento.valorCentavos,
+                },
+              ];
+            })
+          : [];
+        let cobrancasTef: Awaited<
+          ReturnType<typeof executarCobrancasTef>
+        >["operacoes"] = [];
+        let origemTef = conectorOrigem;
+        if (parcelasTef.length > 0) {
+          const descoberta = await descobrirUltraPdvConector();
+          if (!descoberta.ok || !descoberta.saude.dispositivoId) {
+            setErroPagamento(
+              `O Connector local não está disponível para o TEF. ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`
+            );
+            return;
+          }
+          origemTef = descoberta.origem;
+          setConectorOrigem(descoberta.origem);
+          const chavesTef = parcelasTef.map(() => crypto.randomUUID());
+          const cobranca = await executarCobrancasTef({
+            parcelas: parcelasTef,
+            origem: descoberta.origem,
+            dispositivoId: descoberta.saude.dispositivoId,
+            idempotencyKey: (indice) => chavesTef[indice] ?? crypto.randomUUID(),
+            grupoVenda: idempotencyKey,
+            estabelecimento: tefEstabelecimento,
+          });
+          if (!cobranca.ok) {
+            setErroPagamento(`${cobranca.erro} ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`);
+            return;
+          }
+          cobrancasTef = cobranca.operacoes;
+        }
+
+        let indiceCartaoTef = 0;
         const resultado =
           await finalizarVendaPdv(
             {
@@ -1949,7 +2188,12 @@ export function PdvShell({
                 ),
               pagamentos:
                 pagamentosCalculados.map(
-                  (pagamento) => ({
+                  (pagamento) => {
+                    const modalidadeTef = classificarFormaTef(pagamento.forma);
+                    const cobrancaTef = modalidadeTef
+                      ? cobrancasTef[indiceCartaoTef++]
+                      : undefined;
+                    return {
                     formaPagamentoId:
                       pagamento.formaPagamentoId,
                     valorCentavos:
@@ -1964,7 +2208,14 @@ export function PdvShell({
                             pixGeranet?.status === "paga"
                           ? pixGeranet.cobrancaId
                           : null,
-                  })
+                    tefOperacaoId: cobrancaTef?.operacaoId ?? null,
+                    tefVinculoSegredo: cobrancaTef?.vinculoSegredo ?? null,
+                    cartaoManual:
+                      Boolean(modalidadeTef) &&
+                      cartaoManualConfirmado &&
+                      !cobrancaTef,
+                    };
+                  }
                 ),
               observacao: pedidoObservacao,
               catalogoPedidoId,
@@ -1978,10 +2229,34 @@ export function PdvShell({
           );
 
         if (!resultado.ok) {
+          if (cobrancasTef.length > 0 && origemTef) {
+            await desfazerCobrancasTef({
+              operacoes: cobrancasTef,
+              origem: origemTef,
+              idempotencyKeyVenda: idempotencyKey,
+            });
+          }
           setErroPagamento(
             resultado.erro
           );
           return;
+        }
+
+        let avisoTef: string | null = null;
+        if (cobrancasTef.length > 0 && origemTef) {
+          if (resultado.tefConfirmacaoLiberada) {
+            const confirmacao = await confirmarTefAposVenda({
+              vendaId: resultado.vendaId,
+              operacoes: cobrancasTef,
+              origem: origemTef,
+            });
+            if (!confirmacao.ok) {
+              avisoTef = confirmacao.erro;
+            }
+          } else {
+            avisoTef =
+              "A venda foi registrada, mas a confirmação TEF não foi liberada. Não cobre novamente.";
+          }
         }
 
         const pagamentosDaVenda = pagamentosCalculados;
@@ -2004,6 +2279,10 @@ export function PdvShell({
           } catch {
             avisoGaveta = MENSAGEM_GAVETA_VENDA_SEM_ABRIR;
           }
+        }
+
+        if (avisoTef) {
+          avisoGaveta = [avisoGaveta, avisoTef].filter(Boolean).join("\n");
         }
 
         setUltimaVenda({
@@ -2102,6 +2381,9 @@ export function PdvShell({
           () =>
             buscaRef.current?.focus()
         );
+        } finally {
+          tefLockRef.current = false;
+        }
       }
     );
   }
@@ -3124,6 +3406,8 @@ export function PdvShell({
         </Modal>
       )}
 
+      {modalPagamento && <TefMenuPdv origem={conectorOrigem} />}
+
       {modalPagamento && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
@@ -3182,6 +3466,16 @@ export function PdvShell({
             >
               F3 Desconto
             </button>
+
+            {consultaTefFalhou ? (
+              <p className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                {MENSAGEM_CONSULTA_TEF_FALHOU}
+              </p>
+            ) : mensagemPainelCartao(politicaCartao) ? (
+              <p className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                {mensagemPainelCartao(politicaCartao)}
+              </p>
+            ) : null}
 
             <div
               data-pagamento-formas
@@ -3352,6 +3646,26 @@ export function PdvShell({
               </p>
             )}
 
+            {politicaCartao.permitirOperacaoManual &&
+            politicaCartao.empresaHabilitada &&
+            pagamentosCalculados.some((pagamento) =>
+              classificarFormaTef(pagamento.forma)
+            ) ? (
+              <label className="mt-4 flex items-start gap-2 text-sm text-zinc-800">
+                <input
+                  type="checkbox"
+                  checked={cartaoManualConfirmado}
+                  onChange={(event) =>
+                    setCartaoManualConfirmado(event.target.checked)
+                  }
+                />
+                <span>
+                  Operação manual de cartão, sem pinpad. A NFC-e não recebe NSU,
+                  autorização nem dados da adquirente.
+                </span>
+              </label>
+            ) : null}
+
             <PdvConsumidorNota
               clienteDocumento={clienteSelecionado?.cpf_cnpj ?? null}
               usarDocumentoCliente={usarDocumentoClienteNaNota}
@@ -3390,6 +3704,44 @@ export function PdvShell({
             {erroPagamento && (
               <div className="mt-3 whitespace-pre-line rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
                 {erroPagamento}
+                {tefPendencias.length > 0 && (
+                  <button
+                    type="button"
+                    className="mt-2 block font-semibold underline"
+                    onClick={() => {
+                      void (async () => {
+                        const descoberta = await descobrirUltraPdvConector();
+                        if (!descoberta.ok) {
+                          setErroPagamento(
+                            "O Connector local não está disponível para recuperar o TEF."
+                          );
+                          return;
+                        }
+                        await desfazerCobrancasTef({
+                          origem: descoberta.origem,
+                          idempotencyKeyVenda: null,
+                          operacoes: tefPendencias.map((pendencia) => ({
+                            formaPagamentoId: "",
+                            operacaoId: pendencia.id,
+                            valorCentavos: pendencia.valorCentavos ?? 0,
+                            identificador: "",
+                            empresaId: tefEmpresaId ?? "",
+                            terminalCodigo: pendencia.terminalCodigo ?? "",
+                            desafio: "",
+                            vinculoSegredo: "",
+                            autorizacao: "",
+                          })),
+                        });
+                        setTefPendencias([]);
+                        setErroPagamento(
+                          "A pendência foi retomada neste terminal. Venda já gravada segue para confirmação. Autorização sem venda segue para desfazimento. Não inicie outra cobrança até o terminal liberar."
+                        );
+                      })();
+                    }}
+                  >
+                    Recuperar pendência TEF
+                  </button>
+                )}
               </div>
             )}
 

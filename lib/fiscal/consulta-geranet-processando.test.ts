@@ -9,9 +9,11 @@ import { resolverEstadoOperacionalFiscal } from "./estado-operacional-fiscal";
 import {
   classificarLogEmitir,
   decidirStatusLocal,
+  montarAtualizacaoEmissao,
+} from "./geranet/classificar-consulta";
+import type {
   EmissaoParaConsulta,
   LogGeranetResumo,
-  montarAtualizacaoEmissao,
 } from "./geranet/classificar-consulta";
 import { MENSAGEM_BLOQUEIO_AGUARDANDO_RECONCILIACAO } from "./geranet/classificar-emissao";
 

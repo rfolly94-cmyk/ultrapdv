@@ -12,13 +12,15 @@ import {
 import {
   anoFiscalDaEmissao,
   classificarRespostaInutilizacao,
-  EmissaoParaInutilizacao,
-  EventoInutilizacao,
   mensagemInutilizacao,
   montarPayloadInutilizacaoGeranet,
   podeIniciarInutilizacao,
   resumoPayloadInutilizacao,
   validarJustificativaInutilizacao,
+} from "@/lib/fiscal/geranet/classificar-inutilizacao";
+import type {
+  EmissaoParaInutilizacao,
+  EventoInutilizacao,
 } from "@/lib/fiscal/geranet/classificar-inutilizacao";
 import type { SegredosFiscaisGeranet } from "@/lib/fiscal/geranet/montar-payload-nfce";
 import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";

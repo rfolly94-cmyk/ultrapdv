@@ -52,11 +52,6 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
-        source: "/configuracoes/financeiro",
-        destination: "/configuracoes/financeiro/pix",
-        permanent: true,
-      },
-      {
         source: "/contabilidade/xml",
         destination: "/contabilidade/xmls",
         permanent: true,

@@ -128,7 +128,10 @@ test("carregar transporte da emissão filtra empresa_id e prioriza a operação"
   assert.match(helper, /fiscal_operacoes/);
   assert.match(helper, /venda_id/);
   const venda = fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts");
-  const operacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const operacao = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+  ].join("\n");
   assert.match(venda, /carregarTransporteNfe55/);
   assert.match(operacao, /carregarTransporteNfe55/);
   assert.match(venda, /transporteConflitaComFrete9/);
@@ -141,11 +144,15 @@ test("NF-e 55 envia nfe.frete e transportador/volumes persistidos", () => {
     fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),
     fonte("lib/fiscal/nfe55/payload-nfe-venda.ts"),
   ].join("\n");
-  const operacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const operacao = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+  ].join("\n");
   assert.match(venda, /transporteNfeParaPayloadGeranet/);
   assert.match(operacao, /transporteNfeParaPayloadGeranet/);
   assert.match(venda, /frete:\s*\n\s*modalidadeFrete/);
-  assert.match(operacao, /frete: transporteResolvido\.dados\.mod_frete/);
+  assert.match(operacao, /mod_frete \?\? "9"/);
   assert.doesNotMatch(venda, /transporte:\s*null/);
   assert.doesNotMatch(operacao, /transporte:\s*null/);
 });

@@ -13,16 +13,18 @@ import {
   array,
   classificarLogCancelar,
   classificarLogEmitir,
-  EmissaoParaConsulta,
   extrairCamposLog,
   instanteDentroDaJanelaTransmissao,
   logCompativelComEmissao,
-  LogGeranetResumo,
   objeto,
   sanitizarConsultaGeranet,
-  SituacaoConsultaFiscal,
   somenteDigitos,
   texto,
+} from "@/lib/fiscal/geranet/classificar-consulta";
+import type {
+  EmissaoParaConsulta,
+  LogGeranetResumo,
+  SituacaoConsultaFiscal,
 } from "@/lib/fiscal/geranet/classificar-consulta";
 
 export type ResultadoConsultaEmissao = {

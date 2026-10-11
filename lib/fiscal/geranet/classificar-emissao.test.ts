@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import {
   classificarLogEmitir,
   decidirStatusLocal,
+  montarAtualizacaoEmissao,
+} from "./classificar-consulta";
+import type {
   EmissaoParaConsulta,
   LogGeranetResumo,
-  montarAtualizacaoEmissao,
 } from "./classificar-consulta";
 import {
   classificarRespostaEmitir,
@@ -754,8 +758,6 @@ test("CASO E. erro local antes de REQUEST_INICIADA → erro_envio, sem reconcili
 });
 
 test("CASO F. duplo clique: claim/bloqueio ocorre antes de chamarGeranet", () => {
-  const { readFileSync } = require("node:fs") as typeof import("node:fs");
-  const { join } = require("node:path") as typeof import("node:path");
   const emitirVenda = readFileSync(
     join(process.cwd(), "app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
     "utf8"
@@ -775,8 +777,6 @@ test("CASO F. duplo clique: claim/bloqueio ocorre antes de chamarGeranet", () =>
 });
 
 test("CASO G. empresa B não reconcilia emissão da empresa A", () => {
-  const { readFileSync } = require("node:fs") as typeof import("node:fs");
-  const { join } = require("node:path") as typeof import("node:path");
   const reconciliar = readFileSync(
     join(process.cwd(), "lib/fiscal/reconciliar-emissao.ts"),
     "utf8"
@@ -868,8 +868,6 @@ test("HTTP 422 + cStat 539 é rejeição determinística, não processando e nã
     "aguardando_reconciliacao"
   );
 
-  const { readFileSync } = require("node:fs") as typeof import("node:fs");
-  const { join } = require("node:path") as typeof import("node:path");
   const uiReconciliar = readFileSync(
     join(process.cwd(), "components/vendas/reconciliar-emissao-fiscal.tsx"),
     "utf8"

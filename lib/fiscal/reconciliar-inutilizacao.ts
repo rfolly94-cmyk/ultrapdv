@@ -8,9 +8,9 @@ import {
 import {
   anoFiscalDaEmissao,
   aplicarConsultaInutilizacao,
-  EmissaoParaInutilizacao,
   mensagemInutilizacao,
 } from "@/lib/fiscal/geranet/classificar-inutilizacao";
+import type { EmissaoParaInutilizacao } from "@/lib/fiscal/geranet/classificar-inutilizacao";
 import { consultarInutilizacaoGeranet } from "@/lib/fiscal/geranet/consultar-inutilizacao";
 import { obterSegredosFiscaisEmissao } from "@/lib/fiscal/geranet/credencial-plataforma";
 

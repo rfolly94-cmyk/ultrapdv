@@ -51,3 +51,60 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# UltraPDV - backups locais
+/backup-*/
+/diagnostico-*/
+/tef-*-temp/
+/tef-menu-interativo-teste/
+
+# Arquivos temporarios e pacotes de diagnostico
+*.zip
+*.bak
+*.backup-*
+*.backup-encoding
+
+# Executaveis e bibliotecas compiladas
+*.exe
+*.dll
+*.pfx
+*.p12
+*.key
+
+# Lazarus - arquivos gerados
+*.ppu
+*.o
+*.compiled
+*.rst
+/tef-agent/lib/
+/tef-agent/backup/
+
+# Journals e dados financeiros locais
+tef-pendencia.json
+tef-recuperacao.json
+tef-vinculo.json
+tef-pareamento.json
+
+# Diagnosticos em texto na raiz
+/diagnostico-*.txt
+/comparacao-tef.txt
+
+
+# Dados locais e runtime PayGoWeb
+/print-agent/bin/tef/
+
+# Artefatos locais de instalacao e comunicacao TEF
+*.pos
+TSTKEY.ini
+assinatura.sig
+
+
+# Dados locais PayGoWeb do agente Lazarus
+/tef-agent/tef/
+
+# Arquivos de sessao do Lazarus
+*.lps
+
+# Certificados e logs locais
+*.crt
+*.sig

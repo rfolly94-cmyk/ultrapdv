@@ -245,7 +245,10 @@ test("payloads NF-e/NFC-e validam ICMS antes do POST e CRT vem da empresa da emi
   const contingencia = fonte(
     "app/api/fiscal/geranet/nfce-contingencia-venda/route.ts"
   );
-  const operacao = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const operacao = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+  ].join("\n");
   const devolucao = fonte(
     "app/api/fiscal/geranet/nfe-emitir-devolucao-fornecedor/route.ts"
   );

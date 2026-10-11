@@ -13,7 +13,6 @@ import { mensagemReconciliacaoInconclusiva } from "@/lib/fiscal/geranet/classifi
 import { consultarSefazParaReconciliacao } from "@/lib/fiscal/sefaz/consultar-protocolo-nfe";
 import { deveConsultarSefazDireta } from "@/lib/fiscal/sefaz/consulta-protocolo";
 import {
-  EmissaoParaConsulta,
   mensagemConsulta,
   montarAtualizacaoEmissao,
   objeto,
@@ -21,6 +20,7 @@ import {
   sanitizarConsultaGeranet,
   texto,
 } from "@/lib/fiscal/geranet/classificar-consulta";
+import type { EmissaoParaConsulta } from "@/lib/fiscal/geranet/classificar-consulta";
 
 export type OrigemReconciliacao = "manual" | "cron";
 

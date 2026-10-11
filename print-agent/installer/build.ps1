@@ -189,6 +189,7 @@ $nsh = @"
 Set-Content -Path (Join-Path $generated "version.nsh") -Value $nsh -Encoding ASCII
 
 New-Item -ItemType Directory -Force -Path @(
+  (Join-Path $staging "bin\tef"),
   (Join-Path $staging "runtime"),
   (Join-Path $staging "app"),
   (Join-Path $staging "print-engine"),
@@ -207,14 +208,31 @@ if (Test-Path $nodeLicense) {
   Write-Host "Copie o LICENSE completo do zip oficial do Node para o runtime."
 }
 
-$appFiles = @(
-  "server.mjs", "motor.mjs", "imprimir.mjs", "gaveta.mjs", "identidade.mjs", "instancia.mjs",
-  "origens.mjs", "raiz.mjs", "versao.mjs", "stop.mjs", "verify.mjs",
-  "portas.mjs", "config-local.mjs", "log.mjs", "pdf-teste.mjs", "mutex.mjs",
-  "tray.mjs", "pagina-status.html"
-)
+Write-Info "Resolvendo modulos do Connector..."
+$listaApp = & $nodeExe (Join-Path $installerDir "empacotar-app.mjs") --list (Join-Path $raiz "src")
+if ($LASTEXITCODE -ne 0) {
+  Write-Fail "Nao foi possivel resolver os imports de src."
+  exit 1
+}
+$appFiles = @($listaApp | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+if ($appFiles -notcontains "tef-prova.mjs" -or $appFiles -notcontains "tef-recuperacao.mjs") {
+  Write-Fail "O grafo de empacotamento nao inclui os modulos TEF obrigatorios."
+  exit 1
+}
 foreach ($nome in $appFiles) {
   Copy-Item (Join-Path $raiz "src\$nome") (Join-Path $staging "app\$nome")
+}
+$tefExe = Join-Path $raiz "bin\tef\UltraPDVTef_NOVO.exe"
+if (-not (Test-Path -LiteralPath $tefExe -PathType Leaf)) {
+  throw "Executavel TEF nao encontrado: $tefExe"
+}
+Copy-Item -LiteralPath $tefExe -Destination (Join-Path $staging "bin\tef\UltraPDVTef_NOVO.exe") -ErrorAction Stop
+$extrasTef = Get-ChildItem -LiteralPath (Join-Path $staging "bin\tef") -Recurse -Force |
+  Where-Object { $_.FullName -ne (Join-Path $staging "bin\tef\UltraPDVTef_NOVO.exe") }
+if ($extrasTef) {
+  Write-Fail "O pacote TEF so pode levar UltraPDVTef_NOVO.exe. Dados locais do PayGo ficam na maquina."
+  $extrasTef | ForEach-Object { Write-Host "  $($_.FullName)" }
+  exit 1
 }
 Copy-Item $versionFile (Join-Path $staging "app\version.json")
 Copy-Item $versionFile (Join-Path $staging "version.json")
@@ -246,10 +264,20 @@ if ($versaoStaging -ne $productVersion -or $versaoApp -ne $productVersion) {
 }
 Assert-MesmoArquivo $versionFile (Join-Path $staging "version.json") "version.json"
 Assert-MesmoArquivo $versionFile (Join-Path $staging "app\version.json") "app/version.json"
-foreach ($nome in @("server.mjs", "origens.mjs", "imprimir.mjs", "portas.mjs", "versao.mjs")) {
+foreach ($nome in $appFiles) {
   Assert-MesmoArquivo (Join-Path $raiz "src\$nome") (Join-Path $staging "app\$nome") $nome
 }
-Write-Info "Staging validado: $productVersion (arquivos atuais do print-agent\src)"
+& $nodeExe (Join-Path $installerDir "empacotar-app.mjs") --verificar (Join-Path $staging "app")
+if ($LASTEXITCODE -ne 0) {
+  Write-Fail "Imports do diretorio empacotado nao resolveram."
+  exit 1
+}
+& $nodeExe (Join-Path $installerDir "empacotar-app.mjs") --auditar-nsi (Join-Path $installerDir "ultrapdv-connector.nsi")
+if ($LASTEXITCODE -ne 0) {
+  Write-Fail "O instalador NSIS apagaria configuracao ou pendencia financeira."
+  exit 1
+}
+Write-Info "Staging validado: $productVersion ($($appFiles.Count) arquivos de app, imports resolvidos)"
 
 Write-Info "Compilando instalador..."
 Push-Location $installerDir

@@ -149,7 +149,11 @@ test("configuração é por empresa, CSRT vai ao cofre e emissão lê empresas_f
   );
   const action = fonte("app/configuracoes/fiscal/actions.ts");
   const pagina = fonte("app/configuracoes/fiscal/page.tsx");
-  const emitirOp = fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts");
+  const emitirOp = [
+    fonte("app/api/fiscal/geranet/nfe-emitir-operacao/route.ts"),
+    fonte("lib/fiscal/nfe55/preparar-nfe-operacao.ts"),
+    fonte("lib/fiscal/nfe55/payload-nfe-operacao.ts"),
+  ].join("\n");
   const emitirVenda = [
     fonte("app/api/fiscal/geranet/nfe-emitir-venda/route.ts"),
     fonte("lib/fiscal/nfe55/preparar-nfe-venda.ts"),

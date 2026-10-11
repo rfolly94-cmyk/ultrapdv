@@ -160,7 +160,9 @@ export type ReciboVendaCompleto = {
   valorProdutos: number;
   desconto: number;
   acrescimo: number;
+  frete: number;
   total: number;
+  diagnosticoComposicao?: string | null;
   troco: number;
   carteira: ReciboCarteiraDados | null;
 };
@@ -833,6 +835,14 @@ export function montarReciboVenda(
       "esquerda"
     );
   }
+  if (dados.frete > 0) {
+    empurrar(
+      blocos,
+      `Frete ${dinheiro(dados.frete)}`,
+      largura,
+      "esquerda"
+    );
+  }
   if (layout.totais.totalFinal) {
     empurrar(blocos, `TOTAL ${dinheiro(dados.total)}`, largura, "esquerda", true);
   }
@@ -1108,6 +1118,7 @@ export function reciboVendaExemplo(empresa?: ReciboVendaCompleto["empresa"]): Re
     valorProdutos: 95,
     desconto: 5,
     acrescimo: 0,
+    frete: 0,
     total: 90,
     troco: 0,
     carteira: {

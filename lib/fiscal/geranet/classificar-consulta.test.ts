@@ -4,14 +4,16 @@ import { test } from "node:test";
 import {
   classificarLogEmitir,
   decidirStatusLocal,
-  EmissaoParaConsulta,
   instanteDentroDaJanelaTransmissao,
   logCompativelComEmissao,
   logDentroDaJanelaTransmissao,
-  LogGeranetResumo,
   mensagemConsulta,
   montarAtualizacaoEmissao,
   sanitizarConsultaGeranet,
+} from "./classificar-consulta";
+import type {
+  EmissaoParaConsulta,
+  LogGeranetResumo,
 } from "./classificar-consulta";
 
 function emissao(
