@@ -5,10 +5,11 @@ import { redirect } from "next/navigation";
 import {
   ativarAssistenteTefSessao,
   avaliarAssistenteTefSessao,
+  prepararInstalacaoAssistenteSessao,
   salvarRascunhoAssistenteSessao,
   type ObservacaoAssistente,
 } from "@/lib/pdv/tef/assistente-sessao";
-import { ErroTef, salvarConfigTefSessao, autorizarPareamentoTefSessao, concluirPareamentoTefSessao, revogarTerminalTefSessao, verificarComputadorTefSessao } from "@/lib/pdv/tef/servico";
+import { ErroTef, salvarConfigTefSessao, autorizarPareamentoTefSessao, concluirPareamentoTefSessao, diagnosticarRecuperacaoTefSessao, prepararSincronizacaoVinculoTefSessao, recuperarAutorizacaoTefSessao, revogarTerminalTefSessao, verificarComputadorTefSessao } from "@/lib/pdv/tef/servico";
 
 export async function salvarTefEmpresa(formData: FormData) {
   const ambiente = formData.get("ambiente") === "producao" ? "producao" : "homologacao";
@@ -50,6 +51,72 @@ export async function concluirPareamentoEmpresa(input: {
     return await concluirPareamentoTefSessao(input);
   } catch (error) {
     throw new Error(error instanceof ErroTef ? error.message : "Não foi possível concluir o pareamento.");
+  }
+}
+
+export async function prepararSincronizacaoConnector(input: {
+  codigo: string;
+  dispositivoId: string;
+  chavePublica: string;
+  assinaturaPareamento: string;
+}) {
+  try {
+    return await prepararSincronizacaoVinculoTefSessao({
+      codigo: input.codigo,
+      dispositivoId: input.dispositivoId,
+      chavePublica: input.chavePublica,
+      assinaturaPareamento: input.assinaturaPareamento,
+    });
+  } catch (error) {
+    return {
+      efeito: "recusar" as const,
+      motivo: error instanceof ErroTef ? error.message : "Não foi possível preparar a sincronização.",
+      vinculo: null,
+      ativaEmpresa: false as const,
+      executaInstalacao: false as const,
+      revogaChave: false as const,
+      gravaBanco: false as const,
+    };
+  }
+}
+
+const RECUSA_RECUPERACAO = {
+  efeito: "recusar" as const,
+  vinculo: null,
+  gerarChave: false as const,
+  executaInstalacao: false as const,
+};
+
+export async function diagnosticarRecuperacaoConnector(input: {
+  dispositivoId: string;
+  chavePublica: string;
+  chaveId: string;
+  assinaturaIdentidade: string;
+}) {
+  try {
+    return await diagnosticarRecuperacaoTefSessao(input);
+  } catch (error) {
+    throw new Error(
+      error instanceof ErroTef ? error.message : "Não foi possível comparar as chaves deste computador."
+    );
+  }
+}
+
+export async function recuperarAutorizacaoConnector(input: {
+  codigo: string;
+  dispositivoId: string;
+  chavePublica: string;
+  chaveId: string;
+  assinaturaPareamento: string;
+  perdaConfirmada: boolean;
+}) {
+  try {
+    return await recuperarAutorizacaoTefSessao(input);
+  } catch (error) {
+    return {
+      ...RECUSA_RECUPERACAO,
+      motivo: error instanceof ErroTef ? error.message : "Não foi possível recuperar a autorização.",
+    };
   }
 }
 
@@ -104,6 +171,31 @@ export async function validarAssistente(observacao: ObservacaoAssistente) {
     return {
       ok: false as const,
       erro: error instanceof ErroTef ? error.message : "Não foi possível validar a instalação.",
+    };
+  }
+}
+
+export async function prepararInstalacaoAssistente(input: {
+  confirmacaoExplicita: boolean;
+  dispositivoId: string;
+  credencialInformada: boolean;
+  autorizacaoExplicitaReset: boolean;
+  proposta: { pontoCaptura: string; ambiente: string; servidor: string } | null;
+}) {
+  try {
+    return await prepararInstalacaoAssistenteSessao({
+      confirmacaoExplicita: input.confirmacaoExplicita === true,
+      dispositivoId: input.dispositivoId,
+      credencialInformada: input.credencialInformada === true,
+      autorizacaoExplicitaReset: input.autorizacaoExplicitaReset === true,
+      proposta: input.proposta,
+    });
+  } catch (error) {
+    return {
+      ok: false as const,
+      efeito: "recusar" as const,
+      motivo: error instanceof ErroTef ? error.message : "Não foi possível preparar a instalação.",
+      atual: null,
     };
   }
 }

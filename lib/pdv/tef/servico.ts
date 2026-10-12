@@ -25,9 +25,16 @@ import {
   reservarOperacoesTefParaVenda,
   revogarTerminalTef,
   autorizarPareamentoTef,
+  carregarFatosSincronizacaoVinculo,
+  consultarConflitoChaveTef,
   concluirPareamentoTef,
   salvarConfigTefEmpresa,
+  substituirAutorizacaoTerminalTef,
 } from "@/lib/pdv/tef/persistencia";
+import { hashSegredoVinculo, verificarIdentidadeTef, verificarProvaTef } from "@/lib/pdv/tef/prova";
+import { fingerprintChavePublicaEd25519 } from "@/lib/pdv/tef/fingerprint-chave";
+import { decidirRecuperacaoAutorizacao } from "@/lib/pdv/tef/recuperar-autorizacao";
+import { planejarSincronizacaoVinculo } from "@/lib/pdv/tef/sincronizar-vinculo";
 import {
   classificarFormaTef,
   sanitizarParaLog,
@@ -347,6 +354,262 @@ export async function prepararAcessoPinpad(dispositivoId: string) {
     estabelecimento: terminal.estabelecimento,
     desafio: randomBytes(32).toString("hex"),
   };
+}
+
+export async function prepararSincronizacaoVinculoTefSessao(input: {
+  codigo: string;
+  dispositivoId: string;
+  chavePublica: string;
+  assinaturaPareamento: string;
+}) {
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  try {
+    await exigirPermissao({ modulo: "financeiro", acao: "editar" });
+  } catch (error) {
+    if (error instanceof ErroPermissao) {
+      throw new ErroTef(error.message, error.status);
+    }
+    throw error;
+  }
+  const codigo = texto(input.codigo).toUpperCase();
+  if (!/^[A-Z2-9]{10}$/.test(codigo)) {
+    throw new ErroTef("Código de pareamento inválido.");
+  }
+  const dispositivoId = uuid(input.dispositivoId);
+  const chavePublica = texto(input.chavePublica);
+  const assinaturaValida = verificarProvaTef(
+    chavePublica,
+    {
+      acao: "pareamento",
+      desafio: hashSegredoVinculo(codigo),
+      identificador: dispositivoId,
+      valorCentavos: 0,
+      nsu: "",
+      autorizacao: "",
+      rede: "",
+      finalizacao: "",
+      sucesso: true,
+      codigo: "",
+    },
+    texto(input.assinaturaPareamento)
+  );
+  if (!assinaturaValida) {
+    throw new ErroTef("O Connector não comprovou a chave deste computador.", 403);
+  }
+  const fatos = await carregarFatosSincronizacaoVinculo({
+    empresaId: ctx.empresaId,
+    dispositivoId,
+  });
+  return planejarSincronizacaoVinculo({
+    empresaSessaoId: ctx.empresaId,
+    permissaoEditar: true,
+    dispositivoInformado: dispositivoId,
+    chavePublicaInformada: chavePublica,
+    ...fatos,
+  });
+}
+
+const MOTIVO_RECUPERACAO: Record<string, string> = {
+  chave_invalida: "A chave comprovada não é uma chave pública Ed25519.",
+  outra_empresa: "Este computador está vinculado a outra empresa.",
+  sem_terminal: "A chave comprovada não pertence ao terminal desta empresa.",
+  pendente: "Há transação ou reconciliação pendente. A recuperação fica bloqueada até a resolução financeira.",
+  chave_revogada: "A chave atual do Connector já foi revogada. A recuperação não gera outra chave.",
+  chave_outro_terminal: "A chave atual já autoriza outro terminal.",
+  substituida:
+    "A autorização deste terminal mudou durante a recuperação. Confira as chaves antes de tentar de novo. Nenhuma chave nova foi gerada.",
+};
+
+function motivoRecuperacao(codigo: string) {
+  return MOTIVO_RECUPERACAO[codigo] || "Não foi possível recuperar a autorização deste computador.";
+}
+
+async function sessaoFinanceiro() {
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  try {
+    await exigirPermissao({ modulo: "financeiro", acao: "editar" });
+  } catch (error) {
+    if (error instanceof ErroPermissao) {
+      throw new ErroTef(error.message, error.status);
+    }
+    throw error;
+  }
+  return ctx;
+}
+
+export async function diagnosticarRecuperacaoTefSessao(input: {
+  dispositivoId: string;
+  chavePublica: string;
+  chaveId: string;
+  assinaturaIdentidade: string;
+}) {
+  const ctx = await sessaoFinanceiro();
+  const dispositivoId = uuid(input.dispositivoId);
+  const chavePublica = texto(input.chavePublica);
+  const assinaturaValida = verificarIdentidadeTef(
+    chavePublica,
+    dispositivoId,
+    texto(input.assinaturaIdentidade)
+  );
+  if (!assinaturaValida) {
+    throw new ErroTef("O Connector não comprovou a identidade deste computador.", 403);
+  }
+  const fatos = await carregarFatosSincronizacaoVinculo({
+    empresaId: ctx.empresaId,
+    dispositivoId,
+  });
+  const terminal = fatos.terminal;
+  const fingerprintAutorizada = fingerprintChavePublicaEd25519(terminal?.chavePublica ?? "");
+  const fingerprintConnector = fingerprintChavePublicaEd25519(chavePublica);
+  const conferem = Boolean(
+    fingerprintAutorizada && fingerprintConnector && fingerprintAutorizada === fingerprintConnector
+  );
+  return {
+    codigo: terminal?.codigo ?? "",
+    terminalId: terminal?.id ?? "",
+    pontoCaptura: terminal?.pontoCaptura ?? "",
+    chaveIdAutorizada: terminal?.chaveId ?? "",
+    fingerprintAutorizada: fingerprintAutorizada ?? "",
+    chaveIdConnector: UUID.test(texto(input.chaveId)) ? texto(input.chaveId).toLowerCase() : "",
+    fingerprintConnector: fingerprintConnector ?? "",
+    conferem,
+    pendencia: fatos.pendenciaFinanceira,
+    outraEmpresa: fatos.dispositivoOutraEmpresa,
+    administrador: ctx.perfil === "administrador",
+  };
+}
+
+export async function recuperarAutorizacaoTefSessao(input: {
+  codigo: string;
+  dispositivoId: string;
+  chavePublica: string;
+  chaveId: string;
+  assinaturaPareamento: string;
+  perdaConfirmada: boolean;
+}) {
+  const ctx = await sessaoFinanceiro();
+  const codigo = texto(input.codigo).toUpperCase();
+  if (!/^[A-Z2-9]{10}$/.test(codigo)) {
+    throw new ErroTef("Código de pareamento inválido.");
+  }
+  const dispositivoId = uuid(input.dispositivoId);
+  const chavePublica = texto(input.chavePublica);
+  const assinaturaValida = verificarProvaTef(
+    chavePublica,
+    {
+      acao: "pareamento",
+      desafio: hashSegredoVinculo(codigo),
+      identificador: dispositivoId,
+      valorCentavos: 0,
+      nsu: "",
+      autorizacao: "",
+      rede: "",
+      finalizacao: "",
+      sucesso: true,
+      codigo: "",
+    },
+    texto(input.assinaturaPareamento)
+  );
+  const fatos = await carregarFatosSincronizacaoVinculo({
+    empresaId: ctx.empresaId,
+    dispositivoId,
+  });
+  const conflito = fatos.terminal
+    ? await consultarConflitoChaveTef({
+        terminalId: fatos.terminal.id,
+        chavePublica,
+      })
+    : { chaveJaRevogada: false, chaveEmOutroTerminal: false };
+  const decisao = decidirRecuperacaoAutorizacao({
+    administrador: ctx.perfil === "administrador",
+    permissaoEditar: true,
+    perdaConfirmada: input.perdaConfirmada === true,
+    assinaturaValida,
+    empresaSessaoId: ctx.empresaId,
+    dispositivoAssinado: dispositivoId,
+    chavePublicaComprovada: chavePublica,
+    chaveIdInformada: texto(input.chaveId),
+    fingerprintComprovada: fingerprintChavePublicaEd25519(chavePublica),
+    dispositivoOutraEmpresa: fatos.dispositivoOutraEmpresa,
+    pendenciaFinanceira: fatos.pendenciaFinanceira,
+    reconciliacao: false,
+    chaveJaRevogada: conflito.chaveJaRevogada,
+    chaveEmOutroTerminal: conflito.chaveEmOutroTerminal,
+    terminal: fatos.terminal,
+  });
+  if (decisao.efeito === "recusar") {
+    return {
+      efeito: "recusar" as const,
+      motivo: decisao.motivo,
+      vinculo: null,
+      gerarChave: false as const,
+      executaInstalacao: false as const,
+    };
+  }
+  if (decisao.efeito === "autorizar" && fatos.terminal) {
+    const fingerprintAnterior = fingerprintChavePublicaEd25519(fatos.terminal.chavePublica);
+    const fingerprintAtual = fingerprintChavePublicaEd25519(chavePublica);
+    if (!fingerprintAnterior || !fingerprintAtual) {
+      return {
+        efeito: "recusar" as const,
+        motivo: "A chave comprovada não é uma chave pública Ed25519.",
+        vinculo: null,
+        gerarChave: false as const,
+        executaInstalacao: false as const,
+      };
+    }
+    const troca = await substituirAutorizacaoTerminalTef({
+      empresaId: ctx.empresaId,
+      dispositivoId,
+      usuarioId: ctx.usuarioId,
+      chavePublica,
+      chaveId: UUID.test(texto(input.chaveId)) ? texto(input.chaveId).toLowerCase() : null,
+      chaveAnterior: fatos.terminal.chavePublica,
+      fingerprintAnterior,
+      fingerprintAtual,
+    });
+    if (troca.efeito === "recusar") {
+      return {
+        efeito: "recusar" as const,
+        motivo: motivoRecuperacao(troca.motivo),
+        vinculo: null,
+        gerarChave: false as const,
+        executaInstalacao: false as const,
+      };
+    }
+  }
+  try {
+    const atualizados = await carregarFatosSincronizacaoVinculo({
+      empresaId: ctx.empresaId,
+      dispositivoId,
+    });
+    const plano = planejarSincronizacaoVinculo({
+      empresaSessaoId: ctx.empresaId,
+      permissaoEditar: true,
+      dispositivoInformado: dispositivoId,
+      chavePublicaInformada: chavePublica,
+      ...atualizados,
+    });
+    return {
+      efeito: decisao.efeito === "ja_autorizada" ? ("ja_autorizada" as const) : ("autorizada" as const),
+      motivo: plano.efeito === "sincronizar" ? "" : plano.motivo,
+      vinculo: plano.vinculo,
+      gerarChave: false as const,
+      executaInstalacao: false as const,
+    };
+  } catch (error) {
+    if (decisao.efeito !== "autorizar") {
+      throw error;
+    }
+    return {
+      efeito: "autorizada" as const,
+      motivo:
+        "A autorização foi atualizada no banco, mas a sincronização local não pôde ser preparada. Use Sincronizar Connector para repetir só essa gravação. Não gere outra chave.",
+      vinculo: null,
+      gerarChave: false as const,
+      executaInstalacao: false as const,
+    };
+  }
 }
 
 export async function verificarComputadorTefSessao(dispositivoId: string) {

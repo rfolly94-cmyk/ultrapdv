@@ -190,6 +190,65 @@ export function validarPayloadHttpTef(payload, acaoRota = "teste") {
   return { ok: true };
 }
 
+const CHAVES_HTTP_INSTALAR = new Set(["acao", "confirmacao", "credencial"]);
+
+export function credencialTecnicaInformada(valor) {
+  if (typeof valor !== "string" || valor.length < 4 || valor.length > 40) {
+    return "";
+  }
+  if (/\s|[\u0000-\u001f\u007f]/.test(valor)) {
+    return "";
+  }
+  return valor;
+}
+
+export function redigirCredencial(texto, credencial) {
+  const segredo = credencialTecnicaInformada(credencial);
+  const bruto = String(texto ?? "");
+  if (!segredo) {
+    return bruto;
+  }
+  return bruto.split(segredo).join("[redigido]");
+}
+
+export function semSegredoTecnico(valor) {
+  if (!valor || typeof valor !== "object" || Array.isArray(valor)) {
+    return valor;
+  }
+  const copia = { ...valor };
+  delete copia.credencial;
+  delete copia.senha;
+  delete copia.password;
+  return copia;
+}
+
+export function pedidoHttpInstalacao(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, erro: "Payload recusado.", codigo: CODIGOS_TEF.PAYLOAD_RECUSADO };
+  }
+  for (const chave of Object.keys(payload)) {
+    if (!CHAVES_HTTP_INSTALAR.has(chave)) {
+      return { ok: false, erro: "Payload recusado.", codigo: CODIGOS_TEF.PAYLOAD_RECUSADO };
+    }
+  }
+  if (payload.acao !== "instalar" || payload.confirmacao !== true) {
+    return {
+      ok: false,
+      erro: "A instalação exige confirmação explícita.",
+      codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+    };
+  }
+  const credencial = credencialTecnicaInformada(payload.credencial);
+  if (!credencial) {
+    return {
+      ok: false,
+      erro: "Informe a credencial técnica no momento da instalação.",
+      codigo: CODIGOS_TEF.DADOS_INVALIDOS,
+    };
+  }
+  return { ok: true, credencial };
+}
+
 export function validarDadosPagamento(dados) {
   if (!dados || typeof dados !== "object" || Array.isArray(dados)) {
     return {
@@ -631,11 +690,31 @@ function montarPedidoTef(pedido) {
     };
   }
   if (acao === "instalar" || acao === "inicializar") {
-    const pedidoPonto = parametrosPontoNovo(pedido.dados ?? {});
+    const bruto =
+      pedido.dados && typeof pedido.dados === "object" && !Array.isArray(pedido.dados)
+        ? { ...pedido.dados }
+        : {};
+    let credencial = "";
+    if (acao === "instalar" && Object.prototype.hasOwnProperty.call(bruto, "credencial")) {
+      credencial = credencialTecnicaInformada(bruto.credencial);
+      if (!credencial) {
+        return {
+          ok: false,
+          codigo: CODIGOS_TEF.DADOS_INVALIDOS,
+          erro: "Informe a credencial técnica no momento da instalação.",
+        };
+      }
+      delete bruto.credencial;
+    }
+    const pedidoPonto = parametrosPontoNovo(bruto);
     if (!pedidoPonto.ok) {
       return pedidoPonto;
     }
-    return { ok: true, acao, dados: pedidoPonto.dados };
+    return {
+      ok: true,
+      acao,
+      dados: credencial ? { ...pedidoPonto.dados, credencial } : pedidoPonto.dados,
+    };
   }
   return { ok: true, acao, dados: {} };
 }
@@ -840,6 +919,7 @@ export class GerenciadorTefNativo {
     this.codigoSaida = null;
     this.inicializado = false;
     this.identidadeProcesso = null;
+    this.credencialEphemera = "";
     this.transacaoPendente = null;
     this.pendenciaIlegivel = false;
     this.arquivoPendencia = deps.arquivoPendencia ?? arquivoPendenciaTef();
@@ -1366,12 +1446,24 @@ export class GerenciadorTefNativo {
         evidencia: null,
       };
     }
-    const resposta = await this.executar({ acao: "instalar", dados: autorizada.dados });
+    const credencial = credencialTecnicaInformada(autorizado.credencial);
+    const dados = { ...autorizada.dados };
+    if (credencial) {
+      dados.credencial = credencial;
+    }
+    this.credencialEphemera = credencial;
+    let resposta;
+    try {
+      resposta = await this.executar({ acao: "instalar", dados });
+    } finally {
+      this.credencialEphemera = "";
+    }
     const tef = this.snapshot();
-    const resultado =
+    const resultado = semSegredoTecnico(
       resposta?.resultado && typeof resposta.resultado === "object" && !Array.isArray(resposta.resultado)
         ? { ...resposta.resultado }
-        : {};
+        : {}
+    );
     delete resultado.assinatura;
     delete resultado.evidencia;
     delete resultado.instalacaoId;
@@ -2227,12 +2319,12 @@ export class GerenciadorTefNativo {
 
   async registrar(evento, detalhe) {
     try {
-      const texto = String(detalhe ?? "");
+      const texto = redigirCredencial(detalhe, this.credencialEphemera);
       const diagnosticoInstalacao =
         evento === "tef-stderr" &&
         (texto.includes("[ACBrTEF][instalar]") ||
           texto.includes("[ACBrTEF][pagamento]"));
-      await this.registrarLog(evento, detalhe, { diagnosticoInstalacao });
+      await this.registrarLog(evento, texto, { diagnosticoInstalacao });
     } catch {
       // log nunca derruba o Connector
     }

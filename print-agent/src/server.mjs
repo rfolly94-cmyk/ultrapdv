@@ -54,6 +54,8 @@ import {
   GerenciadorTefNativo,
   apresentarStatusTef,
   autorizacaoDoVinculo,
+  pedidoHttpInstalacao,
+  semSegredoTecnico,
   validarPayloadHttpTef,
 } from "./tef.mjs";
 import {
@@ -126,7 +128,7 @@ function respostaOperacaoTef(resultado) {
     typeof resultado.resultado === "object" &&
     !Array.isArray(resultado.resultado)
   ) {
-    corpo.resultado = resultado.resultado;
+    corpo.resultado = semSegredoTecnico(resultado.resultado);
   }
   if (resultado && Object.prototype.hasOwnProperty.call(resultado, "evidencia")) {
     corpo.evidencia = resultado.evidencia && typeof resultado.evidencia === "object"
@@ -323,13 +325,15 @@ export function criarServidor(deps = {}) {
     });
   const executarInstalacaoTef =
     deps.instalarTef ??
-    (async () => {
+    (async (credencial) => {
       const vinculo = await lerVinculo();
       const dispositivoLocal = String(await obterId());
       const chave = await lerChave();
-      return gerenciadorTef.instalar(
-        autorizacaoDoVinculo(vinculo, dispositivoLocal, chave?.privada)
-      );
+      const autorizado = autorizacaoDoVinculo(vinculo, dispositivoLocal, chave?.privada);
+      if (!autorizado) {
+        return gerenciadorTef.instalar(null);
+      }
+      return gerenciadorTef.instalar({ ...autorizado, credencial });
     });
   const executarPagamentoTef =
     deps.pagarTef ?? ((dados) => gerenciadorTef.pagar(dados));
@@ -1202,18 +1206,24 @@ export function criarServidor(deps = {}) {
           );
           return;
         }
-        if (Object.keys(payloadInstalacao).some((chave) => chave !== "acao")) {
+        const pedidoInstalacao = pedidoHttpInstalacao(payloadInstalacao);
+        if (!pedidoInstalacao.ok) {
           json(
             res,
             400,
-            { ok: false, erro: "Payload recusado." },
+            {
+              ok: false,
+              erro: pedidoInstalacao.erro,
+              codigo: pedidoInstalacao.codigo,
+              evidencia: null,
+            },
             origemCheck.origem,
             origens
           );
           return;
         }
 
-        const resultadoInstalacao = await executarInstalacaoTef();
+        const resultadoInstalacao = await executarInstalacaoTef(pedidoInstalacao.credencial);
         const httpInstalacao = respostaOperacaoTef(resultadoInstalacao);
         json(
           res,

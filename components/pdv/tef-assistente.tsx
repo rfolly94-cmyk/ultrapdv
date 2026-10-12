@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import {
   ativarAssistente,
+  prepararInstalacaoAssistente,
   salvarRascunhoAssistente,
   validarAssistente,
 } from "@/app/configuracoes/financeiro/tef/actions";
@@ -95,6 +96,12 @@ export function TefAssistente(props: {
   const [mensagens, setMensagens] = useState<string[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [ativacao, setAtivacao] = useState<string | null>(null);
+  const [propostaPonto, setPropostaPonto] = useState("");
+  const [propostaAmbiente, setPropostaAmbiente] = useState("");
+  const [propostaServidor, setPropostaServidor] = useState("");
+  const [autorizacaoReset, setAutorizacaoReset] = useState(false);
+  const [confirmacaoInstalacao, setConfirmacaoInstalacao] = useState(false);
+  const [credencialTecnica, setCredencialTecnica] = useState("");
 
   const campos = {
     cnpjConfirmado,
@@ -223,6 +230,87 @@ export function TefAssistente(props: {
       setRequisitos(retorno.avaliacao.requisitos);
       setMensagens(retorno.avaliacao.mensagens);
     } finally {
+      setOcupado(false);
+    }
+  }
+
+  function ocultarCredencial(texto: string, credencial: string) {
+    if (credencial.length < 4) {
+      return texto;
+    }
+    return texto.split(credencial).join("[redigido]");
+  }
+
+  async function avaliarMigracao() {
+    setOcupado(true);
+    setMensagens([]);
+    try {
+      const retorno = await prepararInstalacaoAssistente({
+        confirmacaoExplicita: false,
+        dispositivoId: "",
+        credencialInformada: false,
+        autorizacaoExplicitaReset: autorizacaoReset,
+        proposta: {
+          pontoCaptura: propostaPonto,
+          ambiente: propostaAmbiente,
+          servidor: propostaServidor,
+        },
+      });
+      setMensagens([retorno.motivo]);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function instalarPonto() {
+    if (props.empresaJaHabilitada || !confirmacaoInstalacao || credencialTecnica.length < 4) {
+      setMensagens([
+        "A instalação nova exige confirmação explícita e a credencial técnica neste momento.",
+      ]);
+      return;
+    }
+    const senha = credencialTecnica;
+    setCredencialTecnica("");
+    setOcupado(true);
+    setMensagens([]);
+    try {
+      const descoberta = await descobrirUltraPdvConector();
+      if (!descoberta.ok || !descoberta.saude.dispositivoId) {
+        setMensagens([
+          "O UltraPDV Connector não respondeu neste computador. A instalação não foi iniciada.",
+        ]);
+        return;
+      }
+      const preparado = await prepararInstalacaoAssistente({
+        confirmacaoExplicita: true,
+        dispositivoId: descoberta.saude.dispositivoId,
+        credencialInformada: true,
+        autorizacaoExplicitaReset: false,
+        proposta: null,
+      });
+      if (!preparado.ok || preparado.efeito !== "instalar") {
+        setMensagens([preparado.motivo]);
+        return;
+      }
+      const resposta = await fetch(`${descoberta.origem}/tef/instalar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          acao: "instalar",
+          confirmacao: true,
+          credencial: senha,
+        }),
+      });
+      const corpo = (await resposta.json()) as {
+        erro?: string;
+        resultado?: { mensagem?: string };
+      };
+      const texto = corpo.erro || corpo.resultado?.mensagem || "O Connector devolveu o resultado da instalação.";
+      setMensagens([ocultarCredencial(texto, senha)]);
+    } catch {
+      setMensagens(["Não foi possível falar com o Connector. A empresa não foi ativada."]);
+    } finally {
+      setCredencialTecnica("");
       setOcupado(false);
     }
   }
@@ -397,15 +485,71 @@ export function TefAssistente(props: {
               value={adquirentesTexto}
               disabled={props.empresaJaHabilitada}
               onChange={(evento) => setAdquirentesTexto(evento.target.value)}
-              placeholder="Uma por linha, somente as informadas pelo PayGoWeb."
+              placeholder="Uma por linha, somente as comprovadas pelo PayGoWeb."
               className="mt-1 min-h-20 w-full rounded-lg border border-zinc-300 px-3 py-2"
             />
           </label>
           {props.empresaJaHabilitada ? (
-            <PageAlert type="aviso" className="mx-0 mt-0">
-              Esta empresa já está configurada. Os dados atuais são exibidos e não serão trocados
-              por este assistente.
-            </PageAlert>
+            <div className="space-y-3 rounded-xl border border-zinc-200 p-3">
+              <PageAlert type="aviso" className="mx-0 mt-0">
+                Instalação atual: ponto {props.pontoAtual || "não informado"}, ambiente{" "}
+                {props.ambienteAtual === "producao" ? "produção" : "homologação"}. Os dados
+                vigentes não serão trocados por este assistente.
+              </PageAlert>
+              <p className="text-sm text-zinc-700">
+                A migração para outro ponto, ambiente ou servidor depende de reset da instalação
+                local. Esta etapa permanece bloqueada até a PayGo confirmar o procedimento oficial.
+                A autorização abaixo não executa o reset.
+              </p>
+              <label className="block text-sm font-medium text-zinc-800">
+                Ponto novo informado pela PayGo
+                <input
+                  value={propostaPonto}
+                  onChange={(evento) => setPropostaPonto(evento.target.value)}
+                  autoComplete="off"
+                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium text-zinc-800">
+                Ambiente novo
+                <select
+                  value={propostaAmbiente}
+                  onChange={(evento) => setPropostaAmbiente(evento.target.value)}
+                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+                >
+                  <option value="">Selecione</option>
+                  <option value="homologacao">Homologação</option>
+                  <option value="producao">Produção</option>
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-zinc-800">
+                Servidor novo
+                <input
+                  value={propostaServidor}
+                  onChange={(evento) => setPropostaServidor(evento.target.value)}
+                  placeholder="host:porta"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+                />
+              </label>
+              <label className="flex items-start gap-2 text-sm text-zinc-800">
+                <input
+                  type="checkbox"
+                  checked={autorizacaoReset}
+                  onChange={(evento) => setAutorizacaoReset(evento.target.checked)}
+                />
+                Autorizo explicitamente o reset quando existir procedimento oficial confirmado.
+              </label>
+              <button
+                type="button"
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium disabled:opacity-50"
+                disabled={ocupado}
+                onClick={() => void avaliarMigracao()}
+              >
+                Avaliar migração
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -490,6 +634,7 @@ export function TefAssistente(props: {
           empresaId={props.empresaId}
           terminais={props.terminais}
           podeRevogar={props.podeRevogar}
+          administrador={props.administrador}
         />
       ) : null}
 
@@ -522,8 +667,42 @@ export function TefAssistente(props: {
         <div className="space-y-3">
           <PageAlert type="aviso" className="mx-0 mt-0">
             Chegar nesta etapa não ativa a empresa. TEF de homologação continua impedido de
-            financiar NFC-e de produção.
+            financiar NFC-e de produção. A instalação também não ativa a empresa.
           </PageAlert>
+          {props.empresaJaHabilitada ? null : (
+            <div className="space-y-3">
+              <label className="flex items-start gap-2 text-sm text-zinc-800">
+                <input
+                  type="checkbox"
+                  checked={confirmacaoInstalacao}
+                  onChange={(evento) => setConfirmacaoInstalacao(evento.target.checked)}
+                />
+                Confirmo a instalação deste ponto com os dados oficiais já salvos.
+              </label>
+              <label className="block text-sm font-medium text-zinc-800">
+                Credencial técnica
+                <input
+                  type="password"
+                  value={credencialTecnica}
+                  onChange={(evento) => setCredencialTecnica(evento.target.value)}
+                  autoComplete="off"
+                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+                />
+              </label>
+              <p className="text-sm text-zinc-600">
+                A credencial segue somente até o Connector deste computador e é descartada em
+                seguida. Ela não é enviada ao servidor nem gravada no banco.
+              </p>
+              <button
+                type="button"
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={ocupado}
+                onClick={() => void instalarPonto()}
+              >
+                Instalar ponto PayGoWeb
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"

@@ -208,6 +208,7 @@ export default async function ConfiguracaoTefPage({ searchParams }: PageProps) {
             empresaId={config.empresaId}
             terminais={config.terminais}
             podeRevogar={config.podeRevogar}
+            administrador={assistente?.administrador === true}
           />
           <TefPinpadDiagnostico />
         </>

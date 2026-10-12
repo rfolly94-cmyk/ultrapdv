@@ -13,10 +13,6 @@ uses
   ACBrTEFAPIPayGoWeb,
   ACBrUtil.Strings;
 
-const
-  { Homologacao PayGo. Usada somente na pergunta de senha tecnica da instalacao. }
-  SENHA_TECNICA_INSTALACAO = '314159';
-
 type
   TEventosTEF = class
   public
@@ -90,6 +86,7 @@ var
   IdentidadeCnpj: String;
   IdentidadeServidor: String;
   IdentidadeEstabelecimento: String;
+  CredencialTecnica: String;
   IdPagamentoAtivo: String;
   ContadorMenus: Integer;
 
@@ -103,6 +100,35 @@ begin
   { stdout fica exclusivamente para JSON Lines }
   WriteLn(StdErr, Msg);
   Flush(StdErr);
+end;
+
+function CredencialInformada(const Valor: String): Boolean;
+var
+  i: Integer;
+  C: Char;
+begin
+  Result := (Length(Valor) >= 4) and (Length(Valor) <= 40);
+  if not Result then
+    Exit;
+  for i := 1 to Length(Valor) do
+  begin
+    C := Valor[i];
+    if (C <= ' ') or (C = #127) then
+      Exit(False);
+  end;
+end;
+
+procedure LimparCredencialTecnica;
+begin
+  CredencialTecnica := '';
+end;
+
+procedure DefinirCredencialTecnica(const Valor: String);
+begin
+  if CredencialInformada(Valor) then
+    CredencialTecnica := Valor
+  else
+    CredencialTecnica := '';
 end;
 
 function NomeTela(Terminal: TACBrTEFAPITela): String;
@@ -149,6 +175,9 @@ var
 begin
   Bruto := StringReplace(Texto, #13, ' ', [rfReplaceAll]);
   Bruto := StringReplace(Bruto, #10, ' ', [rfReplaceAll]);
+  if CredencialInformada(CredencialTecnica) and
+     (Pos(CredencialTecnica, Bruto) > 0) then
+    Bruto := StringReplace(Bruto, CredencialTecnica, '[redigido]', [rfReplaceAll]);
   total := 0;
   for i := 1 to Length(Bruto) do
     if Bruto[i] in ['0'..'9'] then
@@ -414,13 +443,25 @@ begin
   if DiagnosticoInstalacao and
      PerguntaSenhaTecnica(DefinicaoCampo.TituloPergunta) then
   begin
+    if CredencialInformada(CredencialTecnica) then
+    begin
+      LogErro(
+        '[ACBrTEF][instalar] callback=QuandoPerguntarCampo' +
+        ' campo=senha_tecnica resposta=fornecida'
+      );
+      Resposta := CredencialTecnica;
+      Validado := True;
+      Cancelado := False;
+      Exit;
+    end;
     LogErro(
       '[ACBrTEF][instalar] callback=QuandoPerguntarCampo' +
-      ' campo=senha_tecnica resposta=fornecida'
+      ' campo=senha_tecnica resposta=ausente'
     );
-    Resposta := SENHA_TECNICA_INSTALACAO;
-    Validado := True;
-    Cancelado := False;
+    Resposta := '';
+    LimparCredencialTecnica;
+    Validado := False;
+    Cancelado := True;
     Exit;
   end;
 
@@ -847,6 +888,13 @@ end;
 procedure TEventosTEF.QuandoGravarLog(const ALogLine: String; var Tratado: Boolean);
 begin
   ObservarLinhaPayGo(ALogLine);
+  if CredencialInformada(CredencialTecnica) and
+     (Pos(CredencialTecnica, ALogLine) > 0) then
+  begin
+    LogErro('[ACBrTEF] ' + SanitizarTextoDiagnostico(ALogLine));
+    Tratado := True;
+    Exit;
+  end;
   Tratado := False;
 end;
 
@@ -1149,6 +1197,7 @@ begin
       LogErro('[ACBrTEF] Instalacao PWOPER_INSTALL');
       { OperacaoAdminToPWOPER_ nao mapeia nenhum TACBrTEFOperacao para
         PWOPER_INSTALL. A sobrecarga string repassa o codigo numerico. }
+      DefinirCredencialTecnica(TextoDados(Dados, 'credencial'));
       DiagnosticoInstalacao := True;
       try
         Sucesso := TEF.EfetuarAdministrativa(IntToStr(PWOPER_INSTALL));
@@ -1166,6 +1215,7 @@ begin
             'resultado', 'nenhuma', 'ausente', 'ausente', '');
       finally
         DiagnosticoInstalacao := False;
+        LimparCredencialTecnica;
       end;
 
       Resultado := TJSONObject.Create;

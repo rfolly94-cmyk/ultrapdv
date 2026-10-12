@@ -33,6 +33,10 @@ import {
   type ResultadoConectorTef,
 } from "@/lib/pdv/tef/regras";
 import type { TerminalTefAtivo } from "@/lib/pdv/tef/estado-terminal";
+import type {
+  ConfiguracaoSincronizacao,
+  TerminalSincronizacao,
+} from "@/lib/pdv/tef/sincronizar-vinculo";
 import { validarServidorPayGo } from "@/lib/pdv/tef/servidor-paygo";
 
 export class ErroTef extends Error {
@@ -1462,6 +1466,220 @@ export async function salvarConfigTefEmpresa(
     }
     throw new ErroTef("Não foi possível salvar a configuração TEF.", 500);
   }
+}
+
+function ambienteSincronizacao(valor: unknown): TerminalSincronizacao["ambiente"] {
+  return valor === "producao" || valor === "homologacao" ? valor : "";
+}
+
+export async function carregarFatosSincronizacaoVinculo(input: {
+  empresaId: string;
+  dispositivoId: string;
+}) {
+  const cliente = admin();
+  const completo = await cliente
+    .from("tef_terminais")
+    .select(
+      "id, empresa_id, codigo, dispositivo_id, ativo, chave_publica, chave_id, estabelecimento, ponto_captura, revogada_em, ambiente, servidor, cnpj"
+    )
+    .eq("dispositivo_id", input.dispositivoId);
+  let linhas: Linha[] = [];
+  if (completo.error) {
+    if (!colunaServidorAusente(completo.error)) {
+      if (migracaoAusente(completo.error)) {
+        throw new ErroTef("A estrutura de TEF ainda não foi aplicada neste ambiente.", 503);
+      }
+      throw new ErroTef("Não foi possível consultar o terminal.", 500);
+    }
+    const base = await exigirTabela(
+      cliente
+        .from("tef_terminais")
+        .select(
+          "id, empresa_id, codigo, dispositivo_id, ativo, chave_publica, chave_id, estabelecimento, ponto_captura, revogada_em"
+        )
+        .eq("dispositivo_id", input.dispositivoId)
+    );
+    linhas = ((base ?? []) as Linha[]).map((linha) => ({
+      ...linha,
+      ambiente: "",
+      servidor: "",
+      cnpj: "",
+    }));
+  } else {
+    linhas = (completo.data ?? []) as Linha[];
+  }
+  const empresaId = input.empresaId.trim().toLowerCase();
+  const destaEmpresa = linhas.find(
+    (linha) =>
+      String(linha.empresa_id).toLowerCase() === empresaId &&
+      linha.ativo !== false &&
+      !linha.revogada_em
+  );
+  const dispositivoOutraEmpresa = linhas.some(
+    (linha) =>
+      String(linha.empresa_id).toLowerCase() !== empresaId &&
+      linha.ativo !== false &&
+      !linha.revogada_em
+  );
+  const terminal: TerminalSincronizacao | null = destaEmpresa
+    ? {
+        id: String(destaEmpresa.id),
+        empresaId: String(destaEmpresa.empresa_id),
+        codigo: String(destaEmpresa.codigo ?? ""),
+        dispositivoId: String(destaEmpresa.dispositivo_id),
+        chavePublica: destaEmpresa.chave_publica ? String(destaEmpresa.chave_publica) : "",
+        chaveId: destaEmpresa.chave_id ? String(destaEmpresa.chave_id) : "",
+        estabelecimento: String(destaEmpresa.estabelecimento ?? ""),
+        pontoCaptura: String(destaEmpresa.ponto_captura ?? ""),
+        ativo: destaEmpresa.ativo !== false,
+        revogada: Boolean(destaEmpresa.revogada_em),
+        ambiente: ambienteSincronizacao(destaEmpresa.ambiente),
+        servidor: String(destaEmpresa.servidor ?? ""),
+        cnpj: String(destaEmpresa.cnpj ?? ""),
+      }
+    : null;
+  const configConsulta = await cliente
+    .from("tef_configuracoes")
+    .select("ambiente, estabelecimento, ponto_captura, servidor_homologacao, servidor_producao")
+    .eq("empresa_id", input.empresaId)
+    .maybeSingle();
+  let configLinha: Linha | null = null;
+  if (configConsulta.error) {
+    if (!colunaServidorAusente(configConsulta.error)) {
+      if (migracaoAusente(configConsulta.error)) {
+        throw new ErroTef("A estrutura de TEF ainda não foi aplicada neste ambiente.", 503);
+      }
+      throw new ErroTef("Não foi possível consultar a configuração TEF.", 500);
+    }
+    const base = await exigirTabela(
+      cliente
+        .from("tef_configuracoes")
+        .select("ambiente, estabelecimento, ponto_captura")
+        .eq("empresa_id", input.empresaId)
+        .maybeSingle()
+    );
+    configLinha = base ? { ...base, servidor_homologacao: "", servidor_producao: "" } : null;
+  } else {
+    configLinha = configConsulta.data;
+  }
+  const ambiente = ambienteSincronizacao(configLinha?.ambiente);
+  const config: ConfiguracaoSincronizacao = {
+    ambiente,
+    estabelecimento: String(configLinha?.estabelecimento ?? ""),
+    pontoCaptura: String(configLinha?.ponto_captura ?? ""),
+    servidor:
+      ambiente === "producao"
+        ? String(configLinha?.servidor_producao ?? "")
+        : ambiente === "homologacao"
+          ? String(configLinha?.servidor_homologacao ?? "")
+          : "",
+  };
+  let pendenciaFinanceira = false;
+  if (terminal) {
+    const abertas = await exigirTabela(
+      cliente
+        .from("tef_operacoes")
+        .select("id")
+        .eq("empresa_id", input.empresaId)
+        .eq("terminal_id", terminal.id)
+        .in("status", [...STATUS_TEF_ABERTOS])
+        .limit(1)
+    );
+    pendenciaFinanceira = ((abertas ?? []) as Linha[]).length > 0;
+  }
+  const empresa = await cliente
+    .from("empresas")
+    .select("cnpj")
+    .eq("id", input.empresaId)
+    .maybeSingle();
+  if (empresa.error) {
+    throw new ErroTef("Não foi possível consultar o cadastro da empresa.", 500);
+  }
+  return {
+    dispositivoOutraEmpresa,
+    pendenciaFinanceira,
+    terminal,
+    config,
+    cnpjEmpresa: String(empresa.data?.cnpj ?? ""),
+  };
+}
+
+function funcaoRecuperacaoAusente(error: { code?: string; message?: string } | null) {
+  const texto = `${error?.code ?? ""} ${error?.message ?? ""}`;
+  return /PGRST202|42883|tef_recuperar_autorizacao_terminal|schema cache/i.test(texto);
+}
+
+export async function consultarConflitoChaveTef(input: {
+  terminalId: string;
+  chavePublica: string;
+}) {
+  const cliente = admin();
+  const revogada = await cliente
+    .from("tef_chaves_revogadas")
+    .select("id")
+    .eq("chave_publica", input.chavePublica)
+    .limit(1)
+    .maybeSingle();
+  if (revogada.error && !migracaoAusente(revogada.error)) {
+    throw new ErroTef("Não foi possível consultar as chaves revogadas.", 500);
+  }
+  const outro = await cliente
+    .from("tef_terminais")
+    .select("id")
+    .eq("chave_publica", input.chavePublica)
+    .neq("id", input.terminalId)
+    .limit(1)
+    .maybeSingle();
+  if (outro.error && !migracaoAusente(outro.error)) {
+    throw new ErroTef("Não foi possível consultar os terminais TEF.", 500);
+  }
+  return {
+    chaveJaRevogada: Boolean(revogada.data?.id),
+    chaveEmOutroTerminal: Boolean(outro.data?.id),
+  };
+}
+
+export async function substituirAutorizacaoTerminalTef(input: {
+  empresaId: string;
+  dispositivoId: string;
+  usuarioId: string;
+  chavePublica: string;
+  chaveId: string | null;
+  chaveAnterior: string;
+  fingerprintAnterior: string;
+  fingerprintAtual: string;
+}) {
+  const cliente = admin();
+  const { data, error } = await cliente.rpc("tef_recuperar_autorizacao_terminal", {
+    p_empresa_id: input.empresaId,
+    p_dispositivo_id: input.dispositivoId,
+    p_usuario_id: input.usuarioId,
+    p_chave_publica: input.chavePublica,
+    p_chave_id: input.chaveId,
+    p_chave_anterior: input.chaveAnterior,
+    p_fingerprint_anterior: input.fingerprintAnterior,
+    p_fingerprint_atual: input.fingerprintAtual,
+  });
+  if (error) {
+    if (funcaoRecuperacaoAusente(error)) {
+      throw new ErroTef(
+        "A recuperação de autorização ainda não foi aplicada no banco. A migration 20261012140000_tef_recuperar_autorizacao.sql precisa ser aplicada antes de usar o botão. Ela não revoga nenhuma chave ao ser aplicada.",
+        503
+      );
+    }
+    if (/concorrente/i.test(error.message ?? "")) {
+      throw new ErroTef(
+        "A autorização deste terminal mudou durante a recuperação. Confira as chaves antes de tentar de novo. Nenhuma chave nova foi gerada.",
+        409
+      );
+    }
+    throw new ErroTef("Não foi possível recuperar a autorização do terminal.", 500);
+  }
+  const resultado = (data ?? {}) as { efeito?: string; motivo?: string };
+  return {
+    efeito: String(resultado.efeito ?? "recusar"),
+    motivo: String(resultado.motivo ?? ""),
+  };
 }
 
 export async function definirTefPlataforma(habilitada: boolean) {

@@ -27,6 +27,7 @@ import {
   type CamposEvidenciaInstalacao,
   type ClassificacaoAmbienteInstalacao,
 } from "@/lib/pdv/tef/evidencia-instalacao";
+import { decidirInstalacaoControlada } from "@/lib/pdv/tef/instalacao-controlada";
 import { ErroTef, gravarServidoresPayGoEmpresa, lerHabilitacaoTef, salvarConfigTefEmpresa } from "@/lib/pdv/tef/persistencia";
 import { STATUS_TEF_ABERTOS } from "@/lib/pdv/tef/regras";
 import { decidirGravacaoServidor } from "@/lib/pdv/tef/servidor-paygo";
@@ -781,5 +782,111 @@ export async function registrarEvidenciaInstalacaoSessao(input: {
     ok: true as const,
     ambiente: plano.registro.ambiente,
     origem: "instalacao_controlada" as const,
+  };
+}
+
+async function lerServidoresOficiais(empresaId: string) {
+  const cliente = createAdminClient();
+  const consulta = await cliente
+    .from("tef_configuracoes")
+    .select("servidor_homologacao, servidor_producao")
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  if (consulta.error) {
+    if (colunaServidorAusente(consulta.error) || migracaoAusente(consulta.error)) {
+      return { servidorHomologacao: "", servidorProducao: "" };
+    }
+    throw new ErroTef("Não foi possível consultar o servidor PayGoWeb.", 500);
+  }
+  return {
+    servidorHomologacao: String(consulta.data?.servidor_homologacao ?? ""),
+    servidorProducao: String(consulta.data?.servidor_producao ?? ""),
+  };
+}
+
+export async function prepararInstalacaoAssistenteSessao(input: {
+  confirmacaoExplicita: boolean;
+  dispositivoId: string;
+  credencialInformada: boolean;
+  autorizacaoExplicitaReset: boolean;
+  proposta: { pontoCaptura: string; ambiente: string; servidor: string } | null;
+}) {
+  const pagina = await lerPaginaAssistenteTef();
+  const proposta = input.proposta
+    ? {
+        pontoCaptura: String(input.proposta.pontoCaptura ?? "").trim().slice(0, 40),
+        ambiente:
+          input.proposta.ambiente === "producao" || input.proposta.ambiente === "homologacao"
+            ? input.proposta.ambiente
+            : "",
+        servidor: String(input.proposta.servidor ?? "").trim().slice(0, 200),
+      }
+    : null;
+  const servidores = await lerServidoresOficiais(pagina.empresaId);
+  const servidorAtual =
+    pagina.ambienteAtual === "producao" ? servidores.servidorProducao : servidores.servidorHomologacao;
+  const rascunho = pagina.rascunho;
+  let pontoOficial = pagina.empresaJaHabilitada ? pagina.pontoAtual : rascunho?.pontoCaptura ?? "";
+  let ambienteOficial = pagina.empresaJaHabilitada
+    ? pagina.ambienteAtual
+    : rascunho?.ambienteAutorizado ?? "";
+  let servidorOficial = pagina.empresaJaHabilitada
+    ? servidorAtual
+    : ambienteOficial === "producao"
+      ? rascunho?.servidorProducao ?? ""
+      : rascunho?.servidorHomologacao ?? "";
+  const estabelecimentoOficial = pagina.empresaJaHabilitada
+    ? pagina.estabelecimentoAtual
+    : rascunho?.estabelecimento ?? "";
+  if (pagina.empresaJaHabilitada && pagina.pontoAtual.trim() && proposta) {
+    pontoOficial = proposta.pontoCaptura || pontoOficial;
+    ambienteOficial = proposta.ambiente || ambienteOficial;
+    servidorOficial = proposta.servidor || servidorOficial;
+  }
+  const dispositivoId = String(input.dispositivoId ?? "").trim().toLowerCase();
+  const terminais = ID_EVIDENCIA.test(dispositivoId)
+    ? await terminaisDaObservacao(pagina.empresaId, dispositivoId)
+    : [];
+  const destaEmpresa = terminais.filter((item) => item.empresaId === pagina.empresaId);
+  const pendencias = await pendenciasDaEmpresa(pagina.empresaId);
+  const decisao = decidirInstalacaoControlada({
+    empresaSessaoId: pagina.empresaId,
+    empresaInformada: "",
+    permissaoEditar: pagina.permissaoEditar,
+    administrador: pagina.administrador,
+    plataformaHabilitada: pagina.plataformaHabilitada,
+    pendenciaFinanceira: pendencias > 0,
+    confirmacaoExplicita: input.confirmacaoExplicita === true,
+    credencialInformada: input.credencialInformada === true,
+    pontoJaInstalado: pagina.empresaJaHabilitada && pagina.pontoAtual.trim() !== "",
+    procedimentoOficialConfirmado: false,
+    autorizacaoExplicitaReset: input.autorizacaoExplicitaReset === true,
+    pontoAtual: pagina.pontoAtual,
+    ambienteAtual: pagina.ambienteAtual,
+    servidorAtual,
+    pontoOficial,
+    ambienteOficial,
+    servidorOficial,
+    cnpjEmpresa: pagina.cnpj,
+    estabelecimentoOficial,
+    pontoVinculado: destaEmpresa[0]?.pontoCaptura ?? "",
+    ambienteVinculado: "",
+    servidorVinculado: "",
+    dispositivoPareado: destaEmpresa.length > 0,
+    dispositivoOutraEmpresa:
+      terminais.some((item) => item.empresaId !== pagina.empresaId) && destaEmpresa.length === 0,
+  });
+  return {
+    ok: true as const,
+    efeito: decisao.efeito,
+    motivo: decisao.motivo,
+    atual: {
+      cnpj: pagina.cnpj,
+      pontoCaptura: pagina.pontoAtual,
+      ambiente: pagina.ambienteAtual,
+      servidor: servidorAtual,
+      estabelecimento: pagina.estabelecimentoAtual,
+      instalado: pagina.empresaJaHabilitada && pagina.pontoAtual.trim() !== "",
+    },
   };
 }

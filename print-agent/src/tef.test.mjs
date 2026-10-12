@@ -2124,7 +2124,7 @@ test("instalação responde só a senha técnica e o log não leva o valor", () 
     fonte.indexOf("procedure TEventosTEF.QuandoPerguntarCampo")
   );
   const senha = campo.indexOf("PerguntaSenhaTecnica(DefinicaoCampo.TituloPergunta)");
-  const fornece = campo.indexOf("Resposta := SENHA_TECNICA_INSTALACAO;");
+  const fornece = campo.indexOf("Resposta := CredencialTecnica;");
   const valida = campo.indexOf("Validado := True;");
   const segue = campo.indexOf("Cancelado := False;");
   const sai = campo.indexOf("Exit;");
@@ -2134,6 +2134,7 @@ test("instalação responde só a senha técnica e o log não leva o valor", () 
   assert.ok(cancela > sai);
   assert.match(campo, /Validado := False;/);
   assert.match(campo, /Cancelado := True;/);
+  assert.match(campo, /resposta=ausente/);
   assert.match(
     campo,
     /callback=QuandoPerguntarCampo' \+\s*' campo=senha_tecnica resposta=fornecida'/
@@ -2141,8 +2142,9 @@ test("instalação responde só a senha técnica e o log não leva o valor", () 
   assert.equal(campo.includes("314159"), false);
   assert.equal(menu.includes("SENHA_TECNICA_INSTALACAO"), false);
   assert.equal(menu.includes("ItemSelecionado := -1"), true);
-  const semConstante = fonte.replace("SENHA_TECNICA_INSTALACAO = '314159';", "");
-  assert.equal(semConstante.includes("314159"), false);
+  assert.match(fonte, /DefinirCredencialTecnica\(TextoDados\(Dados, 'credencial'\)\)/);
+  assert.match(fonte, /LimparCredencialTecnica/);
+  assert.equal(fonte.includes("314159"), false);
   assert.equal(fonteTef.includes("314159"), false);
   assert.equal(
     readFileSync(fileURLToPath(new URL("./server.mjs", import.meta.url)), "utf8").includes(
@@ -2279,6 +2281,37 @@ test("instalação exige TEF inicializado, usa timeout de 300s e não cria journ
   assert.equal(resposta.tef.reconciliacaoNecessaria, false);
   await assert.rejects(fs.access(arquivoPendencia));
   assert.equal(proc.stdin.partes.some((linha) => linha.includes('"pagamento"')), false);
+});
+
+test("credencial técnica segue só no stdin da instalação e sai do resultado e do log", async () => {
+  const segredo = "segredo-teste";
+  const { gerenciador, processos, logs, arquivoPendencia } = criarGerenciador();
+  const proc = await deixarInicializadoParaInstalar(gerenciador, processos);
+  const pendente = gerenciador.instalar({ ...IDENTIDADE_INSTALACAO, credencial: segredo });
+  await ate(() => proc.stdin.partes.length === 2);
+  proc.stderr.emit("data", Buffer.from(`[ACBrTEF][instalar] senha ${segredo}\n`));
+  await ate(() => logs.some((item) => item.evento === "tef-stderr"));
+  const pedido = ultimaLinha(proc);
+  assert.equal(pedido.dados.credencial, segredo);
+  proc.emitirStdout(
+    `${JSON.stringify({
+      id: pedido.id,
+      ok: false,
+      resultado: {
+        credencial: segredo,
+        senha: segredo,
+        mensagem: "Instalacao nao concluida",
+      },
+      erro: "Instalacao nao concluida",
+    })}\n`
+  );
+  const resposta = await pendente;
+  assert.equal(resposta.ok, false);
+  assert.equal(resposta.evidencia, null);
+  assert.equal(JSON.stringify(resposta).includes(segredo), false);
+  assert.equal(logs.some((item) => String(item.detalhe).includes(segredo)), false);
+  assert.equal(logs.some((item) => String(item.detalhe).includes("[redigido]")), true);
+  await assert.rejects(fs.access(arquivoPendencia));
 });
 
 test("instalação negada devolve o erro e não cria journal", async () => {
@@ -2457,8 +2490,9 @@ test("POST /tef/instalar recusa parâmetros livres e encaminha a ação", async 
       assert.equal(simulada.body.erro, "Payload recusado.");
 
       const cedo = await postJson(`${base}/tef/instalar`, {});
-      assert.equal(cedo.status, 409);
-      assert.equal(cedo.body.codigo, CODIGOS_TEF.NAO_INICIALIZADO);
+      assert.equal(cedo.status, 400);
+      assert.equal(cedo.body.codigo, CODIGOS_TEF.OPERACAO_NAO_PERMITIDA);
+      assert.equal(cedo.body.evidencia, null);
       assert.equal(processos.length, 0);
 
       assert.equal((await postJson(`${base}/tef/inicializar`, {})).status, 200);
@@ -2466,12 +2500,31 @@ test("POST /tef/instalar recusa parâmetros livres e encaminha a ação", async 
       assert.equal(instalado.status, 400);
       assert.equal(instalado.body.codigo, CODIGOS_TEF.OPERACAO_NAO_PERMITIDA);
       assert.equal(instalado.body.evidencia, null);
-      assert.equal(instalado.body.tef.inicializado, true);
+      assert.equal(instalado.body.tef, undefined);
       assert.equal(processos.length, 1);
       assert.equal(processos[0].opcoes.shell, false);
+      const comSenha = await postJson(`${base}/tef/instalar`, {
+        acao: "instalar",
+        confirmacao: true,
+        credencial: "segredo-teste",
+        empresaId: "11111111-1111-4111-8111-111111111111",
+      });
+      assert.equal(comSenha.status, 400);
+      assert.equal(comSenha.body.erro, "Payload recusado.");
+      assert.equal(JSON.stringify(comSenha.body).includes("segredo-teste"), false);
+      const autorizada = await postJson(`${base}/tef/instalar`, {
+        acao: "instalar",
+        confirmacao: true,
+        credencial: "segredo-teste",
+      });
+      assert.equal(autorizada.status, 400);
+      assert.equal(autorizada.body.codigo, CODIGOS_TEF.OPERACAO_NAO_PERMITIDA);
+      assert.equal(autorizada.body.evidencia, null);
+      assert.equal(JSON.stringify(autorizada.body).includes("segredo-teste"), false);
       const linhas = processos[0].stdin.partes.join("");
       assert.equal(linhas.includes('"acao":"inicializar"'), true);
       assert.equal(linhas.includes('"acao":"instalar"'), false);
+      assert.equal(linhas.includes("segredo-teste"), false);
       assert.equal(linhas.includes("117473"), false);
       assert.equal(linhas.includes("pos-transac-sb.tpgweb.io"), false);
       assert.equal(linhas.includes("42741754000142"), false);
