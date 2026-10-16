@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { bloqueioTefHomologacaoNfceProducao } from "@/lib/fiscal/tef/ambiente-tef-nfce";
+import { origemProducaoComprovada } from "@/lib/pdv/tef/ambiente-transacao";
 import { codigoBandeiraFiscal } from "@/lib/fiscal/tef/dados-fiscais-cartao";
 import {
   saldoDinheiroAutomaticoPdv,
@@ -81,6 +82,7 @@ function provaPix(id = "op-pix"): ProvaTef {
     nsu: "E1928374620261011120364LDuT35VP5",
     autorizacao: null,
     rede: "PIX C6 BANK",
+    ambienteEfetivo: "producao",
   };
 }
 
@@ -276,12 +278,14 @@ test("terminal ocupado, outra empresa e retorno duplicado não cobram de novo", 
     operacaoId: primeira.operacaoId,
     resultado,
     provaValida: true,
+    origem: origemProducaoComprovada(),
   });
   const repetido = registrarResultado(atual, {
     empresaId: EMPRESA_A,
     operacaoId: primeira.operacaoId,
     resultado,
     provaValida: true,
+    origem: origemProducaoComprovada(),
   });
   assert.equal(gravado.ok && gravado.status, "autorizada");
   assert.equal(repetido.ok && repetido.repetida, true);
@@ -466,6 +470,7 @@ test("simulação local de 50 caixas e 1000 vendas não duplica operação nem c
           confirmar: true,
         },
         provaValida: true,
+        origem: origemProducaoComprovada(),
       });
       const recuperacao = decidirRecuperacao({
         empresaId: EMPRESA_A,

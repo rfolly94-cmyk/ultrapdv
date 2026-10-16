@@ -1063,10 +1063,9 @@ export async function POST(
     const bloqueioAmbienteTef = await bloqueioTefHomologacaoNaNfce(async () => {
       const operacoesTef = await supabase
         .from("tef_operacoes")
-        .select("id")
+        .select("id, ambiente_efetivo")
         .eq("empresa_id", empresaId)
-        .eq("venda_id", vendaId)
-        .limit(1);
+        .eq("venda_id", vendaId);
       const configTef = await supabase
         .from("tef_configuracoes")
         .select("ambiente")
@@ -1076,6 +1075,9 @@ export async function POST(
         erro: Boolean(operacoesTef.error || configTef.error),
         quantidade: operacoesTef.data?.length ?? 0,
         ambienteTef: configTef.data?.ambiente ? String(configTef.data.ambiente) : null,
+        ambientesEfetivos: (operacoesTef.data ?? []).map((item) =>
+          item.ambiente_efetivo ? String(item.ambiente_efetivo) : ""
+        ),
       });
     }, fiscal?.ambiente);
     if (bloqueioAmbienteTef) {

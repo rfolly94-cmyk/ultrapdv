@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const ENTRADAS = ["server.mjs", "stop.mjs", "verify.mjs", "identidade.mjs"];
+const ENTRADAS = ["server.mjs", "stop.mjs", "verify.mjs", "identidade.mjs", "tef-preparar-pasta.mjs"];
 const ATIVOS = ["pagina-status.html"];
 const MODULOS_TEF = [
   "tef.mjs",
@@ -12,6 +12,7 @@ const MODULOS_TEF = [
   "tef-prova.mjs",
   "tef-pareamento.mjs",
   "tef-recuperacao.mjs",
+  "tef-pasta.mjs",
 ];
 const ARQUIVOS_PROGRAMDATA = [
   "print-agent.json",
@@ -20,6 +21,8 @@ const ARQUIVOS_PROGRAMDATA = [
   "tef-recuperacao.json",
   "tef-vinculo.json",
   "tef-pareamento.json",
+  "tef-biblioteca.json",
+  "tef-pasta.json",
 ];
 
 const IMPORT_LOCAL =
@@ -161,15 +164,29 @@ export function auditarInstaladorNsi(texto) {
   if (!instalacao.includes("${STAGING_DIR}\\app\\*.mjs")) {
     erros.push("O instalador nao copia todos os modulos de app.");
   }
-  if (!instalacao.includes("UltraPDVTef_NOVO.exe")) {
-    erros.push("O instalador nao inclui UltraPDVTef_NOVO.exe.");
+  if (!instalacao.includes("${TEF_EXE_NAME}")) {
+    erros.push("O instalador nao inclui o executavel TEF versionado.");
   }
-  const semNovo = instalacao.replaceAll("UltraPDVTef_NOVO.exe", "");
-  if (semNovo.includes("UltraPDVTef.exe")) {
-    erros.push("O instalador referencia o executavel TEF antigo.");
+  if (fonte.includes("UltraPDVTef_NOVO.exe")) {
+    erros.push("O instalador ainda grava ou apaga o executavel TEF antigo.");
+  }
+  if (instalacao.includes("UltraPDVTef.exe")) {
+    erros.push("O instalador referencia o executavel TEF sem versao.");
   }
   if (/PGWeb|TSTKEY|certificado\.crt|\.pos\b/.test(instalacao)) {
     erros.push("O instalador empacotaria dados locais do PayGo.");
+  }
+  if (!instalacao.includes("BackupConnectorAnterior")) {
+    erros.push("A atualizacao nao guarda a copia anterior do Connector.");
+  }
+  if (!instalacao.includes("tef-pacote.json")) {
+    erros.push("O instalador nao publica o inventario do pacote TEF.");
+  }
+  if (/RMDir\s+\/r\s+"\$INSTDIR"/.test(fonte)) {
+    erros.push("A desinstalacao apagaria a pasta inteira, inclusive a PGWebLib.");
+  }
+  if (!/RMDir\s+"\$INSTDIR\\bin\\tef"/.test(desinstalacao)) {
+    erros.push("A desinstalacao precisa manter o diretorio de trabalho da PGWebLib.");
   }
   if (erros.length > 0) {
     throw new Error(erros.join("\n"));

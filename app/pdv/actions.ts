@@ -44,6 +44,10 @@ import {
   snapshotDestinatarioParaPersistir,
 } from "@/lib/fiscal/destinatario/resolver-destinatario-fiscal";
 import { mesclarSnapshotOperacao } from "@/lib/fiscal/nfe55/pagamentos-rascunho";
+import {
+  criarCronometroFinalizacao,
+  lerCorrelacaoFinalizacao,
+} from "@/lib/pdv/desempenho/cronometro-finalizacao";
 
 export type FinalizarVendaPdvInput = {
   idempotencyKey: string;
@@ -71,6 +75,7 @@ export type FinalizarVendaPdvInput = {
   }>;
   cpfNaNota?: string | null;
   usarDocumentoClienteNaNota?: boolean;
+  correlacao?: string | null;
 };
 
 export type FinalizarVendaPdvResultado =
@@ -121,15 +126,21 @@ export async function executarFinalizacaoVendaPdv(
   input: FinalizarVendaPdvInput,
   opcoes?: OpcoesFinalizacaoVendaPdv
 ): Promise<FinalizarVendaPdvResultado> {
+  const relogio = criarCronometroFinalizacao(
+    lerCorrelacaoFinalizacao(input.correlacao) ?? input.idempotencyKey
+  );
+  let medicaoOk = false;
   try {
     const supabase =
-      await createClient();
+      await relogio.medir("supabase_cliente", "supabase", () => createClient());
 
     const {
       data: claimsData,
       error: authError,
     } =
-      await obterClaimsSessao(supabase);
+      await relogio.medir("supabase_autenticacao", "supabase", () =>
+        obterClaimsSessao(supabase)
+      );
 
     if (
       authError ||
@@ -143,13 +154,15 @@ export async function executarFinalizacaoVendaPdv(
     }
 
     const { data: vinculo } =
-      await supabase
-        .from("usuarios_empresas")
-        .select("empresa_id")
-        .eq("usuario_id", String(claimsData.claims.sub))
-        .eq("principal", true)
-        .eq("ativo", true)
-        .maybeSingle();
+      await relogio.medir("supabase_vinculo", "supabase", () =>
+        supabase
+          .from("usuarios_empresas")
+          .select("empresa_id")
+          .eq("usuario_id", String(claimsData.claims.sub))
+          .eq("principal", true)
+          .eq("ativo", true)
+          .maybeSingle()
+      );
 
     if (!vinculo) {
       return {
@@ -161,7 +174,9 @@ export async function executarFinalizacaoVendaPdv(
     }
 
     try {
-      await exigirEmpresaOperacional(String(vinculo.empresa_id));
+      await relogio.medir("supabase_permissao", "supabase", () =>
+        exigirEmpresaOperacional(String(vinculo.empresa_id))
+      );
     } catch (error) {
       if (error instanceof ErroAssinaturaRestrita) {
         return { ok: false, erro: error.message };
@@ -170,11 +185,13 @@ export async function executarFinalizacaoVendaPdv(
     }
 
     try {
-      await exigirOperacaoPdv({
-        empresaId: String(vinculo.empresa_id),
-        acao: "finalizar_venda",
-        origem: "finalizarVendaPdv",
-      });
+      await relogio.medir("supabase_permissao", "supabase", () =>
+        exigirOperacaoPdv({
+          empresaId: String(vinculo.empresa_id),
+          acao: "finalizar_venda",
+          origem: "finalizarVendaPdv",
+        })
+      );
     } catch (error) {
       const negacao = resultadoNegacaoPdv(error);
       if (negacao) {
@@ -185,7 +202,9 @@ export async function executarFinalizacaoVendaPdv(
 
     if (input.descontoCentavos > 0) {
       try {
-        await exigirPermissao({ modulo: "pdv", acao: "aplicar_desconto" });
+        await relogio.medir("supabase_permissao", "supabase", () =>
+          exigirPermissao({ modulo: "pdv", acao: "aplicar_desconto" })
+        );
       } catch (error) {
         if (error instanceof ErroPermissao) {
           return { ok: false, erro: error.message };
@@ -397,15 +416,22 @@ export async function executarFinalizacaoVendaPdv(
     const idsFormas = Array.from(
       new Set(input.pagamentos.map((item) => item.formaPagamentoId))
     );
-    const { data: formasPagamento } = await supabase
-      .from("formas_pagamento")
-      .select("id, permite_fiado")
-      .eq("empresa_id", vinculo.empresa_id)
-      .in("id", idsFormas);
+    const { data: formasPagamento } = await relogio.medir(
+      "supabase_formas",
+      "supabase",
+      () =>
+        supabase
+          .from("formas_pagamento")
+          .select("id, permite_fiado")
+          .eq("empresa_id", vinculo.empresa_id)
+          .in("id", idsFormas)
+    );
 
     if (formasPagamento?.some((forma) => forma.permite_fiado)) {
       try {
-        await exigirPermissao({ modulo: "pdv", acao: "usar_fiado" });
+        await relogio.medir("supabase_permissao", "supabase", () =>
+          exigirPermissao({ modulo: "pdv", acao: "usar_fiado" })
+        );
       } catch (error) {
         if (error instanceof ErroPermissao) {
           return { ok: false, erro: error.message };
@@ -419,7 +445,8 @@ export async function executarFinalizacaoVendaPdv(
       uuidValido(input.catalogoPedidoId)
     ) {
       const { data: pedidoOrigem } =
-        await supabase
+        await relogio.medir("supabase_pedido", "supabase", () =>
+          supabase
           .from("catalogo_pedidos")
           .select("id, status, venda_id")
           .eq(
@@ -430,7 +457,8 @@ export async function executarFinalizacaoVendaPdv(
             "id",
             input.catalogoPedidoId
           )
-          .maybeSingle();
+          .maybeSingle()
+        );
 
       if (!pedidoOrigem) {
         return {
@@ -464,7 +492,8 @@ export async function executarFinalizacaoVendaPdv(
       }
     }
 
-    const teto = await avaliarTetoPagamentosNoServidor({
+    const teto = await relogio.medir("supabase_teto", "supabase", () =>
+      avaliarTetoPagamentosNoServidor({
       supabase,
       empresaId: vinculo.empresa_id,
       itens: input.itens.map((item) => ({
@@ -477,7 +506,8 @@ export async function executarFinalizacaoVendaPdv(
       freteCentavos,
       acrescimoCentavos,
       pagamentos: input.pagamentos,
-    });
+    })
+    );
 
     if (!teto.ok) {
       return {
@@ -486,11 +516,13 @@ export async function executarFinalizacaoVendaPdv(
       };
     }
 
-    const pixModo = await validarPixNaFinalizacaoComercial({
+    const pixModo = await relogio.medir("supabase_pix", "supabase", () =>
+      validarPixNaFinalizacaoComercial({
       supabase,
       empresaId: vinculo.empresa_id,
       pagamentos: input.pagamentos,
-    });
+    })
+    );
 
     if (!pixModo.ok) {
       return {
@@ -499,12 +531,14 @@ export async function executarFinalizacaoVendaPdv(
       };
     }
 
-    const tef = await validarTefNaFinalizacao({
+    const tef = await relogio.medir("supabase_tef", "supabase", () =>
+      validarTefNaFinalizacao({
       supabase,
       empresaId: String(vinculo.empresa_id),
       usuarioId: String(claimsData.claims.sub),
       pagamentos: input.pagamentos,
-    });
+    })
+    );
 
     if (!tef.ok) {
       return {
@@ -513,14 +547,27 @@ export async function executarFinalizacaoVendaPdv(
       };
     }
 
+    for (const ajuste of tef.ajustes) {
+      const linha = pagamentos[ajuste.indice] as { forma_pagamento_id?: string } | undefined;
+      if (linha) {
+        linha.forma_pagamento_id = ajuste.formaPagamentoId;
+      }
+      const origem = input.pagamentos[ajuste.indice];
+      if (origem) {
+        origem.formaPagamentoId = ajuste.formaPagamentoId;
+      }
+    }
+
     if (tef.operacaoIds.length > 0) {
       try {
-        await reservarOperacoesTefParaVenda({
+        await relogio.medir("supabase_reserva_tef", "supabase", () =>
+          reservarOperacoesTefParaVenda({
           empresaId: String(vinculo.empresa_id),
           usuarioId: String(claimsData.claims.sub),
           idempotencyKey: input.idempotencyKey,
           operacaoIds: tef.operacaoIds,
-        });
+        })
+        );
       } catch (error) {
         return {
           ok: false,
@@ -528,9 +575,11 @@ export async function executarFinalizacaoVendaPdv(
         };
       }
       try {
-        const fiscais = await listarDadosFiscaisTefPorIds(
+        const fiscais = await relogio.medir("supabase_dados_fiscais_tef", "supabase", () =>
+          listarDadosFiscaisTefPorIds(
           String(vinculo.empresa_id),
           tef.operacaoIds
+        )
         );
         input.pagamentos.forEach((origem, indice) => {
           const fiscal = fiscais.find((item) => item.id === origem.tefOperacaoId);
@@ -555,7 +604,9 @@ export async function executarFinalizacaoVendaPdv(
 
     const fluxoExigeCaixa = opcoes?.exigirCaixaAberto === true;
     const controleAtivo = fluxoExigeCaixa
-      ? await controleCaixaAtivo(supabase, String(vinculo.empresa_id))
+      ? await relogio.medir("supabase_caixa", "supabase", () =>
+          controleCaixaAtivo(supabase, String(vinculo.empresa_id))
+        )
       : false;
     const usarLivroCaixa = deveUsarLivroCaixa({
       controleAtivo,
@@ -563,11 +614,13 @@ export async function executarFinalizacaoVendaPdv(
     });
 
     if (fluxoExigeCaixa) {
-      const estoque = await validarEstoqueNaFinalizacaoPdv({
+      const estoque = await relogio.medir("supabase_estoque", "supabase", () =>
+        validarEstoqueNaFinalizacaoPdv({
         supabase,
         empresaId: String(vinculo.empresa_id),
         itens: input.itens,
-      });
+      })
+      );
       if (!estoque.ok) {
         return {
           ok: false,
@@ -577,9 +630,11 @@ export async function executarFinalizacaoVendaPdv(
     }
 
     if (usarLivroCaixa) {
-      const caixaAberto = await buscarCaixaAbertoEmpresa(
+      const caixaAberto = await relogio.medir("supabase_caixa", "supabase", () =>
+        buscarCaixaAbertoEmpresa(
         supabase,
         String(vinculo.empresa_id)
+      )
       );
       if (!caixaAberto) {
         return {
@@ -599,12 +654,17 @@ export async function executarFinalizacaoVendaPdv(
         };
       }
 
-      const { data: clienteDocumento } = await supabase
-        .from("clientes")
-        .select("id, empresa_id, cpf_cnpj")
-        .eq("empresa_id", vinculo.empresa_id)
-        .eq("id", input.clienteId)
-        .maybeSingle();
+      const { data: clienteDocumento } = await relogio.medir(
+        "supabase_cliente_documento",
+        "supabase",
+        () =>
+          supabase
+            .from("clientes")
+            .select("id, empresa_id, cpf_cnpj")
+            .eq("empresa_id", vinculo.empresa_id)
+            .eq("id", input.clienteId)
+            .maybeSingle()
+      );
 
       if (
         !clienteDocumento ||
@@ -639,7 +699,11 @@ export async function executarFinalizacaoVendaPdv(
     const {
       data,
       error,
-    } = await supabase.rpc(
+    } = await relogio.medir(
+      "supabase_rpc_finalizar",
+      "supabase",
+      () =>
+        supabase.rpc(
       rpcFinalizacao,
       {
         p_empresa_id:
@@ -668,6 +732,13 @@ export async function executarFinalizacaoVendaPdv(
         p_itens: itens,
         p_pagamentos:
           pagamentos,
+      }
+        ),
+      {
+        rpc:
+          rpcFinalizacao === "rpc_finalizar_venda_com_caixa"
+            ? "rpc_finalizar_venda_com_caixa"
+            : "rpc_finalizar_venda",
       }
     );
 
@@ -703,12 +774,17 @@ export async function executarFinalizacaoVendaPdv(
       };
     }
 
-    const { data: vendaSnapshot } = await supabase
-      .from("vendas")
-      .select("id, empresa_id, snapshot_fiscal")
-      .eq("empresa_id", vinculo.empresa_id)
-      .eq("id", registro.venda_id)
-      .maybeSingle();
+    const { data: vendaSnapshot } = await relogio.medir(
+      "supabase_snapshot",
+      "supabase",
+      () =>
+        supabase
+          .from("vendas")
+          .select("id, empresa_id, snapshot_fiscal")
+          .eq("empresa_id", vinculo.empresa_id)
+          .eq("id", registro.venda_id)
+          .maybeSingle()
+    );
 
     if (
       vendaSnapshot &&
@@ -730,7 +806,8 @@ export async function executarFinalizacaoVendaPdv(
               }
             : null,
         });
-        const { error: snapErro } = await supabase
+        const { error: snapErro } = await relogio.medir("supabase_snapshot", "supabase", () =>
+          supabase
           .from("vendas")
           .update({
             snapshot_fiscal: mesclarSnapshotOperacao(
@@ -739,7 +816,8 @@ export async function executarFinalizacaoVendaPdv(
             ),
           })
           .eq("empresa_id", vinculo.empresa_id)
-          .eq("id", registro.venda_id);
+          .eq("id", registro.venda_id)
+        );
 
         if (snapErro) {
           return {
@@ -801,13 +879,18 @@ export async function executarFinalizacaoVendaPdv(
       }
     }
 
-    const vinculoTef = await vincularTefNaVenda({
+    const vinculoTef = await relogio.medir("supabase_vinculo_tef", "supabase", () =>
+      vincularTefNaVenda({
       empresaId: String(vinculo.empresa_id),
       vendaId: String(registro.venda_id),
       usuarioId: String(claimsData.claims.sub),
       operacaoIds: tef.operacaoIds,
       segredos: tef.segredos,
-    });
+    })
+    );
+
+    relogio.definirVenda(String(registro.venda_id));
+    medicaoOk = true;
 
     return {
       ok: true,
@@ -841,6 +924,8 @@ export async function executarFinalizacaoVendaPdv(
       ok: false,
       erro: mensagemErroFinalizacaoPublica(error),
     };
+  } finally {
+    relogio.publicarResumo(medicaoOk);
   }
 }
 
@@ -860,7 +945,13 @@ export async function finalizarVendaPdv(
   }
 
   if (resultado.ok) {
-    revalidatePath("/caixa");
+    const relogioCaixa = criarCronometroFinalizacao(
+      lerCorrelacaoFinalizacao(input.correlacao) ?? input.idempotencyKey
+    );
+    relogioCaixa.definirVenda(resultado.vendaId);
+    relogioCaixa.medirSync("revalidar_caixa", "interface", () => {
+      revalidatePath("/caixa");
+    });
   }
 
   return resultado;

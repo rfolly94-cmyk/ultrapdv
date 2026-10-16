@@ -4,6 +4,11 @@ import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contra
 import { PageAlert } from "@/components/ui/page-alert";
 import { TefAssistente } from "@/components/pdv/tef-assistente";
 import { TefPareamentoForm } from "@/components/pdv/tef-pareamento-form";
+import { TefBibliotecaDiagnostico } from "@/components/pdv/tef-biblioteca-diagnostico";
+import { TefProducaoIsolada } from "@/components/pdv/tef-producao-isolada";
+import { TefInicializacaoBiblioteca } from "@/components/pdv/tef-inicializacao-biblioteca";
+import { TefInstalacaoResumo } from "@/components/pdv/tef-instalacao-resumo";
+import { TefPastaForm } from "@/components/pdv/tef-pasta-form";
 import { TefPinpadDiagnostico } from "@/components/pdv/tef-pinpad-diagnostico";
 import { etapaInicial } from "@/lib/pdv/tef/assistente-instalacao";
 import { lerPaginaAssistenteTef } from "@/lib/pdv/tef/assistente-sessao";
@@ -120,6 +125,8 @@ export default async function ConfiguracaoTefPage({ searchParams }: PageProps) {
           ambienteAtual={assistente.ambienteAtual === "producao" ? "producao" : "homologacao"}
           pontoAtual={assistente.pontoAtual}
           estabelecimentoAtual={assistente.estabelecimentoAtual}
+          servidorHomologacao={assistente.servidorHomologacao}
+          servidorProducao={assistente.servidorProducao}
           migracaoInstalacaoPendente={assistente.migracaoInstalacaoPendente}
           empresaId={config.empresaId}
           terminais={config.terminais}
@@ -128,6 +135,10 @@ export default async function ConfiguracaoTefPage({ searchParams }: PageProps) {
             etapaSalva: assistente.rascunho?.etapa ?? null,
             credenciamentoCompleto: assistente.rascunho?.credenciamentoConfirmado === true,
             empresaJaHabilitada: assistente.empresaJaHabilitada,
+            servidorOficial:
+              assistente.ambienteAtual === "producao"
+                ? assistente.servidorProducao
+                : assistente.servidorHomologacao,
           })}
         />
       ) : null}
@@ -204,12 +215,50 @@ export default async function ConfiguracaoTefPage({ searchParams }: PageProps) {
       </form>
       {config ? (
         <>
+          <TefInstalacaoResumo
+            terminais={config.terminais.map((terminal) => ({
+              codigo: terminal.codigo,
+              dispositivoId: terminal.dispositivoId,
+            }))}
+            credenciamentoOk={Boolean(config.pontoCaptura && config.estabelecimento)}
+            credenciamentoNecessario={config.ambiente === "producao"}
+          />
           <TefPareamentoForm
             empresaId={config.empresaId}
             terminais={config.terminais}
             podeRevogar={config.podeRevogar}
             administrador={assistente?.administrador === true}
           />
+          <TefInicializacaoBiblioteca />
+          <details className="rounded-2xl border border-zinc-200 bg-white p-5">
+            <summary className="cursor-pointer text-sm font-semibold text-zinc-900">
+              Suporte técnico
+            </summary>
+            <div className="mt-4 space-y-6">
+          <TefPastaForm />
+          <TefProducaoIsolada
+            administrador={assistente?.administrador === true}
+            cnpj={assistente?.cnpj || ""}
+            ponto={assistente?.pontoAtual || config.pontoCaptura}
+            servidor={assistente?.servidorProducao || ""}
+            estabelecimento={assistente?.estabelecimentoAtual || config.estabelecimento}
+            ambiente={
+              assistente?.ambienteAtual === "producao" || config.ambiente === "producao"
+                ? "producao"
+                : "homologacao"
+            }
+          />
+          <TefBibliotecaDiagnostico
+            pontoCadastro={assistente?.pontoAtual || config.pontoCaptura}
+            ambienteCadastro={
+              assistente?.ambienteAtual === "producao" || config.ambiente === "producao"
+                ? "producao"
+                : "homologacao"
+            }
+            servidorCadastro={assistente?.servidorProducao || ""}
+          />
+            </div>
+          </details>
           <TefPinpadDiagnostico />
         </>
       ) : null}

@@ -101,7 +101,7 @@ test("abertura automática só com pagamento em dinheiro", () => {
 
 test("falha do Connector não desfaz a venda; abre só depois de finalizar", () => {
   const shell = fonte("components/pdv/pdv-shell.tsx");
-  const posFinalizar = shell.indexOf("await finalizarVendaPdv");
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
   const posAutoGaveta = shell.indexOf('origem: "venda"');
   assert.ok(posFinalizar > 0);
   assert.ok(posAutoGaveta > posFinalizar);

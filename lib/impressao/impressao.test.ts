@@ -200,15 +200,16 @@ test("PDV não dá rollback da venda se a impressão falhar", () => {
   assert.match(shell, /if \(!emitirNfceAutomaticoPdv\)/);
   assert.match(shell, /tentarImpressaoPosVenda/);
   assert.match(shell, /Tentar novamente/);
-  const posFinalizar = shell.indexOf("await finalizarVendaPdv");
-  const posImpressao = shell.indexOf("await tentarImpressaoPosVenda");
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
+  const posImpressao = shell.indexOf("iniciarImpressaoSemBloquear(", posFinalizar);
   assert.ok(posImpressao > posFinalizar);
+  assert.doesNotMatch(shell, /await tentarImpressaoPosVenda/);
   assert.match(shell, /Venda concluída, mas não foi possível imprimir/);
   assert.match(shell, /NFC-e autorizada, mas não foi possível imprimir/);
   assert.doesNotMatch(shell, /rollback/);
   assert.doesNotMatch(shell, /window\.open/);
   assert.doesNotMatch(shell, /window\.print/);
-  assert.match(shell, /imprimirPdfNoUltraPdvConector|BotaoImprimirConector/);
+  assert.match(shell, /executarDestinoImpressao|imprimirPdfNoUltraPdvConector|BotaoImprimirConector/);
   assert.match(
     fonte("app/api/impressao/danfe/[id]/route.ts"),
     /status !== "autorizada"/
@@ -252,7 +253,7 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   const cliente = fonte("lib/impressao/agente.ts");
   const versao = JSON.parse(fonte("print-agent/version.json"));
   assert.equal(versao.name, "UltraPDV Connector");
-  assert.equal(versao.version, "1.3.3");
+  assert.equal(versao.version, "1.3.15");
   assert.match(agente, /127\.0\.0\.1/);
   assert.match(agente, /PORTA_PADRAO/);
   assert.match(portas, /PORTA_PADRAO = 18181/);

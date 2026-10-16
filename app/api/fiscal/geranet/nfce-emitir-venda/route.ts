@@ -2,6 +2,7 @@ import {
   NextRequest,
   NextResponse,
 } from "next/server";
+import { criarCronometroFinalizacao, lerCorrelacaoFinalizacao } from "@/lib/pdv/desempenho/cronometro-finalizacao";
 
 import {
   createClient,
@@ -219,6 +220,11 @@ function idsUnicos(
 export async function POST(
   request: NextRequest
 ) {
+  const relogio = criarCronometroFinalizacao(
+    lerCorrelacaoFinalizacao(request.headers.get("x-ultrapdv-correlacao"))
+  );
+  let medicaoOk = false;
+
   const supabase =
     await createClient();
 
@@ -230,7 +236,9 @@ export async function POST(
       data: claimsData,
       error: authError,
     } =
-      await supabase.auth.getClaims();
+      await relogio.medir("nfce_autenticacao", "supabase", () =>
+        supabase.auth.getClaims()
+      );
 
     if (
       authError ||
@@ -243,13 +251,15 @@ export async function POST(
     }
 
     const { data: vinculo } =
-      await supabase
-        .from("usuarios_empresas")
-        .select("empresa_id")
-        .eq("usuario_id", String(claimsData.claims.sub))
-        .eq("principal", true)
-        .eq("ativo", true)
-        .maybeSingle();
+      await relogio.medir("nfce_autenticacao", "supabase", () =>
+        supabase
+          .from("usuarios_empresas")
+          .select("empresa_id")
+          .eq("usuario_id", String(claimsData.claims.sub))
+          .eq("principal", true)
+          .eq("ativo", true)
+          .maybeSingle()
+      );
 
     if (!vinculo) {
       return erro(
@@ -259,11 +269,15 @@ export async function POST(
     }
 
     try {
-      await exigirEmissaoNfce({
-        empresaId: String(vinculo.empresa_id),
-        origem: "nfce-emitir-venda",
-      });
-      await exigirEmpresaOperacional(String(vinculo.empresa_id));
+      await relogio.medir("nfce_autenticacao", "supabase", () =>
+        exigirEmissaoNfce({
+          empresaId: String(vinculo.empresa_id),
+          origem: "nfce-emitir-venda",
+        })
+      );
+      await relogio.medir("nfce_autenticacao", "supabase", () =>
+        exigirEmpresaOperacional(String(vinculo.empresa_id))
+      );
     } catch (error) {
       const authz = capturaErroAutorizacaoFiscal(error);
       if (authz) {
@@ -335,6 +349,8 @@ export async function POST(
       );
     }
 
+    relogio.definirVenda(vendaId);
+
     // Tudo é validado antes da reserva fiscal.
     const [
       vendaResult,
@@ -345,7 +361,7 @@ export async function POST(
       nfceResult,
       numeracoesResult,
       segredosResult,
-    ] = await Promise.all([
+    ] = await relogio.medir("nfce_carga_venda", "supabase", () => Promise.all([
       supabase
         .from("vendas")
         .select(`
@@ -489,7 +505,7 @@ export async function POST(
           admin,
           empresaId
         ),
-    ]);
+    ]));
 
     const primeiroErro =
       vendaResult.error ??
@@ -653,21 +669,23 @@ export async function POST(
       }
     }
 
-    const fiscalTef = await prepararPagamentosNfceTef(
-      empresaId,
-      vendaId,
-      pagamentosConfirmados
+    const fiscalTef = await relogio.medir("nfce_pagamentos_tef", "supabase", () =>
+      prepararPagamentosNfceTef(
+        empresaId,
+        vendaId,
+        pagamentosConfirmados
+      )
     );
     if (fiscalTef.erro) {
       return erro(fiscalTef.erro);
     }
-    const bloqueioAmbienteTef = await bloqueioTefHomologacaoNaNfce(async () => {
+    const bloqueioAmbienteTef = await relogio.medir("nfce_ambiente_tef", "supabase", () =>
+      bloqueioTefHomologacaoNaNfce(async () => {
       const operacoesTef = await supabase
         .from("tef_operacoes")
-        .select("id")
+        .select("id, ambiente_efetivo")
         .eq("empresa_id", empresaId)
-        .eq("venda_id", vendaId)
-        .limit(1);
+        .eq("venda_id", vendaId);
       const configTef = await supabase
         .from("tef_configuracoes")
         .select("ambiente")
@@ -677,8 +695,12 @@ export async function POST(
         erro: Boolean(operacoesTef.error || configTef.error),
         quantidade: operacoesTef.data?.length ?? 0,
         ambienteTef: configTef.data?.ambiente ? String(configTef.data.ambiente) : null,
+        ambientesEfetivos: (operacoesTef.data ?? []).map((item) =>
+          item.ambiente_efetivo ? String(item.ambiente_efetivo) : ""
+        ),
       });
-    }, fiscal?.ambiente);
+    }, fiscal?.ambiente)
+    );
     if (bloqueioAmbienteTef) {
       return erro(bloqueioAmbienteTef);
     }
@@ -941,7 +963,7 @@ export async function POST(
     const [
       produtosResult,
       produtosFiscalResult,
-    ] = await Promise.all([
+    ] = await relogio.medir("nfce_produtos", "supabase", () => Promise.all([
       supabase
         .from("produtos")
         .select(`
@@ -964,7 +986,7 @@ export async function POST(
         `)
         .eq("empresa_id", empresaId)
         .in("produto_id", produtoIds),
-    ]);
+    ]));
 
     const erroProdutos =
       produtosResult.error ??
@@ -1007,7 +1029,8 @@ export async function POST(
       data: grupos,
       error: gruposError,
     } =
-      await supabase
+      await relogio.medir("nfce_produtos", "supabase", () =>
+        supabase
         .from("grupos_fiscais")
         .select(`
           id,
@@ -1040,7 +1063,8 @@ export async function POST(
         .in(
           "id",
           grupoIds
-        );
+        )
+      );
 
     if (
       gruposError
@@ -1331,13 +1355,16 @@ export async function POST(
       return erro(divergenciaTotais);
     }
 
-    const emissaoPrevia = await carregarEmissaoPorChaveIdempotencia(
-      admin,
-      empresaId,
-      vendaId
+    const emissaoPrevia = await relogio.medir("nfce_idempotencia", "supabase", () =>
+      carregarEmissaoPorChaveIdempotencia(
+        admin,
+        empresaId,
+        vendaId
+      )
     );
     const bloqueioRascunho = avaliarBloqueioRascunhoFiscal(emissaoPrevia);
     if (bloqueioRascunho.tipo === "autorizada") {
+      medicaoOk = true;
       return json({
         ok: true,
         autorizada: true,
@@ -1382,7 +1409,8 @@ export async function POST(
     }
 
     const resultadosSnapshot =
-      await Promise.all(
+      await relogio.medir("nfce_snapshot_itens", "supabase", () =>
+        Promise.all(
         snapshots
           .filter(
             (snapshot) =>
@@ -1410,6 +1438,7 @@ export async function POST(
                 snapshot.id
               )
         )
+      )
       );
 
     const erroSnapshot =
@@ -1431,7 +1460,8 @@ export async function POST(
     const {
       data: reservaData,
       error: reservaError,
-    } = await admin.rpc(
+    } = await relogio.medir("nfce_reserva", "supabase", () =>
+      admin.rpc(
       "rpc_reservar_emissao_fiscal",
       {
         p_empresa_id:
@@ -1448,6 +1478,7 @@ export async function POST(
         p_origem_id:
           vendaId,
       }
+      )
     );
 
     if (reservaError) {
@@ -1514,6 +1545,7 @@ export async function POST(
       emissaoAtual.status ===
       "autorizada"
     ) {
+      medicaoOk = true;
       return json({
         ok: true,
         autorizada: true,
@@ -1615,13 +1647,14 @@ export async function POST(
       return erro("A venda não possui itens.");
     }
 
-    const payload =
+    const logomarcaFiscal = await relogio.medir("nfce_logomarca", "supabase", () =>
+      obterLogomarcaFiscalHex(String(empresaId))
+    );
+    const payload = relogio.medirSync("nfce_montar_payload", "nfce", () =>
       montarPayloadNfceGeranet({
         emitente: {
           logomarca:
-            await obterLogomarcaFiscalHex(
-              String(empresaId)
-            ),
+            logomarcaFiscal,
           cnpj:
             empresa.cnpj,
           inscricaoEstadual:
@@ -1706,7 +1739,8 @@ export async function POST(
         codigoNumerico:
           emissaoAtual.codigo_numerico,
         snapshotFiscal: venda.snapshot_fiscal,
-      }) as PayloadNfceMutavel;
+      })
+    ) as PayloadNfceMutavel;
 
 
     // --------------------------------------------------------
@@ -1803,14 +1837,16 @@ export async function POST(
       itensFiscais,
     });
 
-    const claim = await claimTentativaEmissaoFiscal({
+    const claim = await relogio.medir("nfce_claim", "supabase", () =>
+      claimTentativaEmissaoFiscal({
       admin,
       empresaId,
       emissaoId,
       usuarioId: String(claimsData.claims.sub),
       payload,
       snapshotItens: snapshotItensDaTransmissao(itensFiscais),
-    });
+      })
+    );
 
     if (!claim.ok) {
       return erro(
@@ -1835,7 +1871,8 @@ export async function POST(
 
     try {
       resultadoGeranet =
-        await chamarGeranet({
+        await relogio.medir("nfce_geranet", "nfce", () =>
+          chamarGeranet({
           apiKey,
           endpoint:
             "/api/v1/nfe/emitir",
@@ -1846,7 +1883,8 @@ export async function POST(
             modelo: "65",
             emissao_id: emissaoId,
           },
-        });
+          })
+        );
     } catch (e) {
       const persistencia =
         persistenciaFalhaComunicacaoEmitir(e);
@@ -1919,7 +1957,8 @@ export async function POST(
     if (autorizado) {
       const {
         error: updateError,
-      } = await admin
+      } = await relogio.medir("nfce_persistir_retorno", "supabase", () =>
+        admin
         .from("fiscal_emissoes")
         .update({
           status:
@@ -1961,7 +2000,8 @@ export async function POST(
               .toISOString(),
         })
         .eq("id", emissaoId)
-        .eq("empresa_id", empresaId);
+        .eq("empresa_id", empresaId)
+      );
 
       if (updateError) {
         return erro(
@@ -1999,6 +2039,7 @@ export async function POST(
         .eq("empresa_id", empresaId)
         .eq("id", vendaId);
 
+      medicaoOk = true;
       return json({
         ok: true,
         autorizada: true,
@@ -2226,5 +2267,7 @@ export async function POST(
         : "Erro interno na emissão da venda.",
       500
     );
+  } finally {
+    relogio.publicarResumo(medicaoOk);
   }
 }

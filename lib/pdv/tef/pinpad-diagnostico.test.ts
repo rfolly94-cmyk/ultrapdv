@@ -68,7 +68,29 @@ test("ausência de fabricante não declara compatibilidade pela porta USB", () =
 test("timeout, biblioteca parada e terminal ocupado têm mensagens próprias", () => {
   assert.equal(
     mensagemDiagnosticoPinpad({ codigo: "TEF_TIMEOUT" }),
-    "Comunicação indisponível."
+    "O teste de comunicação não retornou no tempo limite. A biblioteca não enviou código. Nenhuma cobrança foi iniciada."
+  );
+  assert.equal(
+    mensagemDiagnosticoPinpad({
+      resultado: { comunicacao: "timeout_biblioteca", codigoBiblioteca: -2134 },
+    }),
+    "A biblioteca informou tempo esgotado aguardando o pinpad."
+  );
+  assert.equal(
+    mensagemDiagnosticoPinpad({
+      resultado: { comunicacao: "nao_concluido", codigoBiblioteca: -2493 },
+    }),
+    "A biblioteca pediu para continuar o teste e não concluiu. Código -2493."
+  );
+  assert.match(
+    mensagemDiagnosticoPinpad({ resultado: { comunicacao: "sem_porta" } }),
+    /não foi forçada/
+  );
+  assert.equal(
+    mensagemDiagnosticoPinpad({
+      resultado: { comunicacao: "codigo_biblioteca", codigoBiblioteca: -2131 },
+    }),
+    "A biblioteca devolveu o código -2131."
   );
   assert.match(
     mensagemDiagnosticoPinpad({ codigo: "PINPAD_PAYGO_NAO_INICIALIZADO" }),
@@ -77,6 +99,13 @@ test("timeout, biblioteca parada e terminal ocupado têm mensagens próprias", (
   assert.equal(
     mensagemDiagnosticoPinpad({ codigo: "TEF_OCUPADO" }),
     "Terminal ocupado com operação financeira."
+  );
+  assert.match(
+    mensagemDiagnosticoPinpad({
+      codigo: "TEF_OCUPADO",
+      erro: "O teste de comunicação do pinpad ainda está em execução na biblioteca. Nenhuma cobrança foi iniciada.",
+    }),
+    /ainda está em execução/
   );
   assert.equal(
     mensagemDiagnosticoPinpad({

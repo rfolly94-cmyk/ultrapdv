@@ -5,6 +5,7 @@ import { empresaA, empresaB } from "@/lib/multiempresa/cenario";
 import { fonte } from "@/lib/multiempresa/fonte";
 import { validarCredenciamento } from "@/lib/pdv/tef/assistente-instalacao";
 import {
+  confirmarServidorPersistido,
   conferirServidorAutorizado,
   decidirGravacaoServidor,
   servidorDoAmbiente,
@@ -199,7 +200,26 @@ test("ponto novo com parâmetros completos pode gravar o servidor confirmado", (
   assert.equal(credenciamento.servidorProducao, SERVIDOR_B);
   assert.equal(gravacao({ perfil: "operador" }).efeito, "recusar");
   assert.equal(gravacao({ confirmacaoExplicita: false }).efeito, "recusar");
-  assert.equal(gravacao({ empresaJaHabilitada: true }).efeito, "preservar");
+  assert.equal(gravacao({ empresaJaHabilitada: true }).efeito, "gravar");
+  assert.equal(gravacao({ empresaJaHabilitada: true, servidorAtual: SERVIDOR_A }).efeito, "preservar");
+  assert.equal(
+    gravacao({ empresaJaHabilitada: true, servidorAtual: SERVIDOR_B, servidorNovo: SERVIDOR_A }).efeito,
+    "recusar"
+  );
+  const ausente = confirmarServidorPersistido({
+    ambiente: "producao",
+    informado: SERVIDOR_A,
+    gravadoHomologacao: SERVIDOR_B,
+    gravadoProducao: "",
+  });
+  assert.equal(ausente.ok, false);
+  const gravado = confirmarServidorPersistido({
+    ambiente: "producao",
+    informado: SERVIDOR_A,
+    gravadoHomologacao: "",
+    gravadoProducao: SERVIDOR_A,
+  });
+  assert.equal(gravado.ok, true);
 });
 
 test("migration separa os servidores e o fluxo habilitado não inventa endereço", () => {
@@ -219,13 +239,19 @@ test("migration separa os servidores e o fluxo habilitado não inventa endereço
   assert.doesNotMatch(conector, /fetch\(|http\.request|net\.connect/);
   assert.match(ui, /Confirmo o servidor PayGoWeb atribuído a este estabelecimento/);
   assert.match(ui, /Somente um administrador pode confirmar o servidor PayGoWeb/);
+  assert.doesNotMatch(ui, /Servidor novo/);
   assert.doesNotMatch(ui, /pos-transac-sb|117473/);
   const autorizar = persistencia.slice(persistencia.indexOf("export async function autorizarPareamentoTef"));
   const habilitado = autorizar.indexOf("if (!habilitado)");
   const consultaServidor = autorizar.indexOf('select("ambiente, servidor_homologacao, servidor_producao")');
   assert.ok(habilitado >= 0 && consultaServidor > habilitado);
   const salvar = sessao.slice(sessao.indexOf("export async function salvarRascunhoAssistenteSessao"));
-  const preserva = salvar.indexOf("if (pagina.empresaJaHabilitada)");
   const decide = salvar.indexOf("decidirGravacaoServidor");
-  assert.ok(preserva >= 0 && decide > preserva);
+  const confirma = salvar.indexOf("confirmarServidorPersistido");
+  assert.ok(decide >= 0 && confirma > decide);
+  assert.doesNotMatch(salvar, /etapa: "validacao"/);
+  const gravar = persistencia.slice(persistencia.indexOf("export async function gravarServidoresPayGoEmpresa"));
+  const ramo = gravar.slice(gravar.indexOf("habilitado === true"), gravar.indexOf("if (!atual.data)"));
+  assert.match(ramo, /servidor_producao/);
+  assert.doesNotMatch(ramo, /ponto_captura/);
 });

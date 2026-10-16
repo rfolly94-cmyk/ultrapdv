@@ -1,4 +1,5 @@
 import { ambienteInformado, digitosCnpj } from "@/lib/pdv/tef/assistente-instalacao";
+import { pastaProducaoIsolada } from "@/lib/pdv/tef/diretorio-biblioteca";
 import { validarServidorPayGo } from "@/lib/pdv/tef/servidor-paygo";
 
 const PONTO = /^[A-Za-z0-9._-]{1,40}$/;
@@ -199,6 +200,116 @@ export function decidirInstalacaoControlada(input: {
   return {
     efeito: "instalar",
     motivo: "A instalação pode ser enviada ao Connector deste computador.",
+  };
+}
+
+export function decidirInstalacaoProducaoIsolada(input: {
+  empresaSessaoId: string;
+  empresaInformada: string;
+  permissaoEditar: boolean;
+  administrador: boolean;
+  plataformaHabilitada: boolean;
+  pendenciaFinanceira: boolean;
+  confirmacaoExplicita: boolean;
+  credencialInformada: boolean;
+  pontoOficial: string;
+  ambienteOficial: string;
+  servidorOficial: string;
+  cnpjEmpresa: string;
+  estabelecimentoOficial: string;
+  pontoVinculado: string;
+  ambienteVinculado: string;
+  servidorVinculado: string;
+  dispositivoPareado: boolean;
+  dispositivoOutraEmpresa: boolean;
+  diretorioSandbox: string;
+  diretorioProducao: string;
+}): DecisaoInstalacaoControlada {
+  if (input.empresaInformada && input.empresaInformada !== input.empresaSessaoId) {
+    return { efeito: "recusar", motivo: "A empresa da sessão não confere com a empresa informada." };
+  }
+  if (!input.permissaoEditar || !input.administrador) {
+    return {
+      efeito: "recusar",
+      motivo: "Somente um administrador com permissão de edição do financeiro pode instalar o TEF.",
+    };
+  }
+  if (input.pendenciaFinanceira) {
+    return {
+      efeito: "recusar",
+      motivo: "Há transação TEF pendente. A instalação fica bloqueada até a recuperação financeira.",
+    };
+  }
+  if (!input.plataformaHabilitada) {
+    return { efeito: "recusar", motivo: "A plataforma TEF não está habilitada para esta empresa." };
+  }
+  if (ambienteInformado(input.ambienteOficial) !== "producao") {
+    return {
+      efeito: "recusar",
+      motivo: "A instalação isolada exige o ambiente oficial de produção já gravado nesta empresa.",
+    };
+  }
+  if (!pastaProducaoIsolada(input.diretorioSandbox, input.diretorioProducao)) {
+    return {
+      efeito: "recusar",
+      motivo: "A pasta de produção precisa ficar separada da pasta de homologação.",
+    };
+  }
+  if (!input.confirmacaoExplicita) {
+    return { efeito: "recusar", motivo: "A instalação só começa depois da confirmação explícita do administrador." };
+  }
+  if (!input.credencialInformada) {
+    return {
+      efeito: "recusar",
+      motivo: "Informe a credencial técnica no momento da instalação. Ela não fica gravada.",
+    };
+  }
+  const servidor = validarServidorPayGo(input.servidorOficial);
+  if (!servidor.ok) {
+    return { efeito: "recusar", motivo: servidor.motivo };
+  }
+  if (input.servidorVinculado.trim() && input.servidorVinculado.trim() !== servidor.servidor) {
+    return {
+      efeito: "recusar",
+      motivo: "O servidor vinculado a este computador diverge do servidor oficial da empresa.",
+    };
+  }
+  if (
+    input.ambienteVinculado &&
+    ambienteInformado(input.ambienteVinculado) &&
+    ambienteInformado(input.ambienteVinculado) !== "producao"
+  ) {
+    return {
+      efeito: "recusar",
+      motivo: "O ambiente do vínculo deste computador diverge da produção oficial.",
+    };
+  }
+  if (digitosCnpj(input.cnpjEmpresa).length !== 14) {
+    return { efeito: "recusar", motivo: "O cadastro da empresa não possui CNPJ." };
+  }
+  if (!PONTO.test(input.pontoOficial.trim())) {
+    return { efeito: "recusar", motivo: "Informe o ponto de captura atribuído pelo PayGoWeb." };
+  }
+  if (input.pontoVinculado.trim() && input.pontoVinculado.trim() !== input.pontoOficial.trim()) {
+    return {
+      efeito: "recusar",
+      motivo: "O ponto vinculado a este computador diverge do ponto oficial da empresa.",
+    };
+  }
+  const estabelecimento = input.estabelecimentoOficial.trim();
+  if (!estabelecimento || estabelecimento.length > 40) {
+    return { efeito: "recusar", motivo: "Informe o estabelecimento informado pelo PayGoWeb." };
+  }
+  if (!input.dispositivoPareado || input.dispositivoOutraEmpresa) {
+    return {
+      efeito: "recusar",
+      motivo: "Vincule este computador à empresa autenticada antes de instalar o ponto.",
+    };
+  }
+  return {
+    efeito: "instalar",
+    motivo:
+      "A instalação de produção pode seguir na pasta nova. A pasta de homologação permanece intacta.",
   };
 }
 

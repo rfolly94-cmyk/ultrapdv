@@ -48,6 +48,7 @@ VIAddVersionKey "CompanyName" "${PRODUCT_PUBLISHER}"
 !insertmacro MUI_LANGUAGE "PortugueseBR"
 
 Var VerifyCount
+Var FezBackup
 
 Function .onInit
   ${IfNot} ${RunningX64}
@@ -73,11 +74,40 @@ Function LaunchTestPage
   Exec '"$INSTDIR\runtime\node.exe" "$INSTDIR\app\verify.mjs" --open'
 FunctionEnd
 
+Function BackupConnectorAnterior
+  StrCpy $FezBackup "0"
+  ReadEnvStr $1 PROGRAMDATA
+  IfFileExists "$INSTDIR\app\server.mjs" 0 backup_fim
+  CreateDirectory "$1\UltraPDV\backup-connector\anterior\app"
+  ClearErrors
+  CopyFiles /SILENT "$INSTDIR\app\*.*" "$1\UltraPDV\backup-connector\anterior\app\"
+  IfErrors backup_falhou
+  CopyFiles /SILENT "$INSTDIR\version.json" "$1\UltraPDV\backup-connector\anterior\version.json"
+  StrCpy $FezBackup "1"
+  Goto backup_fim
+  backup_falhou:
+    nsExec::ExecToLog '"$SYSDIR\wscript.exe" //nologo "$INSTDIR\launcher\start.vbs"'
+    MessageBox MB_OK|MB_ICONSTOP "Nao foi possivel guardar a copia do Connector atual. A atualizacao foi interrompida e nenhum arquivo novo foi gravado."
+    Abort
+  backup_fim:
+FunctionEnd
+
+Function RestaurarConnectorAnterior
+  ReadEnvStr $1 PROGRAMDATA
+  StrCmp $FezBackup "1" 0 restaurar_fim
+  Call StopConnector
+  CopyFiles /SILENT "$1\UltraPDV\backup-connector\anterior\app\*.*" "$INSTDIR\app\"
+  CopyFiles /SILENT "$1\UltraPDV\backup-connector\anterior\version.json" "$INSTDIR\version.json"
+  nsExec::ExecToLog '"$SYSDIR\wscript.exe" //nologo "$INSTDIR\launcher\start.vbs"'
+  restaurar_fim:
+FunctionEnd
+
 Section "UltraPDV Connector" SecPrincipal
   SectionIn RO
   SetRegView 64
   SetOverwrite on
   Call StopConnector
+  Call BackupConnectorAnterior
 
   SetOutPath "$INSTDIR\runtime"
   File "${STAGING_DIR}\runtime\node.exe"
@@ -88,8 +118,12 @@ Section "UltraPDV Connector" SecPrincipal
   File "${STAGING_DIR}\app\*.html"
   File "${STAGING_DIR}\app\version.json"
 
+  ; Acrescenta somente o executavel desta versao.
+  ; Executaveis TEF anteriores permanecem no diretorio para rollback.
+  ; SetOverwrite on substitui arquivo de mesmo nome. Um agente antigo
+  ; bloqueado pelo Windows nao entra neste File e nao e tocado.
   SetOutPath "$INSTDIR\bin\tef"
-  File "${STAGING_DIR}\bin\tef\UltraPDVTef_NOVO.exe"
+  File "${STAGING_DIR}\bin\tef\${TEF_EXE_NAME}"
 
   SetOutPath "$INSTDIR\print-engine"
   File "${STAGING_DIR}\print-engine\SumatraPDF.exe"
@@ -107,15 +141,24 @@ Section "UltraPDV Connector" SecPrincipal
 
   SetOutPath "$INSTDIR"
   File "${STAGING_DIR}\version.json"
+  File "${STAGING_DIR}\tef-pacote.json"
   File "${STAGING_DIR}\THIRD-PARTY-NOTICES.txt"
 
   CreateDirectory "$INSTDIR\data"
   nsExec::ExecToLog 'icacls "$INSTDIR\data" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
+  ; A biblioteca grava logs na pasta ja instalada. Usuarios recebem Modify.
+  ; Nenhum arquivo dessa pasta e apagado ou recolocado.
+  CreateDirectory "$INSTDIR\bin\tef\producao"
+  CreateDirectory "$INSTDIR\bin\tef\TEF"
+  nsExec::ExecToLog 'icacls "$INSTDIR\bin\tef\producao" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
+  nsExec::ExecToLog 'icacls "$INSTDIR\bin\tef\TEF" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
   ; Atualizacao: cria ProgramData se faltar e nao apaga configuracao,
   ; chave Ed25519, journal, prova, vinculo nem pareamento.
   ReadEnvStr $1 PROGRAMDATA
   CreateDirectory "$1\UltraPDV"
-  nsExec::ExecToLog 'icacls "$1\UltraPDV" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
+  CreateDirectory "$1\UltraPDV\TEF\Producao"
+  nsExec::ExecToLog 'icacls "$1\UltraPDV" /grant *S-1-5-32-545:(OI)(CI)M /C /Q'
+  nsExec::ExecToLog '"$INSTDIR\runtime\node.exe" "$INSTDIR\app\tef-preparar-pasta.mjs"'
 
   nsExec::ExecToLog '"$INSTDIR\runtime\node.exe" "$INSTDIR\app\identidade.mjs" --ensure'
 
@@ -146,7 +189,8 @@ Section "UltraPDV Connector" SecPrincipal
     Sleep 400
     Goto verify_loop
   verify_fail:
-    MessageBox MB_OK|MB_ICONEXCLAMATION "O UltraPDV Connector foi instalado, mas ainda nÃ£o respondeu no teste local. Tente abrir ConfiguraÃ§Ãµes â†’ ImpressÃ£o no UltraPDV ou reiniciar o Windows."
+    Call RestaurarConnectorAnterior
+    MessageBox MB_OK|MB_ICONEXCLAMATION "O Connector novo nao respondeu. A copia anterior do programa foi restaurada. A pasta de trabalho do TEF, a chave e o vinculo nao foram alterados."
     Goto verify_done
   verify_ok:
   verify_done:
@@ -160,12 +204,27 @@ Section "Uninstall"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\UltraPDVConnector"
   DeleteRegKey HKLM "Software\UltraPDV\Connector"
   ; A desinstalacao nao apaga tef-chave.json, tef-pendencia.json,
-  ; tef-recuperacao.json, tef-vinculo.json nem tef-pareamento.json.
+  ; tef-recuperacao.json, tef-vinculo.json, tef-pareamento.json,
+  ; tef-biblioteca.json, tef-pasta.json, backup-connector nem a pasta TEF\Producao.
   ReadEnvStr $1 PROGRAMDATA
   Delete "$1\UltraPDV\print-agent.json"
   Delete "$1\UltraPDV\print-agent.log"
 
-  RMDir /r "$INSTDIR"
+  ; O diretorio de trabalho do TEF fica em bin\tef\TEF.
+  ; Os executaveis UltraPDVTef_*.exe e device.json nao sao apagados.
+  RMDir /r "$INSTDIR\app"
+  RMDir /r "$INSTDIR\runtime"
+  RMDir /r "$INSTDIR\print-engine"
+  RMDir /r "$INSTDIR\licenses"
+  RMDir /r "$INSTDIR\launcher"
+  RMDir /r "$INSTDIR\config"
+  Delete "$INSTDIR\version.json"
+  Delete "$INSTDIR\tef-pacote.json"
+  Delete "$INSTDIR\THIRD-PARTY-NOTICES.txt"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR\bin\tef"
+  RMDir "$INSTDIR\bin"
+  RMDir "$INSTDIR"
 SectionEnd
 
 Function un.StopConnector

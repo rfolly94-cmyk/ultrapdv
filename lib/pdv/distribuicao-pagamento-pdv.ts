@@ -202,6 +202,49 @@ export function aplicarValorFormaPdv(params: {
   return { pagamentos, dinheiroAutomatico };
 }
 
+export function preencherRestanteAoSelecionarPdv(params: {
+  formas: FormaDistribuicaoPdv[];
+  pagamentos: PagamentoDigitadoPdv[];
+  totalCentavos: number;
+  dinheiroAutomatico: boolean;
+  formaPagamentoId: string;
+}) {
+  const atual = params.pagamentos.find(
+    (pagamento) => pagamento.formaPagamentoId === params.formaPagamentoId
+  );
+  if (textoParaCentavosPdv(atual?.valorTexto ?? "0") > 0) {
+    return {
+      pagamentos: params.pagamentos,
+      dinheiroAutomatico: params.dinheiroAutomatico,
+    };
+  }
+
+  const dinheiro = escolherFormaDinheiroPdv(formasCheckout(params.formas));
+  const ignorarDinheiro =
+    params.dinheiroAutomatico &&
+    dinheiro != null &&
+    dinheiro.id !== params.formaPagamentoId;
+  const outros = params.pagamentos.reduce((soma, pagamento) => {
+    if (pagamento.formaPagamentoId === params.formaPagamentoId) {
+      return soma;
+    }
+    if (ignorarDinheiro && pagamento.formaPagamentoId === dinheiro?.id) {
+      return soma;
+    }
+    return soma + textoParaCentavosPdv(pagamento.valorTexto);
+  }, 0);
+  const restante = Math.max(0, Math.round(params.totalCentavos) - outros);
+  return aplicarValorFormaPdv({
+    formas: params.formas,
+    pagamentos: params.pagamentos,
+    totalCentavos: params.totalCentavos,
+    dinheiroAutomatico: params.dinheiroAutomatico,
+    formaPagamentoId: params.formaPagamentoId,
+    valorTexto: centavosParaInputPdv(restante),
+    ajustarDinheiro: true,
+  });
+}
+
 export function formaAposNavegacaoPdv(
   ids: string[],
   atualId: string | null,

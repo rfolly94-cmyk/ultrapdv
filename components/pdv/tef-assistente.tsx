@@ -1,31 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ativarAssistente,
-  prepararInstalacaoAssistente,
   salvarRascunhoAssistente,
   validarAssistente,
+  validarProvaBiblioteca,
 } from "@/app/configuracoes/financeiro/tef/actions";
 import { TefPareamentoForm } from "@/components/pdv/tef-pareamento-form";
+import { TefInicializacaoBiblioteca } from "@/components/pdv/tef-inicializacao-biblioteca";
 import { TefPinpadDiagnostico } from "@/components/pdv/tef-pinpad-diagnostico";
+import { TefProducaoIsolada } from "@/components/pdv/tef-producao-isolada";
 import { PageAlert } from "@/components/ui/page-alert";
-import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
+import {
+  descobrirUltraPdvConector,
+  fetchLocalConector,
+  origemConectorNaPorta,
+  portasDescobertaConector,
+} from "@/lib/impressao/descobrir";
 import {
   ETAPAS_ASSISTENTE,
   adquirentesInformadas,
   ambienteInformado,
   avancarEtapa,
   formatarCnpj,
-  interpretarStatusConnector,
+  classificarFalhaFetchConnector,
+  decidirMotivoConsultaConnector,
+  diagnosticarConsultaConnector,
+  painelSituacaoTef,
   rotuloEstado,
   rotuloEtapa,
   validarCredenciamento,
   voltarEtapa,
+  type AmbienteTefAssistente,
   type EtapaAssistente,
+  type ItemPainelTef,
   type LeituraConnector,
   type LeituraPinpad,
+  type ObservacaoBibliotecaAssistente,
   type RequisitoInstalacao,
 } from "@/lib/pdv/tef/assistente-instalacao";
 import { portaPinpad, type DiagnosticoPinpad } from "@/lib/pdv/tef/pinpad-diagnostico";
@@ -53,6 +66,8 @@ export function TefAssistente(props: {
   ambienteAtual: "homologacao" | "producao";
   pontoAtual: string;
   estabelecimentoAtual: string;
+  servidorHomologacao: string;
+  servidorProducao: string;
   migracaoInstalacaoPendente: boolean;
   empresaId: string;
   terminais: TerminalTefAtivo[];
@@ -84,24 +99,34 @@ export function TefAssistente(props: {
   );
   const [pinpadExigido, setPinpadExigido] = useState(props.rascunho?.pinpadExigido !== false);
   const [servidorHomologacao, setServidorHomologacao] = useState(
-    props.rascunho?.servidorHomologacao ?? ""
+    props.servidorHomologacao || props.rascunho?.servidorHomologacao || ""
   );
-  const [servidorProducao, setServidorProducao] = useState(props.rascunho?.servidorProducao ?? "");
-  const [servidorConfirmado, setServidorConfirmado] = useState(
-    props.rascunho?.servidorConfirmado === true
+  const [servidorProducao, setServidorProducao] = useState(
+    props.servidorProducao || props.rascunho?.servidorProducao || ""
+  );
+  const [servidorConfirmado, setServidorConfirmado] = useState(props.rascunho?.servidorConfirmado === true);
+  const [servidorOficial, setServidorOficial] = useState(
+    props.ambienteAtual === "producao" ? props.servidorProducao : props.servidorHomologacao
   );
   const [connector, setConnector] = useState<LeituraConnector | null>(null);
+  const [agenteCompativel, setAgenteCompativel] = useState<boolean | null>(null);
+  const [agenteNome, setAgenteNome] = useState<string | null>(null);
+  const [evidenciaInstalacao, setEvidenciaInstalacao] = useState(false);
+  const [ambienteEfetivo, setAmbienteEfetivo] = useState<AmbienteTefAssistente | null>(null);
+  const [falhaConsulta, setFalhaConsulta] = useState<string | null>(null);
+  const [biblioteca, setBiblioteca] = useState<ObservacaoBibliotecaAssistente | null>(null);
   const [pinpad, setPinpad] = useState<LeituraPinpad | null>(null);
   const [requisitos, setRequisitos] = useState<RequisitoInstalacao[] | null>(null);
+  const [podeAtivar, setPodeAtivar] = useState(false);
   const [mensagens, setMensagens] = useState<string[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [ativacao, setAtivacao] = useState<string | null>(null);
-  const [propostaPonto, setPropostaPonto] = useState("");
-  const [propostaAmbiente, setPropostaAmbiente] = useState("");
-  const [propostaServidor, setPropostaServidor] = useState("");
-  const [autorizacaoReset, setAutorizacaoReset] = useState(false);
-  const [confirmacaoInstalacao, setConfirmacaoInstalacao] = useState(false);
-  const [credencialTecnica, setCredencialTecnica] = useState("");
+  const [provaBiblioteca, setProvaBiblioteca] = useState<{
+    instalacaoTecnica: string;
+    ambienteBiblioteca: string;
+    adquirente: string;
+    motivo: string;
+  } | null>(null);
 
   const campos = {
     cnpjConfirmado,
@@ -115,32 +140,44 @@ export function TefAssistente(props: {
     servidorHomologacao,
     servidorProducao,
     servidorConfirmado,
-    exigirServidor: !props.empresaJaHabilitada,
   };
 
+  const credenciamento = validarCredenciamento({
+    cnpjEmpresa: props.cnpj,
+    cnpjConfirmado,
+    credenciamentoConfirmado,
+    ambienteAutorizado: ambienteInformado(ambiente),
+    pontoCaptura: ponto,
+    estabelecimento,
+    parametrosOficiais: parametros,
+    adquirentes: adquirentesInformadas(adquirentesTexto),
+    servidorHomologacao,
+    servidorProducao,
+    servidorConfirmado,
+  });
+  const painel = painelSituacaoTef({
+    credenciamentoOk: Boolean(servidorOficial.trim()) && (props.empresaJaHabilitada || credenciamento.ok),
+    connector,
+    pinpad,
+    pinpadExigido,
+    bibliotecaValidada: false,
+    provaTecnica:
+      provaBiblioteca?.instalacaoTecnica === "comprovada" &&
+      provaBiblioteca.ambienteBiblioteca === "configurado",
+    ambienteComprovado: ambienteEfetivo,
+    agenteCompativel,
+    evidenciaInstalacao,
+    falhaConsulta,
+  });
+  const servidorAtualBloqueado =
+    props.empresaJaHabilitada &&
+    (ambiente === "producao" ? Boolean(props.servidorProducao.trim()) : Boolean(props.servidorHomologacao.trim()));
+
   async function persistir(destino: EtapaAssistente) {
-    const checagem = validarCredenciamento({
-      cnpjEmpresa: props.cnpj,
-      cnpjConfirmado,
-      credenciamentoConfirmado,
-      ambienteAutorizado: ambienteInformado(ambiente),
-      pontoCaptura: ponto,
-      estabelecimento,
-      parametrosOficiais: parametros,
-      adquirentes: adquirentesInformadas(adquirentesTexto),
-      servidorHomologacao,
-      servidorProducao,
-      servidorConfirmado,
-      exigirServidor: !props.empresaJaHabilitada,
-    });
-    if (!props.empresaJaHabilitada && !checagem.ok && destino !== "credenciamento") {
-      setMensagens(checagem.pendencias);
+    if (!credenciamento.ok && destino !== "credenciamento") {
+      setMensagens(credenciamento.pendencias);
       setEtapa("credenciamento");
       return false;
-    }
-    if (props.empresaJaHabilitada || props.migracaoInstalacaoPendente) {
-      setEtapa(destino);
-      return true;
     }
     setOcupado(true);
     setMensagens([]);
@@ -151,6 +188,11 @@ export function TefAssistente(props: {
         setEtapa("credenciamento");
         return false;
       }
+      if ("servidorProducao" in retorno) {
+        setServidorProducao(retorno.servidorProducao);
+        setServidorHomologacao(retorno.servidorHomologacao);
+        setServidorOficial(ambiente === "producao" ? retorno.servidorProducao : retorno.servidorHomologacao);
+      }
       setEtapa(retorno.etapa);
       return true;
     } finally {
@@ -158,9 +200,13 @@ export function TefAssistente(props: {
     }
   }
 
-  function observacao() {
+  function observacao(
+    leitura: LeituraConnector | null = connector,
+    bibliotecaInformada: ObservacaoBibliotecaAssistente | null = biblioteca
+  ) {
     return {
-      connector: connector ?? undefined,
+      connector: leitura ?? undefined,
+      biblioteca: bibliotecaInformada,
       pinpad: pinpad ?? undefined,
       pinpadExigido,
       credenciamento: {
@@ -175,8 +221,83 @@ export function TefAssistente(props: {
         servidorHomologacao,
         servidorProducao,
         servidorConfirmado,
-        exigirServidor: !props.empresaJaHabilitada,
       },
+    };
+  }
+
+  function aplicarConsulta(consulta: ReturnType<typeof diagnosticarConsultaConnector>) {
+    setConnector(consulta.leitura);
+    setAgenteCompativel(consulta.agente.compativel);
+    setAgenteNome(consulta.agente.nome);
+    setEvidenciaInstalacao(consulta.agente.evidenciaInstalacao);
+    setAmbienteEfetivo(consulta.agente.ambienteEfetivo);
+    setFalhaConsulta(consulta.mensagem || null);
+    setBiblioteca(consulta.biblioteca);
+    return consulta;
+  }
+
+  async function servidorRespondeSemCors() {
+    for (const porta of portasDescobertaConector()) {
+      try {
+        await fetch(`${origemConectorNaPorta(porta)}/health`, { mode: "no-cors", cache: "no-store" });
+        return true;
+      } catch {
+        continue;
+      }
+    }
+    return false;
+  }
+
+  async function consultarConnector() {
+    const descoberta = await descobrirUltraPdvConector();
+    if (!descoberta.ok) {
+      const motivo = decidirMotivoConsultaConnector({
+        falha: descoberta.motivo,
+        noCorsRespondeu:
+          descoberta.motivo === "ausente" || descoberta.motivo === "sem_porta"
+            ? await servidorRespondeSemCors()
+            : false,
+      });
+      return {
+        ...aplicarConsulta(
+          diagnosticarConsultaConnector({
+            descobertaOk: false,
+            motivoDescoberta: motivo,
+          })
+        ),
+        origem: "",
+      };
+    }
+    let status: unknown = null;
+    let statusHttp: number | null = null;
+    let falhaStatus: "timeout" | "cors" | "indisponivel" | "json" | null = null;
+    try {
+      const resposta = await fetchLocalConector(`${descoberta.origem}/tef/status`);
+      statusHttp = resposta.status;
+      const texto = await resposta.text();
+      try {
+        status = JSON.parse(texto) as unknown;
+      } catch {
+        falhaStatus = "json";
+      }
+    } catch (erro) {
+      const classe = classificarFalhaFetchConnector(erro);
+      falhaStatus =
+        classe === "indisponivel" && (await servidorRespondeSemCors()) ? "cors" : classe;
+    }
+    return {
+      ...aplicarConsulta(
+        diagnosticarConsultaConnector({
+          descobertaOk: true,
+          origem: descoberta.origem,
+          versao: descoberta.saude.versao ?? descoberta.saude.version ?? null,
+          dispositivoId: descoberta.saude.dispositivoId ?? "",
+          statusHttp,
+          status,
+          falhaStatus,
+        })
+      ),
+      origem: descoberta.origem,
     };
   }
 
@@ -184,138 +305,113 @@ export function TefAssistente(props: {
     setOcupado(true);
     setMensagens([]);
     try {
-      const descoberta = await descobrirUltraPdvConector();
-      if (!descoberta.ok) {
-        setConnector(interpretarStatusConnector({ descobertaOk: false }));
-        setMensagens([
-          "O UltraPDV Connector não respondeu neste computador. Instale o Connector nesta máquina e abra-o. Este assistente não instala, atualiza nem reinicia o programa.",
-        ]);
+      const consulta = await consultarConnector();
+      if (consulta.mensagem) {
+        setMensagens([consulta.mensagem]);
         return;
       }
-      let status: unknown = null;
-      try {
-        const resposta = await fetch(`${descoberta.origem}/tef/status`, { cache: "no-store" });
-        status = await resposta.json();
-      } catch {
-        status = null;
+      if (consulta.agente.compativel === false) {
+        setMensagens([
+          "Atualize o Connector pelo instalador desta máquina. A versão carregada não é compatível com o TEF.",
+        ]);
       }
-      const leitura = interpretarStatusConnector({
-        descobertaOk: true,
-        versao: descoberta.saude.versao ?? descoberta.saude.version ?? null,
-        status,
-      });
-      setConnector(leitura);
     } finally {
       setOcupado(false);
     }
   }
 
-  async function validar() {
-    const salvo = await persistir(etapa);
-    if (!salvo && !props.empresaJaHabilitada) {
+  useEffect(() => {
+    if ((etapa !== "connector" && etapa !== "ativacao") || connector) {
       return;
     }
+    void verificarConnector();
+  }, [etapa, connector]);
+
+  async function validar() {
     setOcupado(true);
+    setMensagens([]);
     try {
-      const descoberta = await descobrirUltraPdvConector();
-      const dispositivoId = descoberta.ok ? descoberta.saude.dispositivoId ?? "" : "";
+      const consulta = await consultarConnector();
+      if (!consulta.statusLido) {
+        setMensagens([consulta.mensagem || "Não foi possível ler /tef/status."]);
+        setRequisitos(null);
+        setPodeAtivar(false);
+        return;
+      }
+      if (!consulta.origem) {
+        setProvaBiblioteca({
+          instalacaoTecnica: "pendente",
+          ambienteBiblioteca: "ausente",
+          adquirente: "desconhecida",
+          motivo: "O Connector respondeu ao status, mas a origem da prova não foi identificada.",
+        });
+      } else {
+        let prova: { versao: number | null; campos: unknown; assinatura: string } | null = null;
+        let erroProva = "";
+        try {
+          const resposta = await fetchLocalConector(`${consulta.origem}/tef/biblioteca/evidencia`);
+          const corpo = (await resposta.json()) as {
+            ok?: boolean;
+            erro?: string;
+            versao?: number;
+            campos?: unknown;
+            assinatura?: string;
+          };
+          if (!resposta.ok || corpo.ok === false) {
+            erroProva =
+              corpo.erro === "Não encontrado."
+                ? "O Connector em execução não possui a consulta da prova assinada. Atualize o Connector para validar a instalação já feita. A instalação do PayGoWeb não será repetida."
+                : corpo.erro || "A prova assinada não pôde ser lida.";
+          } else {
+            prova = {
+              versao: typeof corpo.versao === "number" ? corpo.versao : null,
+              campos: corpo.campos,
+              assinatura: String(corpo.assinatura ?? ""),
+            };
+          }
+        } catch {
+          erroProva = "Não foi possível ler a prova assinada no Connector.";
+        }
+        if (!prova) {
+          setProvaBiblioteca({
+            instalacaoTecnica: "pendente",
+            ambienteBiblioteca: "ausente",
+            adquirente: "desconhecida",
+            motivo: erroProva,
+          });
+        } else {
+          setProvaBiblioteca(
+            await validarProvaBiblioteca({
+              dispositivoId: consulta.dispositivoId,
+              versao: prova.versao,
+              campos: prova.campos,
+              assinatura: prova.assinatura,
+            })
+          );
+        }
+      }
       const retorno = await validarAssistente({
-        ...observacao(),
-        dispositivoId,
+        ...observacao(consulta.leitura, consulta.biblioteca),
+        dispositivoId: consulta.dispositivoId,
       });
       if (!retorno.ok) {
         setMensagens([retorno.erro]);
+        setPodeAtivar(false);
         return;
       }
       setRequisitos(retorno.avaliacao.requisitos);
-      setMensagens(retorno.avaliacao.mensagens);
+      setPodeAtivar(retorno.avaliacao.podeAtivar);
+      setMensagens(retorno.avaliacao.mensagens.filter((item) => item.trim()));
     } finally {
-      setOcupado(false);
-    }
-  }
-
-  function ocultarCredencial(texto: string, credencial: string) {
-    if (credencial.length < 4) {
-      return texto;
-    }
-    return texto.split(credencial).join("[redigido]");
-  }
-
-  async function avaliarMigracao() {
-    setOcupado(true);
-    setMensagens([]);
-    try {
-      const retorno = await prepararInstalacaoAssistente({
-        confirmacaoExplicita: false,
-        dispositivoId: "",
-        credencialInformada: false,
-        autorizacaoExplicitaReset: autorizacaoReset,
-        proposta: {
-          pontoCaptura: propostaPonto,
-          ambiente: propostaAmbiente,
-          servidor: propostaServidor,
-        },
-      });
-      setMensagens([retorno.motivo]);
-    } finally {
-      setOcupado(false);
-    }
-  }
-
-  async function instalarPonto() {
-    if (props.empresaJaHabilitada || !confirmacaoInstalacao || credencialTecnica.length < 4) {
-      setMensagens([
-        "A instalação nova exige confirmação explícita e a credencial técnica neste momento.",
-      ]);
-      return;
-    }
-    const senha = credencialTecnica;
-    setCredencialTecnica("");
-    setOcupado(true);
-    setMensagens([]);
-    try {
-      const descoberta = await descobrirUltraPdvConector();
-      if (!descoberta.ok || !descoberta.saude.dispositivoId) {
-        setMensagens([
-          "O UltraPDV Connector não respondeu neste computador. A instalação não foi iniciada.",
-        ]);
-        return;
-      }
-      const preparado = await prepararInstalacaoAssistente({
-        confirmacaoExplicita: true,
-        dispositivoId: descoberta.saude.dispositivoId,
-        credencialInformada: true,
-        autorizacaoExplicitaReset: false,
-        proposta: null,
-      });
-      if (!preparado.ok || preparado.efeito !== "instalar") {
-        setMensagens([preparado.motivo]);
-        return;
-      }
-      const resposta = await fetch(`${descoberta.origem}/tef/instalar`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          acao: "instalar",
-          confirmacao: true,
-          credencial: senha,
-        }),
-      });
-      const corpo = (await resposta.json()) as {
-        erro?: string;
-        resultado?: { mensagem?: string };
-      };
-      const texto = corpo.erro || corpo.resultado?.mensagem || "O Connector devolveu o resultado da instalação.";
-      setMensagens([ocultarCredencial(texto, senha)]);
-    } catch {
-      setMensagens(["Não foi possível falar com o Connector. A empresa não foi ativada."]);
-    } finally {
-      setCredencialTecnica("");
       setOcupado(false);
     }
   }
 
   async function ativar() {
+    if (!podeAtivar) {
+      setMensagens(["A ativação só fica disponível depois da validação real da instalação."]);
+      return;
+    }
     setOcupado(true);
     setAtivacao(null);
     try {
@@ -328,24 +424,39 @@ export function TefAssistente(props: {
         setMensagens(retorno.mensagens);
         return;
       }
-      setMensagens(retorno.mensagens);
+      setMensagens([]);
       setAtivacao(
         retorno.efeito === "preservar"
           ? "A configuração desta empresa foi mantida. Nenhuma chave, ambiente ou ponto de captura foi alterado."
-          : "TEF ativado para esta empresa. A plataforma master não foi alterada."
+          : "TEF ativado para esta empresa."
       );
     } finally {
       setOcupado(false);
     }
   }
 
+  function resolver(item: ItemPainelTef) {
+    if (item.id === "credenciamento") {
+      setEtapa("credenciamento");
+      return;
+    }
+    if (item.id === "connector") {
+      void verificarConnector();
+      return;
+    }
+    if (item.id === "paygo" || item.id === "ambiente") {
+      setEtapa(servidorOficial.trim() ? "ativacao" : "credenciamento");
+    }
+  }
+
+  const servidorExibido = servidorOficial.trim() || "não informado";
+
   return (
     <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5">
       <div>
         <h2 className="text-lg font-semibold text-zinc-950">Configurar TEF</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          PayGoWeb pelo ACBrTEFAPI. A ativação só ocorre no último passo, com os requisitos
-          comprovados.
+          PayGoWeb. A instalação só começa nesta tela, com confirmação, e não ao avançar de etapa.
         </p>
       </div>
       <ol className="flex flex-wrap gap-2">
@@ -360,31 +471,20 @@ export function TefAssistente(props: {
           </li>
         ))}
       </ol>
-      {props.migracaoInstalacaoPendente ? (
-        <PageAlert type="aviso" className="mx-0 mt-0">
-          O andamento ainda não pode ser retomado neste banco. A migration
-          20261011140000_tef_assistente_instalacao.sql está preparada e não foi aplicada.
+      {mensagens.length > 0 ? (
+        <PageAlert type="erro" className="mx-0 mt-0">
+          {mensagens[0]}
         </PageAlert>
       ) : null}
-      {mensagens.map((mensagem) => (
-        <PageAlert key={mensagem} type="aviso" className="mx-0 mt-0">
-          {mensagem}
-        </PageAlert>
-      ))}
 
       {etapa === "credenciamento" ? (
         <div className="space-y-3">
-          <p className="text-sm text-zinc-700">
-            CNPJ da empresa autenticada:{" "}
-            <strong>{props.cnpj ? formatarCnpj(props.cnpj) : "não cadastrado"}</strong>
-          </p>
           <label className="block text-sm font-medium text-zinc-800">
-            Digite o CNPJ para confirmar
+            CNPJ da empresa autenticada
             <input
-              value={cnpjConfirmado}
-              onChange={(evento) => setCnpjConfirmado(evento.target.value)}
-              disabled={props.empresaJaHabilitada}
-              className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+              value={props.cnpj ? formatarCnpj(props.cnpj) : "não cadastrado"}
+              disabled
+              className="mt-1 w-full rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2"
             />
           </label>
           <label className="flex items-start gap-2 text-sm text-zinc-800">
@@ -392,12 +492,15 @@ export function TefAssistente(props: {
               type="checkbox"
               checked={credenciamentoConfirmado}
               disabled={props.empresaJaHabilitada}
-              onChange={(evento) => setCredenciamentoConfirmado(evento.target.checked)}
+              onChange={(evento) => {
+                setCredenciamentoConfirmado(evento.target.checked);
+                setCnpjConfirmado(evento.target.checked ? props.cnpj : "");
+              }}
             />
             Confirmo o credenciamento PayGoWeb deste CNPJ.
           </label>
           <label className="block text-sm font-medium text-zinc-800">
-            Ambiente autorizado
+            Ambiente
             <select
               value={ambiente}
               disabled={props.empresaJaHabilitada}
@@ -427,45 +530,54 @@ export function TefAssistente(props: {
               className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
             />
           </label>
-          <label className="block text-sm font-medium text-zinc-800">
-            Servidor PayGoWeb de homologação
-            <input
-              value={servidorHomologacao}
-              disabled={props.empresaJaHabilitada}
-              onChange={(evento) => setServidorHomologacao(evento.target.value)}
-              placeholder="host:porta"
-              autoComplete="off"
-              spellCheck={false}
-              className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm font-medium text-zinc-800">
-            Servidor PayGoWeb de produção
-            <input
-              value={servidorProducao}
-              disabled={props.empresaJaHabilitada}
-              onChange={(evento) => setServidorProducao(evento.target.value)}
-              placeholder="host:porta"
-              autoComplete="off"
-              spellCheck={false}
-              className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-            />
-          </label>
+          {ambiente === "homologacao" ? (
+            <label className="block text-sm font-medium text-zinc-800">
+              Servidor PayGoWeb de homologação
+              <input
+                value={servidorHomologacao}
+                disabled={props.empresaJaHabilitada && Boolean(props.servidorHomologacao.trim())}
+                onChange={(evento) => {
+                  setServidorHomologacao(evento.target.value);
+                  setServidorConfirmado(false);
+                }}
+                placeholder="host:porta"
+                autoComplete="off"
+                spellCheck={false}
+                className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+              />
+            </label>
+          ) : (
+            <label className="block text-sm font-medium text-zinc-800">
+              Servidor PayGoWeb de produção
+              <input
+                value={servidorProducao}
+                disabled={servidorAtualBloqueado}
+                onChange={(evento) => {
+                  setServidorProducao(evento.target.value);
+                  setServidorConfirmado(false);
+                }}
+                placeholder="host:porta"
+                autoComplete="off"
+                spellCheck={false}
+                className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
+              />
+            </label>
+          )}
           <p className="text-sm text-zinc-600">
-            Informe o host:porta atribuído a este estabelecimento. Homologação e produção são
-            servidores distintos. O endereço não é usado como destino de requisição do navegador.
+            Informe o host:porta deste estabelecimento. O servidor só é aceito depois de gravado e
+            relido. O campo de avaliação de migração não substitui este valor.
           </p>
           <label className="flex items-start gap-2 text-sm text-zinc-800">
             <input
               type="checkbox"
               checked={servidorConfirmado}
-              disabled={props.empresaJaHabilitada || !props.administrador}
+              disabled={!props.administrador}
               onChange={(evento) => setServidorConfirmado(evento.target.checked)}
             />
             Confirmo o servidor PayGoWeb atribuído a este estabelecimento.
           </label>
-          {!props.administrador && !props.empresaJaHabilitada ? (
-            <PageAlert type="aviso" className="mx-0 mt-0">
+          {!props.administrador ? (
+            <PageAlert type="erro" className="mx-0 mt-0">
               Somente um administrador pode confirmar o servidor PayGoWeb.
             </PageAlert>
           ) : null}
@@ -489,127 +601,21 @@ export function TefAssistente(props: {
               className="mt-1 min-h-20 w-full rounded-lg border border-zinc-300 px-3 py-2"
             />
           </label>
-          {props.empresaJaHabilitada ? (
-            <div className="space-y-3 rounded-xl border border-zinc-200 p-3">
-              <PageAlert type="aviso" className="mx-0 mt-0">
-                Instalação atual: ponto {props.pontoAtual || "não informado"}, ambiente{" "}
-                {props.ambienteAtual === "producao" ? "produção" : "homologação"}. Os dados
-                vigentes não serão trocados por este assistente.
-              </PageAlert>
-              <p className="text-sm text-zinc-700">
-                A migração para outro ponto, ambiente ou servidor depende de reset da instalação
-                local. Esta etapa permanece bloqueada até a PayGo confirmar o procedimento oficial.
-                A autorização abaixo não executa o reset.
-              </p>
-              <label className="block text-sm font-medium text-zinc-800">
-                Ponto novo informado pela PayGo
-                <input
-                  value={propostaPonto}
-                  onChange={(evento) => setPropostaPonto(evento.target.value)}
-                  autoComplete="off"
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-                />
-              </label>
-              <label className="block text-sm font-medium text-zinc-800">
-                Ambiente novo
-                <select
-                  value={propostaAmbiente}
-                  onChange={(evento) => setPropostaAmbiente(evento.target.value)}
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-                >
-                  <option value="">Selecione</option>
-                  <option value="homologacao">Homologação</option>
-                  <option value="producao">Produção</option>
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-zinc-800">
-                Servidor novo
-                <input
-                  value={propostaServidor}
-                  onChange={(evento) => setPropostaServidor(evento.target.value)}
-                  placeholder="host:porta"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-                />
-              </label>
-              <label className="flex items-start gap-2 text-sm text-zinc-800">
-                <input
-                  type="checkbox"
-                  checked={autorizacaoReset}
-                  onChange={(evento) => setAutorizacaoReset(evento.target.checked)}
-                />
-                Autorizo explicitamente o reset quando existir procedimento oficial confirmado.
-              </label>
-              <button
-                type="button"
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium disabled:opacity-50"
-                disabled={ocupado}
-                onClick={() => void avaliarMigracao()}
-              >
-                Avaliar migração
-              </button>
-            </div>
-          ) : null}
         </div>
       ) : null}
 
       {etapa === "connector" ? (
-        <div className="space-y-3 text-sm text-zinc-700">
-          <p>
-            A verificação apenas lê o Connector desta máquina. Ela não substitui, atualiza nem
-            reinicia a instalação.
-          </p>
-          <button
-            type="button"
-            className="rounded-lg border border-zinc-300 px-3 py-2 font-medium disabled:opacity-50"
-            disabled={ocupado}
-            onClick={() => void verificarConnector()}
-          >
-            Verificar Connector
-          </button>
-          {connector ? (
-            <dl className="grid gap-2 sm:grid-cols-2">
-              <Item rotulo="Versão" valor={connector.versao} />
-              <Item rotulo="Disponível" valor={connector.disponivel ? "sim" : "não"} />
-              <Item
-                rotulo="Executável TEF"
-                valor={
-                  connector.respondeu
-                    ? connector.executavelEncontrado
-                      ? connector.processo || "encontrado"
-                      : "ausente"
-                    : null
-                }
-              />
-              <Item
-                rotulo="PayGoWeb"
-                valor={connector.respondeu ? (connector.paygoInicializado ? "inicializado" : "não inicializado") : null}
-              />
-              <Item
-                rotulo="Ambiente efetivo"
-                valor={
-                  connector.situacaoAmbiente === "comprovado" && connector.ambienteEfetivo
-                    ? connector.ambienteEfetivo
-                    : "desconhecido"
-                }
-              />
-            </dl>
+        <div className="space-y-4">
+          <Painel itens={painel} onResolver={resolver} />
+          {connector?.respondeu ? (
+            <p className="text-sm text-zinc-600">
+              Connector {connector.versao || "sem versão"}
+              {agenteNome ? `, agente ${agenteNome}` : ""}.
+              {connector.processo === "parado"
+                ? " O processo TEF está parado e o Connector permanece conectado."
+                : ""}
+            </p>
           ) : null}
-          <p className="text-sm text-zinc-600">
-            Este status deixa o ambiente desconhecido. A evidência assinada só nasce no
-            instalar() do Connector, depois que a biblioteca observa o ponto ausente,
-            PW_iSetEnvironment com sucesso e PWOPER_INSTALL no mesmo ponto. O ponto novo só
-            recebe os parâmetros autorizados do vínculo. Sem ponto, ambiente, CNPJ, servidor
-            ou estabelecimento, a instalação permanece bloqueada. Uma instalação já concluída
-            sem essa evidência permanece desconhecida. Este assistente não reinstala o ponto.
-            A ativação continua sendo uma ação separada.
-          </p>
-        </div>
-      ) : null}
-
-      {etapa === "pinpad" ? (
-        <div className="space-y-3">
           <label className="flex items-start gap-2 text-sm text-zinc-800">
             <input
               type="checkbox"
@@ -618,95 +624,88 @@ export function TefAssistente(props: {
             />
             Esta instalação exige pinpad.
           </label>
-          <p className="text-sm text-zinc-600">
-            A consulta de identificação pode ficar indisponível fora de uma transação. Essa é uma
-            limitação da PGWebLib. Um modelo lido pela biblioteca não é uma homologação.
-          </p>
+          <TefInicializacaoBiblioteca />
           <TefPinpadDiagnostico
             somenteQuandoDisponivel
             onResultado={(resultado) => setPinpad(leituraPinpad(resultado))}
           />
-        </div>
-      ) : null}
-
-      {etapa === "vinculacao" ? (
-        <TefPareamentoForm
-          empresaId={props.empresaId}
-          terminais={props.terminais}
-          podeRevogar={props.podeRevogar}
-          administrador={props.administrador}
-        />
-      ) : null}
-
-      {etapa === "validacao" ? (
-        <div className="space-y-3">
-          <button
-            type="button"
-            className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            disabled={ocupado}
-            onClick={() => void validar()}
-          >
-            Verificar requisitos
-          </button>
-          {requisitos ? (
-            <ul className="space-y-2">
-              {requisitos.map((item) => (
-                <li key={item.id} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm">
-                  <span className="font-semibold text-zinc-900">
-                    {item.rotulo}: {rotuloEstado(item.estado)}
-                  </span>
-                  <span className="mt-1 block text-zinc-600">{item.mensagem}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <TefPareamentoForm
+            empresaId={props.empresaId}
+            terminais={props.terminais}
+            podeRevogar={props.podeRevogar}
+            administrador={props.administrador}
+          />
         </div>
       ) : null}
 
       {etapa === "ativacao" ? (
-        <div className="space-y-3">
-          <PageAlert type="aviso" className="mx-0 mt-0">
-            Chegar nesta etapa não ativa a empresa. TEF de homologação continua impedido de
-            financiar NFC-e de produção. A instalação também não ativa a empresa.
-          </PageAlert>
-          {props.empresaJaHabilitada ? null : (
-            <div className="space-y-3">
-              <label className="flex items-start gap-2 text-sm text-zinc-800">
-                <input
-                  type="checkbox"
-                  checked={confirmacaoInstalacao}
-                  onChange={(evento) => setConfirmacaoInstalacao(evento.target.checked)}
-                />
-                Confirmo a instalação deste ponto com os dados oficiais já salvos.
-              </label>
-              <label className="block text-sm font-medium text-zinc-800">
-                Credencial técnica
-                <input
-                  type="password"
-                  value={credencialTecnica}
-                  onChange={(evento) => setCredencialTecnica(evento.target.value)}
-                  autoComplete="off"
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-                />
-              </label>
-              <p className="text-sm text-zinc-600">
-                A credencial segue somente até o Connector deste computador e é descartada em
-                seguida. Ela não é enviada ao servidor nem gravada no banco.
-              </p>
-              <button
-                type="button"
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
-                disabled={ocupado}
-                onClick={() => void instalarPonto()}
-              >
-                Instalar ponto PayGoWeb
-              </button>
-            </div>
-          )}
+        <div className="space-y-4">
+          <Painel itens={painel} onResolver={resolver} />
+          <p className="text-sm text-zinc-600">
+            Chegar nesta etapa não ativa a empresa. A evidência assinada só nasce na instalação feita
+            pelo Connector.
+          </p>
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <Item rotulo="Ponto oficial" valor={ponto || "não informado"} />
+            <Item rotulo="Ambiente do cadastro" valor={ambiente === "producao" ? "produção" : ambiente === "homologacao" ? "homologação" : "não informado"} />
+            <Item rotulo="Servidor oficial" valor={servidorExibido} />
+            <Item rotulo="CNPJ" valor={props.cnpj ? formatarCnpj(props.cnpj) : "não informado"} />
+          </dl>
+          <TefProducaoIsolada
+            administrador={props.administrador}
+            cnpj={props.cnpj}
+            ponto={ponto}
+            servidor={servidorOficial}
+            estabelecimento={estabelecimento}
+            ambiente={ambiente === "producao" ? "producao" : "homologacao"}
+          />
+          <button
+            type="button"
+            className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            disabled={ocupado}
+            onClick={() => void validar()}
+          >
+            Validar instalação
+          </button>
+          {provaBiblioteca ? (
+            <dl className="grid gap-2 text-sm sm:grid-cols-3">
+              <Item
+                rotulo="Instalação técnica"
+                valor={`${rotuloProva(provaBiblioteca.instalacaoTecnica)}. ${provaBiblioteca.motivo}`}
+              />
+              <Item
+                rotulo="Ambiente da biblioteca"
+                valor={rotuloProva(provaBiblioteca.ambienteBiblioteca)}
+              />
+              <Item
+                rotulo="Adquirente"
+                valor={`${rotuloProva(provaBiblioteca.adquirente)}. A prova técnica não habilita transação real.`}
+              />
+            </dl>
+          ) : null}
+          <TefInicializacaoBiblioteca />
+          <TefPinpadDiagnostico
+            somenteQuandoDisponivel
+            onResultado={(resultado) => setPinpad(leituraPinpad(resultado))}
+          />
+          {requisitos ? (
+            <ul className="space-y-2">
+              {requisitos
+                .filter((item) => item.estado !== "aprovado")
+                .map((item) => (
+                  <li key={item.id} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm">
+                    <span className="font-semibold text-zinc-900">
+                      {item.rotulo}: {rotuloEstado(item.estado)}
+                    </span>
+                    <span className="mt-1 block text-zinc-600">{item.mensagem}</span>
+                  </li>
+                ))}
+            </ul>
+          ) : null}
           <button
             type="button"
             className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            disabled={ocupado || (!props.empresaJaHabilitada && !requisitos?.every((item) => item.estado === "aprovado"))}
+            disabled={ocupado || !podeAtivar}
             onClick={() => void ativar()}
           >
             {props.empresaJaHabilitada ? "Manter a configuração atual" : "Ativar TEF nesta empresa"}
@@ -743,6 +742,36 @@ export function TefAssistente(props: {
   );
 }
 
+function Painel({
+  itens,
+  onResolver,
+}: {
+  itens: ItemPainelTef[];
+  onResolver: (item: ItemPainelTef) => void;
+}) {
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2">
+      {itens.map((item) => (
+        <li key={item.id} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm">
+          <span className="font-semibold text-zinc-900">
+            {item.rotulo}: {item.situacao}
+          </span>
+          {item.pendente ? <span className="mt-1 block text-zinc-600">{item.explicacao}</span> : null}
+          {item.pendente && item.id !== "pinpad" ? (
+            <button
+              type="button"
+              className="mt-2 rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium"
+              onClick={() => onResolver(item)}
+            >
+              Resolver
+            </button>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function leituraPinpad(resultado: DiagnosticoPinpad | null): LeituraPinpad {
   if (!resultado) {
     return {
@@ -772,10 +801,19 @@ function leituraPinpad(resultado: DiagnosticoPinpad | null): LeituraPinpad {
   };
 }
 
+function rotuloProva(valor: string) {
+  const rotulos: Record<string, string> = {
+    comprovada: "Comprovada",
+    pendente: "Pendente",
+    configurado: "Configurado",
+    divergente: "Divergente",
+    ausente: "Ausente",
+    desconhecida: "Desconhecida",
+  };
+  return rotulos[valor] ?? valor;
+}
+
 function Item({ rotulo, valor }: { rotulo: string; valor: string | null }) {
-  if (!valor) {
-    return null;
-  }
   return (
     <div>
       <dt className="text-zinc-500">{rotulo}</dt>

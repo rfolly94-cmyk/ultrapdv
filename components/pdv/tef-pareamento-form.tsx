@@ -14,8 +14,13 @@ import { resultadoAposAutorizacao } from "@/lib/pdv/tef/recuperar-autorizacao";
 import {
   avaliarProcessoAntesDeGravar,
   concluirSincronizacaoLocal,
+  exigirIdentidadeFiscalDoStatus,
   lerRecusaVincular,
+  lerVinculoDoStatus,
+  mensagemVinculoConfirmado,
   montarCorpoVincular,
+  rotuloCampoVinculo,
+  type CampoVinculo,
   type VinculoAutorizado,
   type VinculoConfirmado,
 } from "@/lib/pdv/tef/sincronizar-vinculo";
@@ -59,6 +64,7 @@ export function TefPareamentoForm(props: {
   const [pedindoSincronizacao, setPedindoSincronizacao] = useState(false);
   const [codigoSincronizacao, setCodigoSincronizacao] = useState("");
   const [sincronizado, setSincronizado] = useState<VinculoConfirmado | null>(null);
+  const [divergencias, setDivergencias] = useState<CampoVinculo[]>([]);
   const [pedindoRecuperacao, setPedindoRecuperacao] = useState(false);
   const [codigoRecuperacao, setCodigoRecuperacao] = useState("");
   const [perdaConfirmada, setPerdaConfirmada] = useState(false);
@@ -228,6 +234,7 @@ export function TefPareamentoForm(props: {
         inicializado?: boolean;
         transacaoPendenteConfirmacao?: boolean;
         reconciliacaoNecessaria?: boolean;
+        agente?: { versao?: string };
       };
       vinculo?: {
         vinculado?: boolean;
@@ -235,6 +242,9 @@ export function TefPareamentoForm(props: {
         terminalCodigo?: string;
         pontoCaptura?: string;
         estabelecimento?: string;
+        ambiente?: string;
+        servidor?: string;
+        cnpjInformado?: boolean;
       };
     };
   }
@@ -256,6 +266,7 @@ export function TefPareamentoForm(props: {
     setErro(null);
     setMensagem(null);
     setSincronizado(null);
+    setDivergencias([]);
     setOcupado(true);
     try {
       const descoberta = await descobrirUltraPdvConector();
@@ -300,6 +311,7 @@ export function TefPareamentoForm(props: {
         setErro(preparado.motivo || "A sincronização foi recusada.");
         return;
       }
+      const exigeFiscal = exigirIdentidadeFiscalDoStatus(statusAtual);
       const processo = avaliarProcessoAntesDeGravar({
         processo: {
           processo: statusAtual.tef?.processo ?? "",
@@ -307,18 +319,11 @@ export function TefPareamentoForm(props: {
           transacaoPendenteConfirmacao,
           reconciliacaoNecessaria,
         },
-        vinculoLocal: statusAtual.vinculo?.vinculado
-          ? {
-              vinculado: true,
-              empresaId: statusAtual.vinculo.empresaId ?? "",
-              terminalCodigo: statusAtual.vinculo.terminalCodigo ?? "",
-              pontoCaptura: statusAtual.vinculo.pontoCaptura ?? "",
-              estabelecimento: statusAtual.vinculo.estabelecimento ?? "",
-            }
-          : null,
+        vinculoLocal: lerVinculoDoStatus(statusAtual.vinculo),
         vinculoAutorizado: preparado.vinculo,
       });
       if (processo.efeito === "recusar") {
+        setDivergencias(processo.divergencias);
         setErro(processo.motivo);
         return;
       }
@@ -327,13 +332,16 @@ export function TefPareamentoForm(props: {
           gravacaoOk: true,
           status: statusAtual,
           esperado: preparado.vinculo,
+          exigirIdentidadeFiscal: exigeFiscal,
         });
         if (confirmado.efeito === "falhou") {
+          setDivergencias(confirmado.divergencias);
           setErro(confirmado.motivo);
           return;
         }
+        setDivergencias([]);
         setSincronizado(confirmado.gravado);
-        setMensagem("O Connector já está com o vínculo oficial. Nenhuma venda foi ativada.");
+        setMensagem(mensagemVinculoConfirmado("ja_sincronizado", confirmado.gravado.identidadeFiscal));
         setPedindoSincronizacao(false);
         setCodigoSincronizacao("");
         return;
@@ -341,7 +349,11 @@ export function TefPareamentoForm(props: {
       const gravacao = await fetch(`${descoberta.origem}/tef/vincular`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(montarCorpoVincular(codigoSincronizacao, preparado.vinculo)),
+        body: JSON.stringify(
+          montarCorpoVincular(codigoSincronizacao, preparado.vinculo, {
+            identidadeFiscal: exigeFiscal,
+          })
+        ),
       });
       const recusa = await lerGravacaoVincular(gravacao);
       let statusFinal: Awaited<ReturnType<typeof lerStatusConnector>> | null = null;
@@ -355,17 +367,16 @@ export function TefPareamentoForm(props: {
         recusa,
         status: statusFinal,
         esperado: preparado.vinculo,
+        exigirIdentidadeFiscal: exigeFiscal || exigirIdentidadeFiscalDoStatus(statusFinal),
       });
       if (confirmado.efeito === "falhou") {
+        setDivergencias(confirmado.divergencias);
         setErro(confirmado.motivo);
         return;
       }
+      setDivergencias([]);
       setSincronizado(confirmado.gravado);
-      setMensagem(
-        confirmado.efeito === "recuperado"
-          ? "A resposta da gravação falhou, mas o status do Connector já confirma o vínculo oficial. Nenhuma venda foi ativada."
-          : "Vínculo do Connector atualizado. Nenhuma venda foi ativada e nenhuma transação foi enviada."
-      );
+      setMensagem(mensagemVinculoConfirmado(confirmado.efeito, confirmado.gravado.identidadeFiscal));
       setPedindoSincronizacao(false);
       setCodigoSincronizacao("");
     } catch (error) {
@@ -444,6 +455,7 @@ export function TefPareamentoForm(props: {
     vinculo: VinculoAutorizado,
     statusAtual: Awaited<ReturnType<typeof lerStatusConnector>>
   ) {
+    const exigeFiscal = exigirIdentidadeFiscalDoStatus(statusAtual);
     const processo = avaliarProcessoAntesDeGravar({
       processo: {
         processo: statusAtual.tef?.processo ?? "",
@@ -451,15 +463,7 @@ export function TefPareamentoForm(props: {
         transacaoPendenteConfirmacao: statusAtual.tef?.transacaoPendenteConfirmacao === true,
         reconciliacaoNecessaria: statusAtual.tef?.reconciliacaoNecessaria === true,
       },
-      vinculoLocal: statusAtual.vinculo?.vinculado
-        ? {
-            vinculado: true,
-            empresaId: statusAtual.vinculo.empresaId ?? "",
-            terminalCodigo: statusAtual.vinculo.terminalCodigo ?? "",
-            pontoCaptura: statusAtual.vinculo.pontoCaptura ?? "",
-            estabelecimento: statusAtual.vinculo.estabelecimento ?? "",
-          }
-        : null,
+      vinculoLocal: lerVinculoDoStatus(statusAtual.vinculo),
       vinculoAutorizado: vinculo,
     });
     if (processo.efeito === "recusar") {
@@ -470,6 +474,7 @@ export function TefPareamentoForm(props: {
         gravacaoOk: true,
         status: statusAtual,
         esperado: vinculo,
+        exigirIdentidadeFiscal: exigeFiscal,
       });
       return confirmado.efeito === "falhou"
         ? { ok: false as const, motivo: confirmado.motivo, status: statusAtual }
@@ -478,7 +483,9 @@ export function TefPareamentoForm(props: {
     const gravacao = await fetch(`${origem}/tef/vincular`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(montarCorpoVincular(codigoPareamento, vinculo)),
+      body: JSON.stringify(
+        montarCorpoVincular(codigoPareamento, vinculo, { identidadeFiscal: exigeFiscal })
+      ),
     });
     const recusa = await lerGravacaoVincular(gravacao);
     let statusFinal: Awaited<ReturnType<typeof lerStatusConnector>> | null = null;
@@ -492,6 +499,7 @@ export function TefPareamentoForm(props: {
       recusa,
       status: statusFinal,
       esperado: vinculo,
+      exigirIdentidadeFiscal: exigeFiscal || exigirIdentidadeFiscalDoStatus(statusFinal),
     });
     if (confirmado.efeito === "falhou") {
       return { ok: false as const, motivo: confirmado.motivo, status: statusFinal };
@@ -696,8 +704,9 @@ export function TefPareamentoForm(props: {
           <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-sm text-zinc-700">
               Cole o código exibido no Connector deste computador. A sincronização regrava
-              só o vínculo local, com o código lógico e o ponto oficiais desta empresa.
-              Não reinstala o PayGoWeb, não revoga a chave e não ativa vendas.
+              só o vínculo local, com o código lógico, o ponto, o ambiente, o servidor e o
+              CNPJ oficiais desta empresa. Não reinstala o PayGoWeb, não revoga a chave e
+              não ativa vendas.
             </p>
             <label className="block text-sm font-medium text-zinc-800">
               Código do Connector
@@ -840,7 +849,30 @@ export function TefPareamentoForm(props: {
               <dt className="text-zinc-500">Processo TEF</dt>
               <dd className="font-medium">{sincronizado.processo || "—"}</dd>
             </div>
+            {sincronizado.identidadeFiscal ? (
+              <>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-zinc-500">Ambiente no Connector</dt>
+                  <dd className="font-medium">{sincronizado.ambiente === "producao" ? "Produção" : "Homologação"}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-zinc-500">Servidor no Connector</dt>
+                  <dd className="font-medium">{sincronizado.servidor}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-zinc-500">CNPJ no Connector</dt>
+                  <dd className="font-medium">{sincronizado.cnpjInformado ? "informado" : "ausente"}</dd>
+                </div>
+              </>
+            ) : null}
           </dl>
+        ) : null}
+        {divergencias.length > 0 ? (
+          <ul className="list-disc space-y-1 pl-5 text-sm text-red-700">
+            {divergencias.map((campo) => (
+              <li key={campo}>{rotuloCampoVinculo(campo)} ainda diverge do cadastro oficial.</li>
+            ))}
+          </ul>
         ) : null}
         {props.podeRevogar && !terminal.temPendencia && !confirmarRevogacao ? (
           <button

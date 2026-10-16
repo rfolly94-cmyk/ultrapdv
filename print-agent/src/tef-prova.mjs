@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, verify } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -84,6 +84,103 @@ export function assinarPareamentoTef(chavePrivadaPem, codigoHash, dispositivoId)
     sucesso: true,
     codigo: "",
   });
+}
+
+export function juntarComprovanteTef(via1, via2) {
+  return `${String(via1 ?? "")}\n${String(via2 ?? "")}`;
+}
+
+export function normalizarComprovanteTef(texto) {
+  return String(texto ?? "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .replace(/[ \t]+/g, " ")
+    .toUpperCase();
+}
+
+export function hashComprovanteTef(texto) {
+  return createHash("sha256").update(normalizarComprovanteTef(texto)).digest("hex");
+}
+
+export function mensagemAmbienteTef(campos) {
+  return [
+    "ultrapdv-tef-ambiente-v1",
+    campo(campos.desafio),
+    campo(campos.identificador),
+    String(Math.round(Number(campos.valorCentavos) || 0)),
+    campo(campos.nsu),
+    campo(campos.autorizacao),
+    campo(campos.rede),
+    campo(campos.finalizacao),
+    campo(campos.pontoCaptura),
+    campo(campos.host),
+    campo(campos.comprovanteSha256),
+  ].join("\n");
+}
+
+export function mensagemBibliotecaTef(campos) {
+  return [
+    "ultrapdv-tef-biblioteca-v2",
+    campo(campos.pontoCaptura),
+    campo(campos.servidor),
+    campo(campos.ambiente),
+    String(Math.round(Number(campos.retornoSetEnvironment) || 0)),
+    String(Math.round(Number(campos.codigoAmbiente) || 0)),
+    campo(campos.diretorio),
+  ].join("\n");
+}
+
+export function assinarBibliotecaTef(chavePrivadaPem, campos) {
+  return sign(
+    null,
+    Buffer.from(mensagemBibliotecaTef(campos)),
+    createPrivateKey(chavePrivadaPem)
+  ).toString("base64");
+}
+
+export function verificarBibliotecaTef(chavePublicaPem, campos, assinatura) {
+  try {
+    return verify(
+      null,
+      Buffer.from(mensagemBibliotecaTef(campos)),
+      createPublicKey(chavePublicaPem),
+      Buffer.from(String(assinatura ?? ""), "base64")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function mensagemModalidadeTef(campos) {
+  const tipo =
+    campos?.tipoCartao == null || campos.tipoCartao === ""
+      ? ""
+      : String(campos.tipoCartao);
+  return [
+    "ultrapdv-tef-modalidade-v1",
+    campo(campos.desafio),
+    campo(campos.identificador),
+    String(Math.round(Number(campos.valorCentavos) || 0)),
+    campo(campos.nsu),
+    campo(campos.autorizacao),
+    tipo,
+  ].join("\n");
+}
+
+export function assinarModalidadeTef(chavePrivadaPem, campos) {
+  return sign(
+    null,
+    Buffer.from(mensagemModalidadeTef(campos)),
+    createPrivateKey(chavePrivadaPem)
+  ).toString("base64");
+}
+
+export function assinarAmbienteTef(chavePrivadaPem, campos) {
+  return sign(
+    null,
+    Buffer.from(mensagemAmbienteTef(campos)),
+    createPrivateKey(chavePrivadaPem)
+  ).toString("base64");
 }
 
 export function assinarProvaTef(chavePrivadaPem, campos) {

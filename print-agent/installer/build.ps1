@@ -176,6 +176,15 @@ if (Test-Path $staging) {
   Remove-Item -LiteralPath $staging -Recurse -Force
 }
 
+if ($productVersion -notmatch '^\d+\.\d+\.\d+$') {
+  Write-Fail "A versao do Connector precisa ser numerica."
+  exit 1
+}
+$nomeAgente = [string]$versao.agenteTef
+if ($nomeAgente -ne "UltraPDVTef_1313.exe") {
+  Write-Fail "Esta atualizacao deve distribuir UltraPDVTef_1313.exe e manter UltraPDVTef_139.exe intacto."
+  exit 1
+}
 $setupOutNsis = ConvertTo-NsisPath $setupOut
 $stagingNsis = ConvertTo-NsisPath $staging
 $nsh = @"
@@ -185,6 +194,7 @@ $nsh = @"
 !define SETUP_NAME "$setupName"
 !define SETUP_OUTFILE "$setupOutNsis"
 !define STAGING_DIR "$stagingNsis"
+!define TEF_EXE_NAME "$nomeAgente"
 "@
 Set-Content -Path (Join-Path $generated "version.nsh") -Value $nsh -Encoding ASCII
 
@@ -222,20 +232,100 @@ if ($appFiles -notcontains "tef-prova.mjs" -or $appFiles -notcontains "tef-recup
 foreach ($nome in $appFiles) {
   Copy-Item (Join-Path $raiz "src\$nome") (Join-Path $staging "app\$nome")
 }
-$tefExe = Join-Path $raiz "bin\tef\UltraPDVTef_NOVO.exe"
+$tefExe = Join-Path $raiz "bin\tef\$nomeAgente"
 if (-not (Test-Path -LiteralPath $tefExe -PathType Leaf)) {
   throw "Executavel TEF nao encontrado: $tefExe"
 }
-Copy-Item -LiteralPath $tefExe -Destination (Join-Path $staging "bin\tef\UltraPDVTef_NOVO.exe") -ErrorAction Stop
+$hashAgente1313 = "F1E32D1B339B07378B828A0076B088B83F18B1945E996D7B539090D8D4C4EA61"
+$hashAgente = (Get-FileHash -Algorithm SHA256 -LiteralPath $tefExe).Hash
+if ($hashAgente -ne $hashAgente1313) {
+  Write-Fail "O agente TEF nao e o binario conferido."
+  Write-Host "  esperado: $hashAgente1313"
+  Write-Host "  obtido:   $hashAgente"
+  exit 1
+}
+$hash139Esperado = "EE9909238404931649F98A7437C499D257BB3080E1D23F89DEA5A2CF60814904"
+$agente139 = Join-Path $raiz "bin\tef\UltraPDVTef_139.exe"
+if (-not (Test-Path -LiteralPath $agente139)) {
+  Write-Fail "UltraPDVTef_139.exe precisa permanecer no diretorio para rollback."
+  exit 1
+}
+$hash139 = (Get-FileHash -Algorithm SHA256 -LiteralPath $agente139).Hash
+if ($hash139 -ne $hash139Esperado) {
+  Write-Fail "UltraPDVTef_139.exe foi alterado. A compilacao 1.3.9 precisa permanecer intacta."
+  Write-Host "  esperado: $hash139Esperado"
+  Write-Host "  obtido:   $hash139"
+  exit 1
+}
+$agenteAnterior = Join-Path $raiz "bin\tef\UltraPDVTef_138.exe"
+if (Test-Path -LiteralPath $agenteAnterior) {
+  $hashAnteriorEsperado = "C51E326DC6B0FD4D6D91810C46F0132147D450E531C93B02366A14C2F6D12C56"
+  $hashAnterior = (Get-FileHash -Algorithm SHA256 -LiteralPath $agenteAnterior).Hash
+  if ($hashAnterior -ne $hashAnteriorEsperado) {
+    Write-Fail "UltraPDVTef_138.exe foi alterado. A compilacao anterior precisa permanecer intacta."
+    Write-Host "  esperado: $hashAnteriorEsperado"
+    Write-Host "  obtido:   $hashAnterior"
+    exit 1
+  }
+}
+Write-Info "Agente TEF conferido: $hashAgente"
+Copy-Item -LiteralPath $tefExe -Destination (Join-Path $staging "bin\tef\$nomeAgente") -ErrorAction Stop
+$hashDepoisDaCopia = (Get-FileHash -Algorithm SHA256 -LiteralPath $tefExe).Hash
+if ($hashDepoisDaCopia -ne $hashAgente1313) {
+  Write-Fail "A copia para o instalador alterou UltraPDVTef_1313.exe."
+  exit 1
+}
+$agenteTexto = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($tefExe))
+foreach ($marca in @("117473", "pos-transac-sb.tpgweb.io", "42.741.754/0001-42", "6696546", "pos-transac.pgweb.io")) {
+  if ($agenteTexto.Contains($marca)) {
+    Write-Fail "O agente TEF contem ponto, servidor ou documento fixo: $marca"
+    exit 1
+  }
+}
+if (-not $agenteTexto.Contains("bibliotecaInstalada") -or -not $agenteTexto.Contains("pontoSolicitado") -or -not $agenteTexto.Contains("diretorioBiblioteca")) {
+  Write-Fail "O agente TEF nao informa a pasta nem a observacao da biblioteca."
+  exit 1
+}
+foreach ($marcaAgente in @("tipoCartao", "PWINFO_CARDTYPE", "UltraPDV\TEF\Producao", "PROGRAMDATA")) {
+  if (-not $agenteTexto.Contains($marcaAgente)) {
+    Write-Fail "O agente TEF nao declara a producao em ProgramData nem o tipo do cartao: $marcaAgente"
+    exit 1
+  }
+}
 $extrasTef = Get-ChildItem -LiteralPath (Join-Path $staging "bin\tef") -Recurse -Force |
-  Where-Object { $_.FullName -ne (Join-Path $staging "bin\tef\UltraPDVTef_NOVO.exe") }
+  Where-Object { $_.Name -ne $nomeAgente }
 if ($extrasTef) {
-  Write-Fail "O pacote TEF so pode levar UltraPDVTef_NOVO.exe. Dados locais do PayGo ficam na maquina."
+  Write-Fail "O pacote TEF so pode levar $nomeAgente. O executavel antigo e os dados do PayGo ficam na maquina."
   $extrasTef | ForEach-Object { Write-Host "  $($_.FullName)" }
   exit 1
 }
 Copy-Item $versionFile (Join-Path $staging "app\version.json")
 Copy-Item $versionFile (Join-Path $staging "version.json")
+$pacoteTef = Join-Path $raiz "tef-pacote.json"
+if (-not (Test-Path -LiteralPath $pacoteTef)) {
+  Write-Fail "tef-pacote.json nao encontrado."
+  exit 1
+}
+$pacoteObj = Get-Content -Raw $pacoteTef | ConvertFrom-Json
+if ([string]$pacoteObj.executavel -ne ("bin/tef/" + $nomeAgente)) {
+  Write-Fail "tef-pacote.json aponta para $($pacoteObj.executavel), mas a versao $productVersion exige bin/tef/$nomeAgente."
+  exit 1
+}
+if (-not $agenteTexto.Contains("1.3.13") -or -not $agenteTexto.Contains("PortaPinPad") -or -not $agenteTexto.Contains("LIMITE_REPETICOES_PPCOMM")) {
+  Write-Fail "O agente TEF nao e a compilacao 1.3.13 com o diagnostico de pinpad."
+  exit 1
+}
+if ($agenteTexto.Contains("COM7")) {
+  Write-Fail "O agente TEF nao pode forcar a COM7."
+  exit 1
+}
+foreach ($marcaNova in @("diretorioPai", "diretorioPwInit", "retornoPwInit", "retornoPwInitNome")) {
+  if (-not $agenteTexto.Contains($marcaNova)) {
+    Write-Fail "O agente TEF nao informa o diretorio enviado a PW_iInit: $marcaNova"
+    exit 1
+  }
+}
+Copy-Item $pacoteTef (Join-Path $staging "tef-pacote.json")
 Copy-Item $sumatra (Join-Path $staging "print-engine\SumatraPDF.exe")
 Copy-Item $sumatraDll (Join-Path $staging "print-engine\libmupdf.dll")
 Copy-Item (Join-Path $raiz "licenses\*") (Join-Path $staging "licenses") -Recurse -Force
@@ -263,9 +353,41 @@ if ($versaoStaging -ne $productVersion -or $versaoApp -ne $productVersion) {
   exit 1
 }
 Assert-MesmoArquivo $versionFile (Join-Path $staging "version.json") "version.json"
+Assert-MesmoArquivo $pacoteTef (Join-Path $staging "tef-pacote.json") "tef-pacote.json"
 Assert-MesmoArquivo $versionFile (Join-Path $staging "app\version.json") "app/version.json"
 foreach ($nome in $appFiles) {
   Assert-MesmoArquivo (Join-Path $raiz "src\$nome") (Join-Path $staging "app\$nome") $nome
+}
+$servidorEmpacotado = Get-Content -Raw (Join-Path $staging "app\server.mjs")
+if ($servidorEmpacotado -notmatch 'CABECALHOS_CORS_PERMITIDOS[\s\S]{0,400}x-ultrapdv-dispositivo') {
+  Write-Fail "O server.mjs empacotado nao autoriza x-ultrapdv-dispositivo."
+  exit 1
+}
+if ($servidorEmpacotado -match 'Access-Control-Allow-Origin"\s*=\s*"\*"') {
+  Write-Fail "O server.mjs empacotado libera qualquer origem."
+  exit 1
+}
+$tefEmpacotado = Get-Content -Raw (Join-Path $staging "app\tef.mjs")
+if ($tefEmpacotado -notmatch "validarPastaConfirmada" -or $tefEmpacotado -notmatch "mensagemRetornoBiblioteca") {
+  Write-Fail "O Connector empacotado nao valida a pasta confirmada nem preserva o codigo do PW_iInit."
+  exit 1
+}
+$pastaEmpacotada = Get-Content -Raw (Join-Path $staging "app\tef-pasta.mjs")
+$inicioValidacao = $pastaEmpacotada.IndexOf("export async function validarPastaConfirmada")
+$fimValidacao = $pastaEmpacotada.IndexOf("export async function testarGravacaoOperacional")
+if ($inicioValidacao -lt 0 -or $fimValidacao -le $inicioValidacao) {
+  Write-Fail "A validacao da pasta confirmada nao foi empacotada."
+  exit 1
+}
+$validacaoEmpacotada = $pastaEmpacotada.Substring($inicioValidacao, $fimValidacao - $inicioValidacao)
+if ($validacaoEmpacotada.Contains("testarGravacaoPasta") -or $validacaoEmpacotada.Contains("icacls")) {
+  Write-Fail "A validacao da pasta confirmada ainda cria arquivo temporario ou executa icacls."
+  exit 1
+}
+$prepararEmpacotado = Get-Content -Raw (Join-Path $staging "app\tef-preparar-pasta.mjs")
+if ($prepararEmpacotado.Contains("UltraPDV-TEF") -or $prepararEmpacotado.Contains("validarPastaConfirmada")) {
+  Write-Fail "A preparacao do instalador nao pode redefinir a pasta personalizada."
+  exit 1
 }
 & $nodeExe (Join-Path $installerDir "empacotar-app.mjs") --verificar (Join-Path $staging "app")
 if ($LASTEXITCODE -ne 0) {
@@ -300,4 +422,4 @@ Write-Host "Arquivo: $setupOut"
 Write-Host ("Tamanho: {0:N1} MB ({1} bytes)" -f ($setupInfo.Length / 1MB), $setupInfo.Length)
 Write-Host ("Data: {0:yyyy-MM-dd HH:mm:ss}" -f $setupInfo.LastWriteTime)
 Write-Host "SHA256: $sha"
-Write-Host "Proximo passo: encerre o agente de desenvolvimento e instale este Setup como cliente."
+Write-Host "Pacote local pronto. Nao execute o Setup nesta etapa."

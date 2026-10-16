@@ -9,8 +9,10 @@ import {
   concluirSincronizacaoLocal,
   descreverRecusaVincular,
   lerRecusaVincular,
+  mensagemVinculoConfirmado,
   montarCorpoVincular,
   planejarSincronizacaoVinculo,
+  versaoInformaIdentidadeFiscal,
   type PedidoSincronizacaoVinculo,
   type VinculoAutorizado,
 } from "./sincronizar-vinculo";
@@ -114,6 +116,10 @@ test("sincronização preserva código lógico, terminal e chave e troca só o p
       terminalCodigo: "117473",
       pontoCaptura: "117473",
       estabelecimento: "SMARTCELL",
+      informaIdentidadeFiscal: false,
+      ambiente: "",
+      servidor: "",
+      cnpjInformado: false,
     },
     vinculoAutorizado: decisao.vinculo,
   });
@@ -172,6 +178,10 @@ test("pendência, reconciliação e processo ativo com ponto antigo bloqueiam a 
       terminalCodigo: "117473",
       pontoCaptura: "117473",
       estabelecimento: "SMARTCELL",
+      informaIdentidadeFiscal: false,
+      ambiente: "",
+      servidor: "",
+      cnpjInformado: false,
     },
     vinculoAutorizado: autorizado,
   });
@@ -243,6 +253,183 @@ test("falha de gravação pode ser repetida e o status oficial recupera a confir
   }
 });
 
+function localFiscal(parcial: {
+  ambiente?: string;
+  servidor?: string;
+  cnpjInformado?: boolean;
+  pontoCaptura?: string;
+} = {}) {
+  return {
+    vinculado: true,
+    empresaId: EMPRESA,
+    terminalCodigo: "117473",
+    pontoCaptura: parcial.pontoCaptura ?? "6696546",
+    estabelecimento: "SMARTCELL",
+    informaIdentidadeFiscal: true,
+    ambiente: parcial.ambiente ?? "",
+    servidor: parcial.servidor ?? "",
+    cnpjInformado: parcial.cnpjInformado === true,
+  };
+}
+
+test("vínculo antigo com ponto certo continua incompleto no Connector 1.3.5", () => {
+  const autorizado = planejarSincronizacaoVinculo(pedido()).vinculo as VinculoAutorizado;
+  const antigo = avaliarProcessoAntesDeGravar({
+    processo: processoParado(),
+    vinculoLocal: localFiscal(),
+    vinculoAutorizado: autorizado,
+  });
+  assert.equal(antigo.efeito, "gravar");
+  assert.deepEqual(antigo.divergencias, ["ambiente", "servidor", "cnpj"]);
+  const corpo = montarCorpoVincular("AB23CD45EF", autorizado, { identidadeFiscal: true });
+  assert.equal(corpo.ambiente, "producao");
+  assert.equal(corpo.servidor, "tef.producao.example:31735");
+  assert.equal(corpo.cnpj, CNPJ);
+  assert.equal(corpo.terminalCodigo, "117473");
+  assert.equal(corpo.terminalId, TERMINAL);
+  assert.equal("chavePrivada" in corpo, false);
+  const confirmado = concluirSincronizacaoLocal({
+    gravacaoOk: true,
+    status: {
+      vinculo: {
+        vinculado: true,
+        empresaId: EMPRESA,
+        terminalCodigo: "117473",
+        pontoCaptura: "6696546",
+        estabelecimento: "SMARTCELL",
+        ambiente: "",
+        servidor: "",
+        cnpjInformado: false,
+      },
+      tef: { processo: "parado", agente: { versao: "1.3.5" } },
+    },
+    esperado: autorizado,
+    exigirIdentidadeFiscal: true,
+  });
+  assert.equal(confirmado.efeito, "falhou");
+  if (confirmado.efeito === "falhou") {
+    assert.deepEqual(confirmado.divergencias, ["ambiente", "servidor", "cnpj"]);
+    assert.match(confirmado.motivo, /Ainda divergem: ambiente, servidor, CNPJ/);
+  }
+  assert.equal(versaoInformaIdentidadeFiscal("1.3.5"), true);
+  assert.equal(versaoInformaIdentidadeFiscal("1.3.4"), false);
+  assert.equal(versaoInformaIdentidadeFiscal("1.3.3"), false);
+});
+
+test("vínculo completo só é oficial depois que o status confirma ambiente, servidor e CNPJ", () => {
+  const autorizado = planejarSincronizacaoVinculo(pedido()).vinculo as VinculoAutorizado;
+  const completo = avaliarProcessoAntesDeGravar({
+    processo: processoParado(),
+    vinculoLocal: localFiscal({
+      ambiente: "producao",
+      servidor: "tef.producao.example:31735",
+      cnpjInformado: true,
+    }),
+    vinculoAutorizado: autorizado,
+  });
+  assert.equal(completo.efeito, "ja_sincronizado");
+  assert.deepEqual(completo.divergencias, []);
+  const status = {
+    vinculo: {
+      vinculado: true,
+      empresaId: EMPRESA,
+      terminalCodigo: "117473",
+      pontoCaptura: "6696546",
+      estabelecimento: "SMARTCELL",
+      ambiente: "producao",
+      servidor: "tef.producao.example:31735",
+      cnpjInformado: true,
+    },
+    tef: { processo: "parado", agente: { versao: "1.3.5" } },
+  };
+  const confirmado = concluirSincronizacaoLocal({
+    gravacaoOk: true,
+    status,
+    esperado: autorizado,
+    exigirIdentidadeFiscal: true,
+  });
+  assert.equal(confirmado.efeito, "sincronizado");
+  if (confirmado.efeito === "sincronizado") {
+    assert.equal(confirmado.gravado.identidadeFiscal, true);
+    assert.equal(confirmado.gravado.terminalCodigo, "117473");
+    assert.equal(
+      mensagemVinculoConfirmado("sincronizado", confirmado.gravado.identidadeFiscal),
+      "Vínculo oficial sincronizado. Nenhuma venda foi ativada."
+    );
+  }
+});
+
+test("Connector 1.3.3 e 1.3.4 sincronizam o ponto sem receber a identidade fiscal", () => {
+  const autorizado = planejarSincronizacaoVinculo(pedido()).vinculo as VinculoAutorizado;
+  const legado = avaliarProcessoAntesDeGravar({
+    processo: processoParado(),
+    vinculoLocal: {
+      vinculado: true,
+      empresaId: EMPRESA,
+      terminalCodigo: "117473",
+      pontoCaptura: "6696546",
+      estabelecimento: "SMARTCELL",
+      informaIdentidadeFiscal: false,
+      ambiente: "",
+      servidor: "",
+      cnpjInformado: false,
+    },
+    vinculoAutorizado: autorizado,
+  });
+  assert.equal(legado.efeito, "ja_sincronizado");
+  const corpo = montarCorpoVincular("AB23CD45EF", autorizado);
+  assert.equal("ambiente" in corpo, false);
+  assert.equal("cnpj" in corpo, false);
+  assert.equal("servidor" in corpo, false);
+  const confirmado = concluirSincronizacaoLocal({
+    gravacaoOk: true,
+    status: {
+      vinculo: {
+        vinculado: true,
+        empresaId: EMPRESA,
+        terminalCodigo: "117473",
+        pontoCaptura: "6696546",
+        estabelecimento: "SMARTCELL",
+      },
+      tef: { processo: "parado", agente: { versao: "1.3.4" } },
+    },
+    esperado: autorizado,
+  });
+  assert.equal(confirmado.efeito, "sincronizado");
+  if (confirmado.efeito === "sincronizado") {
+    assert.equal(confirmado.gravado.identidadeFiscal, false);
+    assert.doesNotMatch(
+      mensagemVinculoConfirmado("ja_sincronizado", false),
+      /Vínculo oficial sincronizado/
+    );
+  }
+});
+
+test("falha de gravação no Connector 1.3.5 não confirma vínculo incompleto", () => {
+  const autorizado = planejarSincronizacaoVinculo(pedido()).vinculo as VinculoAutorizado;
+  const semServidor = planejarSincronizacaoVinculo(
+    pedido({ config: { ...pedido().config, servidor: "" } })
+  );
+  assert.equal(semServidor.efeito, "recusar");
+  assert.match(semServidor.motivo, /servidor oficial/);
+  const falha = concluirSincronizacaoLocal({
+    gravacaoOk: false,
+    recusa: { httpStatus: 500, erro: "Não foi possível gravar o vínculo." },
+    status: {
+      vinculo: localFiscal(),
+      tef: { processo: "parado", agente: { versao: "1.3.5" } },
+    },
+    esperado: autorizado,
+    exigirIdentidadeFiscal: true,
+  });
+  assert.equal(falha.efeito, "falhou");
+  if (falha.efeito === "falhou") {
+    assert.equal(falha.podeRepetir, true);
+    assert.match(falha.motivo, /HTTP 500/);
+    assert.deepEqual(falha.divergencias, ["ambiente", "servidor", "cnpj"]);
+  }
+});
+
 test("a ação reutiliza /tef/vincular e não instala, não revoga e não grava o banco", () => {
   const ui = fonte("components/pdv/tef-pareamento-form.tsx");
   const servico = fonte("lib/pdv/tef/servico.ts");
@@ -253,7 +440,11 @@ test("a ação reutiliza /tef/vincular e não instala, não revoga e não grava 
   assert.match(sincronizar, /lerStatusConnector/);
   assert.match(ui, /async function lerStatusConnector[\s\S]*\/tef\/status/);
   assert.doesNotMatch(sincronizar, /\/tef\/instalar|\/tef\/inicializar|PWOPER_|rotacionar|revogar/);
-  assert.match(sincronizar, /montarCorpoVincular\(codigoSincronizacao, preparado\.vinculo\)/);
+  assert.match(sincronizar, /montarCorpoVincular\(codigoSincronizacao, preparado\.vinculo/);
+  assert.match(sincronizar, /identidadeFiscal: exigeFiscal/);
+  assert.match(sincronizar, /mensagemVinculoConfirmado/);
+  assert.doesNotMatch(sincronizar, /já está com o vínculo oficial/);
+  assert.match(ui, /ainda diverge do cadastro oficial/);
   assert.match(sincronizar, /lerGravacaoVincular/);
   assert.match(sincronizar, /recusa/);
   assert.doesNotMatch(sincronizar, /pontoCaptura: terminal|pontoCaptura: ponto|empresaId: props/);

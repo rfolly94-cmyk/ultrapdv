@@ -11,6 +11,7 @@ import {
   centavosParaInputPdv,
   formaAposNavegacaoPdv,
   pagamentosAberturaPdv,
+  preencherRestanteAoSelecionarPdv,
   textoParaCentavosPdv,
 } from "./distribuicao-pagamento-pdv";
 
@@ -214,8 +215,23 @@ test("7. F2 no pagamento continua concluindo a venda", () => {
   assert.match(shell, /data-pagamento-formas/);
   assert.match(shell, /dinheiroAutomatico/);
   assert.match(shell, /formaAposNavegacaoPdv/);
+  assert.match(shell, /preencherRestanteAoSelecionarPdv/);
+  assert.match(shell, /restanteCentavos === 0/);
   assert.doesNotMatch(
     shell.slice(shell.indexOf("data-pagamento-formas")),
     /usarRestante\(forma\.id\)/
   );
+});
+
+test("selecionar débito com dinheiro automático preenche o restante da venda", () => {
+  const abertura = pagamentosAberturaPdv({ formas, totalCentavos: 12500 });
+  const selecionado = preencherRestanteAoSelecionarPdv({
+    formas,
+    pagamentos: abertura.pagamentos,
+    totalCentavos: 12500,
+    dinheiroAutomatico: abertura.dinheiroAutomatico,
+    formaPagamentoId: "debito",
+  });
+  assert.equal(valor(selecionado.pagamentos, "debito"), 12500);
+  assert.equal(valor(selecionado.pagamentos, "dinheiro"), 0);
 });

@@ -1,8 +1,14 @@
 import { cnpjCredenciadoraPayGo } from "@/lib/fiscal/tef/credenciadoras-paygo";
+import type { DecisaoAmbientePagamento } from "@/lib/pdv/tef/ambiente-transacao";
 import { dadosFiscaisProvaTef } from "@/lib/pdv/tef/prova";
+import {
+  decidirModalidadeOficial,
+  MENSAGEM_MODALIDADE_INDETERMINADA,
+} from "@/lib/pdv/tef/modalidade-efetiva";
 import {
   decidirRecuperacao,
   interpretarResultadoConector,
+  resultadoPixPayGo,
   STATUS_TEF_ABERTOS,
   type ModalidadeTef,
   type ResultadoConectorTef,
@@ -16,6 +22,9 @@ export type OperacaoTef = {
   identificador: string;
   idempotencyKey: string;
   modalidade: ModalidadeTef;
+  modalidadeSolicitada?: ModalidadeTef | null;
+  modalidadeEfetiva?: ModalidadeTef | null;
+  tipoCartaoPayGo?: number | null;
   valorCentavos: number;
   status: StatusTef;
   nsu: string | null;
@@ -32,6 +41,11 @@ export type OperacaoTef = {
   cnpjCredenciadora?: string | null;
   cnpjRecebedor?: string | null;
   instituicao?: string | null;
+  ambienteEfetivo?: "producao" | "homologacao" | "desconhecido" | "";
+  pontoEfetivo?: string;
+  hostEfetivo?: string;
+  comprovanteSha256?: string;
+  motivoAmbiente?: string;
 };
 
 export type TerminalTef = {
@@ -130,11 +144,36 @@ function publica(operacao: OperacaoTef) {
     valorCentavos: operacao.valorCentavos,
     valor: operacao.valorCentavos / 100,
     modalidade: operacao.modalidade,
+    modalidadeSolicitada: operacao.modalidadeSolicitada ?? operacao.modalidade,
+    modalidadeEfetiva: operacao.modalidadeEfetiva ?? null,
+    avisoModalidade:
+      operacao.modalidadeEfetiva &&
+      operacao.modalidadeEfetiva !== (operacao.modalidadeSolicitada ?? operacao.modalidade)
+        ? operacao.modalidadeEfetiva === "credito"
+          ? "Pagamento aprovado no crédito"
+          : "Pagamento aprovado no débito"
+        : "",
     status: operacao.status,
     terminalId: operacao.terminalId,
     teste: operacao.teste,
+    diagnostico: operacao.motivoAmbiente || "",
+    proibirDesfazimento: operacao.status === "reconciliacao" || operacao.teste === true,
     jaAutorizada: operacao.status === "autorizada" || operacao.status === "vinculada",
   };
+}
+
+function respostaOperacao(operacao: OperacaoTef, repetida: boolean) {
+  return { ok: true as const, repetida, ...publica(operacao) };
+}
+
+function bloqueioAmbienteReceita(operacao: OperacaoTef) {
+  if (operacao.ambienteEfetivo === "producao" && !operacao.teste) {
+    return null;
+  }
+  if (operacao.teste || operacao.ambienteEfetivo === "homologacao") {
+    return "Esta transação é de homologação e não pode compor uma venda nem uma NFC-e de produção.";
+  }
+  return "Esta transação TEF não foi comprovada como produção. A venda não foi finalizada. Abra Configurações, Financeiro, TEF para o diagnóstico.";
 }
 
 export function salvarConfigEmpresa(
@@ -306,8 +345,10 @@ export function iniciarOperacao(
     return {
       ok: true as const,
       repetida: true,
+      recuperada: true,
       parear: true,
       emAndamento: existente.status === "iniciada",
+      cobrarDeNovo: false,
       terminalCodigo: terminal.terminal.codigo,
       desafio: "",
       vinculoSegredo: "",
@@ -316,22 +357,41 @@ export function iniciarOperacao(
   }
 
   const aberta = memoria.operacoes.find((item) => {
-    if (item.terminalId !== terminal.terminal.id) {
+    if (item.empresaId !== pedido.empresaId) {
       return false;
     }
-    if (
+    const mesmoTerminal = item.terminalId === terminal.terminal.id;
+    const mesmoGrupo =
+      Boolean(pedido.grupoVenda) && item.vendaIdempotencyKey === pedido.grupoVenda;
+    if (!mesmoTerminal && !mesmoGrupo) {
+      return false;
+    }
+    return (
       item.status === "iniciada" ||
+      item.status === "autorizada" ||
+      item.status === "vinculada" ||
       item.status === "desconhecida" ||
       item.status === "desfazimento_pendente" ||
       item.status === "reconciliacao"
-    ) {
-      return true;
-    }
-    const mesmoGrupo =
-      Boolean(pedido.grupoVenda) && item.vendaIdempotencyKey === pedido.grupoVenda;
-    return (item.status === "autorizada" || item.status === "vinculada") && !mesmoGrupo;
+    );
   });
   if (aberta) {
+    const mesmoGrupo =
+      Boolean(pedido.grupoVenda) && aberta.vendaIdempotencyKey === pedido.grupoVenda;
+    if (mesmoGrupo) {
+      return {
+        ok: true as const,
+        repetida: true,
+        recuperada: true,
+        parear: false,
+        emAndamento: aberta.status === "iniciada",
+        cobrarDeNovo: false,
+        terminalCodigo: terminal.terminal.codigo,
+        desafio: "",
+        vinculoSegredo: "",
+        ...publica(aberta),
+      };
+    }
     return erro(
       "TERMINAL_OCUPADO",
       "Este terminal TEF já está em uma operação."
@@ -345,6 +405,9 @@ export function iniciarOperacao(
     identificador: pedido.identificador,
     idempotencyKey: pedido.idempotencyKey,
     modalidade: pedido.modalidade,
+    modalidadeSolicitada: pedido.modalidade,
+    modalidadeEfetiva: null,
+    tipoCartaoPayGo: null,
     valorCentavos: pedido.valorCentavos,
     status: "iniciada",
     nsu: null,
@@ -362,8 +425,10 @@ export function iniciarOperacao(
   return {
     ok: true as const,
     repetida: false,
+    recuperada: false,
     parear: true,
     emAndamento: false,
+    cobrarDeNovo: true,
     terminalCodigo: terminal.terminal.codigo,
     desafio: operacao.desafio,
     vinculoSegredo: pedido.vinculoSegredo ?? "",
@@ -378,6 +443,11 @@ export function registrarResultado(
     operacaoId: string;
     resultado: ResultadoConectorTef | null;
     provaValida?: boolean;
+    origem?: DecisaoAmbientePagamento;
+    modalidadeOficial?: {
+      provaValida: boolean;
+      tipoCartao: unknown;
+    };
   }
 ) {
   const operacao = acharDaEmpresa(memoria, input.empresaId, input.operacaoId);
@@ -385,11 +455,7 @@ export function registrarResultado(
     return erro("NAO_ENCONTRADA", "Operação TEF não encontrada.");
   }
   if (operacao.status !== "iniciada") {
-    return {
-      ok: true as const,
-      repetida: true,
-      ...publica(operacao),
-    };
+    return respostaOperacao(operacao, true);
   }
   const provaValida = input.provaValida === true;
   const interpretado = interpretarResultadoConector(
@@ -418,8 +484,59 @@ export function registrarResultado(
   operacao.cnpjRecebedor =
     provaValida && fiscal.cnpjRecebedor.length === 14 ? fiscal.cnpjRecebedor : null;
   operacao.instituicao = provaValida ? fiscal.instituicao || null : null;
-  operacao.teste = operacao.teste || interpretado.teste;
-  return { ok: true as const, repetida: false, ...publica(operacao) };
+  if (interpretado.status === "autorizada") {
+    const origem = input.origem;
+    const efeito = origem?.efeito ?? "desconhecido";
+    operacao.ambienteEfetivo = efeito;
+    operacao.pontoEfetivo = origem?.ponto ?? "";
+    operacao.hostEfetivo = origem?.host ?? "";
+    operacao.comprovanteSha256 = origem?.hash ?? "";
+    operacao.motivoAmbiente = (origem?.diagnostico || origem?.motivo || "").slice(0, 400);
+    if (efeito === "producao") {
+      operacao.status = "autorizada";
+      operacao.teste = /^teste/i.test(operacao.identificador);
+    } else if (efeito === "homologacao" && origem?.fluxoTeste === true) {
+      operacao.status = "autorizada";
+      operacao.teste = true;
+    } else {
+      operacao.status = "reconciliacao";
+      operacao.teste = false;
+      if (!operacao.motivoAmbiente) {
+        operacao.motivoAmbiente =
+          "O ambiente desta transação não foi comprovado. A venda e a NFC-e não foram concluídas. Não cobre novamente. Abra Configurações, Financeiro, TEF para o diagnóstico do terminal.";
+      }
+    }
+    if (operacao.status === "autorizada") {
+      const pix = resultadoPixPayGo(input.resultado);
+      if (!input.modalidadeOficial) {
+        if (!pix) {
+          operacao.status = "reconciliacao";
+          operacao.teste = false;
+          operacao.modalidadeEfetiva = null;
+          operacao.tipoCartaoPayGo = null;
+          operacao.motivoAmbiente = MENSAGEM_MODALIDADE_INDETERMINADA;
+        }
+      } else {
+        const decisao = decidirModalidadeOficial({
+          solicitada: operacao.modalidadeSolicitada ?? operacao.modalidade,
+          tipoCartao: input.modalidadeOficial.tipoCartao,
+          provaValida: input.modalidadeOficial.provaValida,
+          pix,
+        });
+        operacao.modalidadeSolicitada = decisao.modalidadeSolicitada;
+        operacao.modalidadeEfetiva = decisao.modalidadeEfetiva;
+        operacao.tipoCartaoPayGo = decisao.tipoCartao;
+        if (decisao.conciliacao) {
+          operacao.status = "reconciliacao";
+          operacao.teste = false;
+          operacao.motivoAmbiente = decisao.motivo ?? "";
+        } else if (decisao.modalidadeEfetiva) {
+          operacao.modalidade = decisao.modalidadeEfetiva;
+        }
+      }
+    }
+  }
+  return respostaOperacao(operacao, false);
 }
 
 export function vincularVenda(
@@ -445,6 +562,10 @@ export function vincularVenda(
       "CONFIRMACAO_BLOQUEADA",
       "Esta transação TEF não pode ser vinculada à venda."
     );
+  }
+  const ambienteVenda = bloqueioAmbienteReceita(operacao);
+  if (ambienteVenda) {
+    return erro("CONFIRMACAO_BLOQUEADA", ambienteVenda);
   }
   if (operacao.vendaId && operacao.vendaId !== input.vendaId) {
     return erro("CONFLITO", "A operação TEF já está vinculada a outra venda.");
@@ -487,6 +608,10 @@ export function reservarOperacoesParaVenda(
         "CONFIRMACAO_BLOQUEADA",
         "Há pagamento com cartão sem TEF autorizado para esta venda."
       );
+    }
+    const ambienteReserva = bloqueioAmbienteReceita(operacao);
+    if (ambienteReserva) {
+      return erro("CONFIRMACAO_BLOQUEADA", ambienteReserva);
     }
     if (operacao.usuarioId && operacao.usuarioId !== input.usuarioId) {
       return erro(
@@ -561,6 +686,10 @@ export function marcarConfirmada(
   const operacao = acharDaEmpresa(memoria, input.empresaId, input.operacaoId);
   if (!operacao || operacao.status !== "vinculada" || operacao.teste || !operacao.vendaId) {
     return erro("CONFIRMACAO_BLOQUEADA", "A confirmação financeira do TEF não foi liberada.");
+  }
+  const ambienteConfirmacao = bloqueioAmbienteReceita(operacao);
+  if (ambienteConfirmacao) {
+    return erro("CONFIRMACAO_BLOQUEADA", ambienteConfirmacao);
   }
   if (input.provaValida !== true) {
     return erro(
@@ -724,6 +853,32 @@ export function marcarDesfeita(
   return { ok: true as const, ...publica(operacao) };
 }
 
+export function marcarPendenciaAdministrativa(
+  memoria: MemoriaTef,
+  input: { empresaId: string; operacaoId: string; motivo: string }
+) {
+  const operacao = acharDaEmpresa(memoria, input.empresaId, input.operacaoId);
+  if (!operacao) {
+    return erro("NAO_ENCONTRADA", "Operação TEF não encontrada.");
+  }
+  if (operacao.status === "reconciliacao") {
+    if (!operacao.motivoAmbiente && input.motivo) {
+      operacao.motivoAmbiente = input.motivo.slice(0, 400);
+    }
+    return { ok: true as const, ...publica(operacao) };
+  }
+  if (operacao.status !== "autorizada" || operacao.vendaId) {
+    return erro(
+      "CONFIRMACAO_BLOQUEADA",
+      "Esta operação não admite pendência administrativa."
+    );
+  }
+  operacao.status = "reconciliacao";
+  operacao.teste = false;
+  operacao.motivoAmbiente = input.motivo.slice(0, 400);
+  return { ok: true as const, ...publica(operacao) };
+}
+
 export function listarPendencias(memoria: MemoriaTef, empresaId: string) {
   return memoria.operacoes
     .filter(
@@ -735,6 +890,12 @@ export function listarPendencias(memoria: MemoriaTef, empresaId: string) {
       status: item.status,
       valorCentavos: item.valorCentavos,
       modalidade: item.modalidade,
+      modalidadeSolicitada: item.modalidadeSolicitada ?? item.modalidade,
+      modalidadeEfetiva: item.modalidadeEfetiva ?? null,
+      tipoCartaoPayGo: item.tipoCartaoPayGo ?? null,
+      diagnostico: item.motivoAmbiente || "",
+      vendaIdempotencyKey: item.vendaIdempotencyKey,
+      proibirDesfazimento: item.status === "reconciliacao" || item.teste === true,
       vendaId: item.vendaId,
       identificador: item.identificador,
       terminalId: item.terminalId,

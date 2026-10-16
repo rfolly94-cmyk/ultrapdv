@@ -151,8 +151,8 @@ test("CASO 6: venda finalizada + recurso false não envia ao agente", () => {
   });
   assert.deepEqual(destino, { tipo: "nenhum" });
   const shell = fonte("components/pdv/pdv-shell.tsx");
-  const posFinalizar = shell.indexOf("await finalizarVendaPdv");
-  const posImpressao = shell.indexOf("await tentarImpressaoPosVenda");
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
+  const posImpressao = shell.indexOf("iniciarImpressaoSemBloquear(", posFinalizar);
   assert.ok(posImpressao > posFinalizar);
   assert.match(shell, /conectorLiberado/);
   assert.doesNotMatch(shell, /rollback/);

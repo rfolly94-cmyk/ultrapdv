@@ -117,6 +117,119 @@ export function mensagemIdentidadeTef(dispositivoId: string) {
   });
 }
 
+export type CamposAmbienteTef = {
+  desafio: string;
+  identificador: string;
+  valorCentavos: number;
+  nsu: string;
+  autorizacao: string;
+  rede: string;
+  finalizacao: string;
+  pontoCaptura: string;
+  host: string;
+  comprovanteSha256: string;
+};
+
+/**
+ * Prova separada da mensagem ultrapdv-tef-v1.
+ * Cobre host, ponto e hash do comprovante.
+ * Manter igual a print-agent/src/tef-prova.mjs.
+ */
+export function mensagemAmbienteTef(campos: CamposAmbienteTef) {
+  return [
+    "ultrapdv-tef-ambiente-v1",
+    campo(campos.desafio),
+    campo(campos.identificador),
+    String(Math.round(campos.valorCentavos)),
+    campo(campos.nsu),
+    campo(campos.autorizacao),
+    campo(campos.rede),
+    campo(campos.finalizacao),
+    campo(campos.pontoCaptura),
+    campo(campos.host),
+    campo(campos.comprovanteSha256),
+  ].join("\n");
+}
+
+export function verificarAmbienteTef(
+  chavePublicaPem: string,
+  campos: CamposAmbienteTef,
+  prova: string
+) {
+  if (!chavePublicaPem || !prova) {
+    return false;
+  }
+  try {
+    const publica = createPublicKey(chavePublicaPem);
+    return verify(
+      null,
+      Buffer.from(mensagemAmbienteTef(campos)),
+      publica,
+      Buffer.from(prova, "base64")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function assinarAmbienteTef(chavePrivadaPem: string, campos: CamposAmbienteTef) {
+  const privada = createPrivateKey(chavePrivadaPem);
+  return sign(null, Buffer.from(mensagemAmbienteTef(campos)), privada).toString("base64");
+}
+
+export type CamposModalidadeTef = {
+  desafio: string;
+  identificador: string;
+  valorCentavos: number;
+  nsu: string;
+  autorizacao: string;
+  tipoCartao: number | null;
+};
+
+/**
+ * Prova separada da mensagem ultrapdv-tef-v1.
+ * Cobre só o inteiro de PWINFO_CARDTYPE. Texto de comprovante não entra.
+ * Manter igual a print-agent/src/tef-prova.mjs.
+ */
+export function mensagemModalidadeTef(campos: CamposModalidadeTef) {
+  const tipo = campos.tipoCartao == null ? "" : String(campos.tipoCartao);
+  return [
+    "ultrapdv-tef-modalidade-v1",
+    campo(campos.desafio),
+    campo(campos.identificador),
+    String(Math.round(campos.valorCentavos)),
+    campo(campos.nsu),
+    campo(campos.autorizacao),
+    tipo,
+  ].join("\n");
+}
+
+export function verificarModalidadeTef(
+  chavePublicaPem: string,
+  campos: CamposModalidadeTef,
+  prova: string
+) {
+  if (!chavePublicaPem || !prova) {
+    return false;
+  }
+  try {
+    const publica = createPublicKey(chavePublicaPem);
+    return verify(
+      null,
+      Buffer.from(mensagemModalidadeTef(campos)),
+      publica,
+      Buffer.from(prova, "base64")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function assinarModalidadeTef(chavePrivadaPem: string, campos: CamposModalidadeTef) {
+  const privada = createPrivateKey(chavePrivadaPem);
+  return sign(null, Buffer.from(mensagemModalidadeTef(campos)), privada).toString("base64");
+}
+
 export function hashSegredoVinculo(segredo: string) {
   return createHash("sha256").update(campo(segredo)).digest("hex");
 }

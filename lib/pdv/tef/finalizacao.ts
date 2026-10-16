@@ -5,11 +5,16 @@ import {
   operacaoManualAceita,
   type PoliticaCartaoTef,
 } from "@/lib/pdv/tef/cartao-checkout";
-import { classificarFormaTef, validarPagamentoMisto } from "@/lib/pdv/tef/regras";
+import {
+  formaDaModalidadeEfetiva,
+  mensagemFormaAusente,
+} from "@/lib/pdv/tef/modalidade-efetiva";
+import { classificarFormaTef, validarPagamentoMisto, type ModalidadeTef } from "@/lib/pdv/tef/regras";
 import { hashSegredoVinculo } from "@/lib/pdv/tef/prova";
 import {
   ErroTef,
   lerHabilitacaoTef,
+  marcarPendenciaFormaTefPersistida,
   vincularOperacoesTefNaVenda,
 } from "@/lib/pdv/tef/persistencia";
 
@@ -60,12 +65,12 @@ export async function validarTefNaFinalizacao(input: {
     if (bloqueio) {
       return bloqueio;
     }
-    return { ok: true as const, operacaoIds: [] as string[], segredos: {} };
+    return { ok: true as const, operacaoIds: [] as string[], segredos: {}, ajustes: [] };
   }
 
   const informouTef = input.pagamentos.some((pagamento) => pagamento.tefOperacaoId);
   if (!habilitacao.empresaHabilitada && !informouTef) {
-    return { ok: true as const, operacaoIds: [] as string[], segredos: {} };
+    return { ok: true as const, operacaoIds: [] as string[], segredos: {}, ajustes: [] };
   }
 
   if (habilitacao.migracaoPendente && informouTef) {
@@ -139,22 +144,100 @@ export async function validarTefNaFinalizacao(input: {
     ? await input.supabase
         .from("tef_operacoes")
         .select(
-          "id, empresa_id, modalidade, valor_centavos, status, venda_id, teste, nsu, autorizacao, rede, instituicao, bandeira_nome, usuario_id, segredo_vinculo_hash"
+          "id, empresa_id, modalidade, valor_centavos, status, venda_id, teste, nsu, autorizacao, rede, instituicao, bandeira_nome, usuario_id, segredo_vinculo_hash, ambiente_efetivo"
         )
         .eq("empresa_id", input.empresaId)
         .in("id", ids)
     : { data: [], error: null };
 
   if (erroOps) {
+    const detalhe = `${erroOps.code ?? ""} ${erroOps.message ?? ""}`;
     return {
       ok: false as const,
-      erro: "Não foi possível validar o TEF.",
+      erro: /42703|PGRST204|ambiente_efetivo/i.test(detalhe)
+        ? "A comprovação de ambiente do TEF ainda não está disponível. A venda não foi finalizada."
+        : "Não foi possível validar o TEF.",
+      operacaoIds: [] as string[],
+    };
+  }
+
+  const formasTef = (formas ?? []).map((item: Record<string, unknown>) => ({
+    id: String(item.id),
+    codigo: item.codigo ? String(item.codigo) : null,
+    nome: item.nome ? String(item.nome) : null,
+    tipo: item.tipo ? String(item.tipo) : null,
+    codigo_fiscal: item.codigo_fiscal ? String(item.codigo_fiscal) : null,
+    permite_fiado: item.permite_fiado === true,
+  }));
+  const ajustes: Array<{
+    indice: number;
+    formaPagamentoId: string;
+    aviso: string | null;
+  }> = [];
+  const parcelasAlinhadas = parcelasProva.map((parcela, indice) => {
+    if (!parcela.modalidade || !parcela.tefOperacaoId) {
+      return parcela;
+    }
+    const operacao = (operacoes ?? []).find(
+      (item: Record<string, unknown>) => String(item.id) === parcela.tefOperacaoId
+    );
+    const efetiva: ModalidadeTef | null =
+      operacao?.modalidade === "credito" || operacao?.modalidade === "debito"
+        ? operacao.modalidade
+        : null;
+    if (!efetiva || efetiva === parcela.modalidade) {
+      return parcela;
+    }
+    const forma = formaDaModalidadeEfetiva(
+      formasTef,
+      efetiva,
+      input.pagamentos[indice]?.formaPagamentoId
+    );
+    if (!forma) {
+      return parcela;
+    }
+    ajustes.push({
+      indice,
+      formaPagamentoId: forma.id,
+      aviso:
+        efetiva === "credito"
+          ? "Pagamento aprovado no crédito"
+          : "Pagamento aprovado no débito",
+    });
+    return { ...parcela, modalidade: efetiva };
+  });
+  const semForma = parcelasProva.find((parcela, indice) => {
+    if (!parcela.modalidade || !parcela.tefOperacaoId) {
+      return false;
+    }
+    const operacao = (operacoes ?? []).find(
+      (item: Record<string, unknown>) => String(item.id) === parcela.tefOperacaoId
+    );
+    const efetiva = operacao?.modalidade === "credito" || operacao?.modalidade === "debito"
+      ? operacao.modalidade
+      : null;
+    return Boolean(efetiva && efetiva !== parcela.modalidade && !ajustes.some((item) => item.indice === indice));
+  });
+  if (semForma) {
+    const operacao = (operacoes ?? []).find(
+      (item: Record<string, unknown>) => String(item.id) === semForma.tefOperacaoId
+    );
+    const efetiva = operacao?.modalidade === "credito" ? "credito" : "debito";
+    if (semForma.tefOperacaoId) {
+      await marcarPendenciaFormaTefPersistida({
+        empresaId: input.empresaId,
+        operacaoId: semForma.tefOperacaoId,
+      }).catch(() => undefined);
+    }
+    return {
+      ok: false as const,
+      erro: mensagemFormaAusente(efetiva),
       operacaoIds: [] as string[],
     };
   }
 
   const avaliacao = validarPagamentoMisto(
-    parcelasProva,
+    parcelasAlinhadas,
     (operacoes ?? []).map((linha: Record<string, unknown>) => ({
       id: String(linha.id),
       empresaId: String(linha.empresa_id),
@@ -172,6 +255,7 @@ export async function validarTefNaFinalizacao(input: {
       segredoVinculoHash: linha.segredo_vinculo_hash
         ? String(linha.segredo_vinculo_hash)
         : "",
+      ambienteEfetivo: linha.ambiente_efetivo ? String(linha.ambiente_efetivo) : "",
     })),
     input.empresaId
   );
@@ -184,7 +268,7 @@ export async function validarTefNaFinalizacao(input: {
       segredos[parcela.tefOperacaoId] = parcela.segredoVinculoHash;
     }
   }
-  return { ok: true as const, operacaoIds: avaliacao.operacaoIds, segredos };
+  return { ok: true as const, operacaoIds: avaliacao.operacaoIds, segredos, ajustes };
 }
 
 async function bloquearCartaoSeConsultaFalhou(input: {

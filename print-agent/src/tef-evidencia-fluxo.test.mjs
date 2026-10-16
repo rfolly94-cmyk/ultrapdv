@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   CODIGOS_TEF,
   GerenciadorTefNativo,
+  NOME_TEF_NATIVO,
   observacaoEvidenciaInstalacao,
 } from "./tef.mjs";
 import { mensagemEvidenciaInstalacao } from "./tef-prova.mjs";
@@ -104,7 +105,7 @@ function criarGerenciador() {
   let seq = 0;
   const gerenciador = new GerenciadorTefNativo({
     arquivoPendencia,
-    localizar: async () => ({ encontrado: true, caminho: "C:\\UltraPDV\\UltraPDVTef_NOVO.exe" }),
+    localizar: async () => ({ encontrado: true, caminho: `C:\\UltraPDV\\${NOME_TEF_NATIVO}` }),
     spawn: () => {
       const proc = criarProcesso();
       processos.push(proc);
@@ -123,6 +124,7 @@ function criarGerenciador() {
       }
     },
     limiteEncerramentoMs: 20,
+    instalacaoAutomatica: false,
   });
   return { gerenciador, processos, arquivoPendencia };
 }
@@ -148,11 +150,15 @@ async function deixarInicializado(gerenciador, processos, identidade = null) {
   await ate(() => processos.length === 1 && processos[0].stdin.partes.length === 1);
   const proc = processos[0];
   const pedido = ultimaLinha(proc);
+  const diretorio = pedido.dados?.diretorio;
   proc.emitirStdout(
     `${JSON.stringify({
       id: pedido.id,
       ok: true,
-      resultado: { inicializado: true },
+      resultado: {
+        inicializado: true,
+        ...(diretorio ? { diretorioBiblioteca: diretorio } : {}),
+      },
       erro: null,
     })}\n`
   );
@@ -391,6 +397,7 @@ test("ausência de parâmetros, outra empresa, outro ponto e outro ambiente não
     cnpj: "11222333000181",
     servidor: "tef.cliente.example:31735",
     estabelecimento: "LOJA NOVA",
+    diretorio: "sandbox",
   });
 
   const semParametros = await gerenciador.inicializar({ pontoCaptura: "200001" });

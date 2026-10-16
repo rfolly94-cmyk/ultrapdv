@@ -100,11 +100,11 @@ test("3. configuração ativa + aguardando reconciliação = recibo normal e NÃ
   assert.equal(acoes.hrefSituacaoFiscal, `/vendas/${vendaId}`);
 
   const shell = fonte("components/pdv/pdv-shell.tsx");
-  const posFinalizar = shell.indexOf("await finalizarVendaPdv");
-  const posEmitir = shell.indexOf("await chamarEmissaoNfceVenda");
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
+  const posEmitir = shell.indexOf("chamarEmissaoNfceVenda(");
   assert.ok(posEmitir > posFinalizar);
   assert.equal(
-    shell.split("await chamarEmissaoNfceVenda").length - 1,
+    shell.split("chamarEmissaoNfceVenda(").length - 1,
     1,
     "pós-venda não pode reenviar NFC-e"
   );

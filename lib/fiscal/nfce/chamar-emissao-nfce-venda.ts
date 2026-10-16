@@ -18,9 +18,11 @@ function texto(valor: unknown) {
 export async function chamarEmissaoNfceVenda(input: {
   vendaId: string;
   ambiente: 1 | 2;
+  correlacao?: string | null;
 }): Promise<ResultadoEmissaoNfceVenda> {
   const vendaId = texto(input.vendaId);
   const ambiente = input.ambiente === 1 ? 1 : 2;
+  const correlacao = texto(input.correlacao);
 
   try {
     const response = await fetch("/api/fiscal/geranet/nfce-emitir-venda", {
@@ -28,6 +30,7 @@ export async function chamarEmissaoNfceVenda(input: {
       headers: {
         "Content-Type": "application/json",
         "Idempotency-Key": vendaId,
+        ...(correlacao ? { "x-ultrapdv-correlacao": correlacao } : {}),
       },
       body: JSON.stringify({
         confirmar:

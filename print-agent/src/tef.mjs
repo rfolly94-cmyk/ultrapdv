@@ -4,8 +4,21 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { registrarLog } from "./log.mjs";
-import { assinarEvidenciaInstalacao } from "./tef-prova.mjs";
+import {
+  arquivoChaveTef,
+  assinarBibliotecaTef,
+  assinarEvidenciaInstalacao,
+  verificarBibliotecaTef,
+} from "./tef-prova.mjs";
 import { resolverRaizAgente } from "./raiz.mjs";
+import { carregarVersao } from "./versao.mjs";
+import {
+  avaliarIsolamentoProducao,
+  descreverDiretoriosAgente,
+  diretorioProducaoPgWeb,
+  tokenDiretorioBiblioteca,
+  tokenDiretorioInformado,
+} from "./tef-diretorio.mjs";
 import {
   arquivoPendenciaTef,
   gravarPendenciaTef,
@@ -16,8 +29,106 @@ import {
   removerPendenciaTef,
   STATUS_JOURNAL_TEF,
 } from "./tef-pendencia.mjs";
+import {
+  arquivoPastaTef,
+  instalarPastaPadrao,
+  planejarDiretorioInicial,
+  registrarResultadoAtivacao,
+  validarPastaConfirmada,
+} from "./tef-pasta.mjs";
 
-export const NOME_TEF_NATIVO = "UltraPDVTef_NOVO.exe";
+export const NOME_TEF_ANTIGO = "UltraPDVTef_NOVO.exe";
+
+export function nomeExecutavelTef(versao) {
+  const pedida = String(versao ?? "").trim();
+  const atual = carregarVersao(resolverRaizAgente());
+  if (pedida && pedida === atual.version && atual.agenteTef) {
+    return atual.agenteTef;
+  }
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(pedida);
+  if (!match) {
+    return "";
+  }
+  return `UltraPDVTef_${match[1]}${match[2]}${match[3]}.exe`;
+}
+
+export function versaoAgenteEsperada(raiz = resolverRaizAgente()) {
+  const version = String(carregarVersao(raiz).version ?? "").trim();
+  if (nomeExecutavelTef(version)) return version;
+  const propria = String(carregarVersao(resolverRaizAgente()).version ?? "").trim();
+  return nomeExecutavelTef(propria) ? propria : "";
+}
+
+export const NOME_TEF_NATIVO = nomeExecutavelTef(versaoAgenteEsperada());
+
+export function descreverAgenteTef({
+  caminho = "",
+  versaoEsperada = "",
+  antigoEncontrado = false,
+  diretorioBiblioteca = "",
+} = {}) {
+  const esperada = String(versaoEsperada ?? "").trim();
+  const nomeEsperado = nomeExecutavelTef(esperada);
+  const nome = path.basename(String(caminho ?? ""));
+  const compativel =
+    Boolean(nomeEsperado) && nome.toLowerCase() === nomeEsperado.toLowerCase();
+  let situacao = "ausente";
+  if (compativel) {
+    situacao = "selecionado";
+  } else if (antigoEncontrado) {
+    situacao = "antigo_ignorado";
+  } else if (caminho) {
+    situacao = "incompativel";
+  }
+  const caminhoSelecionado =
+    caminho && situacao !== "antigo_ignorado" ? path.resolve(String(caminho)) : "";
+  const diretorios = descreverDiretoriosAgente(
+    compativel ? caminhoSelecionado : "",
+    diretorioBiblioteca
+  );
+  return {
+    nome: nomeEsperado,
+    caminho: caminhoSelecionado,
+    versao: compativel ? esperada : "",
+    versaoEsperada: esperada,
+    compativel,
+    situacao,
+    ...diretorios,
+  };
+}
+
+export function mensagemRetornoBiblioteca(codigo, nome, caminho) {
+  const numero = Math.round(Number(codigo));
+  const rotulo = String(nome ?? "").trim();
+  const pasta = String(caminho ?? "").trim();
+  const codigoTexto = `${numero}${rotulo ? ` ${rotulo}` : ""}`;
+  const pastaTexto = pasta ? ` Pasta utilizada: ${pasta}.` : "";
+  if (numero === -2485 || rotulo === "PWRET_WRITERR") {
+    return `A PGWebLib recusou a gravação na inicialização. Código ${codigoTexto}.${pastaTexto} O TEF não foi marcado como pronto. Nenhum pagamento foi autorizado.`;
+  }
+  return `A PGWebLib não confirmou a inicialização. Código ${codigoTexto}.${pastaTexto} Nenhum pagamento foi autorizado.`;
+}
+
+export function mensagemFalhaInicializacao(erro) {
+  const texto = String(erro ?? "");
+  if (/grava|acesso negado|denied|EPERM|EACCES/i.test(texto)) {
+    return MENSAGEM_TEF_GRAVACAO_BIBLIOTECA;
+  }
+  if (texto.includes("TEF_DIRETORIO_AUSENTE")) {
+    return "A pasta de produção da PGWebLib não está em ProgramData. Nenhum arquivo foi criado e a inicialização não começou.";
+  }
+  if (texto.startsWith("TEF_INICIALIZACAO_FALHOU")) {
+    return "A PGWebLib não confirmou a inicialização. Nenhum pagamento, instalação ou manutenção foi iniciado.";
+  }
+  return texto.trim().slice(0, 400);
+}
+
+export function mensagemAgenteIncompativel(agente) {
+  if (agente?.situacao === "antigo_ignorado") {
+    return `O agente ${agente.nome} não foi encontrado. O executável antigo permanece instalado e não será usado. A cobrança não foi iniciada.`;
+  }
+  return `O agente carregado não é ${agente?.nome || "o desta versão"}. A cobrança não foi iniciada.`;
+}
 export const MENSAGEM_TEF_NAO_INSTALADO =
   "Módulo nativo TEF ainda não está instalado/configurado.";
 export const MENSAGEM_TEF_OCUPADO =
@@ -37,7 +148,13 @@ export const MENSAGEM_TEF_RECONCILIACAO_NECESSARIA =
 export const MENSAGEM_TEF_PINPAD_OCUPADO =
   "Terminal ocupado com operação financeira.";
 export const MENSAGEM_TEF_PINPAD_NAO_INICIALIZADO =
-  "Comunicação indisponível. O PayGoWeb não será reiniciado por este diagnóstico.";
+  "A PGWebLib ainda não foi inicializada. Este diagnóstico não a inicializa. O PayGoWeb não será reiniciado por este diagnóstico.";
+export const MENSAGEM_TEF_PINPAD_TIMEOUT =
+  "O teste de comunicação não retornou no tempo limite. A biblioteca não enviou código. Nenhuma cobrança foi iniciada.";
+export const MENSAGEM_TEF_PINPAD_EM_EXECUCAO =
+  "O teste de comunicação do pinpad ainda está em execução na biblioteca. Nenhuma cobrança foi iniciada.";
+export const MENSAGEM_TEF_GRAVACAO_BIBLIOTECA =
+  "A PGWebLib não conseguiu gravar na pasta de produção. Os arquivos existentes permanecem intactos. A inicialização não instalou, não cobrou e não confirmou transação.";
 export const MENSAGEM_TEF_INSTALACAO_BLOQUEADA =
   "A instalação de um ponto novo exige vínculo, credencial e parâmetros autorizados.";
 export const MENSAGEM_TEF_PARAMETROS_AUSENTES =
@@ -111,11 +228,26 @@ const CAMPOS_HTTP_TEF_PROIBIDOS = [
 const LIMITE_BUFFER_STDOUT = 1024 * 1024;
 const LIMITE_ENCERRAMENTO_MS = 700;
 
-function exeTefPermitido(caminho) {
+function exeTefPermitido(caminho, versao = versaoAgenteEsperada()) {
+  const nome = nomeExecutavelTef(versao);
   return (
-    path.basename(String(caminho ?? "")).toLowerCase() ===
-    NOME_TEF_NATIVO.toLowerCase()
+    Boolean(nome) &&
+    path.basename(String(caminho ?? "")).toLowerCase() === nome.toLowerCase()
   );
+}
+
+function diretoriosTefNativo(env = process.env, raiz = resolverRaizAgente()) {
+  const installDir = String(env.ULTRAPDV_INSTALL_DIR ?? "").trim();
+  const programFiles = String(env.ProgramFiles ?? "C:\\Program Files").trim();
+  const programFilesX86 = String(
+    env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)"
+  ).trim();
+  return [
+    path.join(raiz, "bin", "tef"),
+    installDir ? path.join(installDir, "bin", "tef") : "",
+    path.join(programFiles, "UltraPDV Connector", "bin", "tef"),
+    path.join(programFilesX86, "UltraPDV Connector", "bin", "tef"),
+  ].filter((item, indice, lista) => item && lista.indexOf(item) === indice);
 }
 
 function possuiCampo(objeto, campo) {
@@ -132,47 +264,44 @@ function textoChunk(chunk) {
   return String(chunk ?? "");
 }
 
-export function candidatosTefNativo(env = process.env, raiz = resolverRaizAgente()) {
-  const installDir = String(env.ULTRAPDV_INSTALL_DIR ?? "").trim();
-  const programFiles = String(env.ProgramFiles ?? "C:\\Program Files").trim();
-  const programFilesX86 = String(
-    env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)"
-  ).trim();
-
-  const lista = [
-    path.join(raiz, "bin", "tef", NOME_TEF_NATIVO),
-    installDir ? path.join(installDir, "bin", "tef", NOME_TEF_NATIVO) : "",
-    path.join(programFiles, "UltraPDV Connector", "bin", "tef", NOME_TEF_NATIVO),
-    path.join(
-      programFilesX86,
-      "UltraPDV Connector",
-      "bin",
-      "tef",
-      NOME_TEF_NATIVO
-    ),
-  ].filter((item) => item.length > 0);
-
-  return [...new Set(lista)];
+export function candidatosTefNativo(
+  env = process.env,
+  raiz = resolverRaizAgente(),
+  versao = versaoAgenteEsperada(raiz)
+) {
+  const nome = nomeExecutavelTef(versao);
+  if (!nome) {
+    return [];
+  }
+  return diretoriosTefNativo(env, raiz).map((pasta) => path.join(pasta, nome));
 }
 
 export async function localizarTefNativo(
   env = process.env,
   access = fs.access,
-  raiz = resolverRaizAgente()
+  raiz = resolverRaizAgente(),
+  versao = versaoAgenteEsperada(raiz)
 ) {
-  for (const candidato of candidatosTefNativo(env, raiz)) {
-    if (!exeTefPermitido(candidato)) {
-      continue;
+  let antigoEncontrado = false;
+  for (const pasta of diretoriosTefNativo(env, raiz)) {
+    const candidato = path.join(pasta, nomeExecutavelTef(versao));
+    if (exeTefPermitido(candidato, versao)) {
+      try {
+        await access(candidato);
+        return { encontrado: true, caminho: candidato, antigoEncontrado };
+      } catch {
+        // o nome esperado ainda não está nesta pasta
+      }
     }
     try {
-      await access(candidato);
-      return { encontrado: true, caminho: candidato };
+      await access(path.join(pasta, NOME_TEF_ANTIGO));
+      antigoEncontrado = true;
     } catch {
-      continue;
+      // ausência do executável antigo não é erro
     }
   }
 
-  return { encontrado: false, caminho: null };
+  return { encontrado: false, caminho: null, antigoEncontrado };
 }
 
 export function validarPayloadHttpTef(payload, acaoRota = "teste") {
@@ -265,13 +394,24 @@ export function validarDadosPagamento(dados) {
     };
   }
   for (const chave of Object.keys(dados)) {
-    if (chave !== "identificador" && chave !== "valor") {
+    if (chave !== "identificador" && chave !== "valor" && chave !== "preferencia") {
       return {
         ok: false,
         codigo: CODIGOS_TEF.PAYLOAD_RECUSADO,
         erro: "Payload recusado.",
       };
     }
+  }
+  const preferencia =
+    dados.preferencia === "debito" || dados.preferencia === "credito"
+      ? dados.preferencia
+      : "";
+  if (dados.preferencia != null && dados.preferencia !== "" && !preferencia) {
+    return {
+      ok: false,
+      codigo: CODIGOS_TEF.PAYLOAD_RECUSADO,
+      erro: "Payload recusado.",
+    };
   }
   const identificador =
     typeof dados.identificador === "string" ? dados.identificador.trim() : "";
@@ -301,6 +441,7 @@ export function validarDadosPagamento(dados) {
     ok: true,
     identificador,
     valor: centavos / 100,
+    preferencia,
   };
 }
 
@@ -694,6 +835,28 @@ function montarPedidoTef(pedido) {
       pedido.dados && typeof pedido.dados === "object" && !Array.isArray(pedido.dados)
         ? { ...pedido.dados }
         : {};
+    const diretorio = tokenDiretorioInformado(bruto.diretorio);
+    delete bruto.diretorio;
+    let diretorioPai = "";
+    if (acao === "inicializar" && Object.prototype.hasOwnProperty.call(bruto, "diretorioPai")) {
+      diretorioPai = typeof bruto.diretorioPai === "string" ? bruto.diretorioPai.trim() : "";
+      delete bruto.diretorioPai;
+      if (
+        !diretorioPai ||
+        diretorioPai !== diretorioPai.trim() ||
+        /[\0\r\n]/u.test(diretorioPai) ||
+        diretorioPai.includes("..") ||
+        diretorioPai.includes("/") ||
+        diretorioPai.startsWith("\\\\") ||
+        !/^[A-Za-z]:\\[^\\].+$/u.test(diretorioPai)
+      ) {
+        return {
+          ok: false,
+          codigo: CODIGOS_TEF.PAYLOAD_RECUSADO,
+          erro: "Payload recusado.",
+        };
+      }
+    }
     let credencial = "";
     if (acao === "instalar" && Object.prototype.hasOwnProperty.call(bruto, "credencial")) {
       credencial = credencialTecnicaInformada(bruto.credencial);
@@ -710,10 +873,17 @@ function montarPedidoTef(pedido) {
     if (!pedidoPonto.ok) {
       return pedidoPonto;
     }
+    const dados = credencial ? { ...pedidoPonto.dados, credencial } : { ...pedidoPonto.dados };
+    if (diretorio) {
+      dados.diretorio = diretorio;
+    }
+    if (diretorioPai) {
+      dados.diretorioPai = diretorioPai;
+    }
     return {
       ok: true,
       acao,
-      dados: credencial ? { ...pedidoPonto.dados, credencial } : pedidoPonto.dados,
+      dados,
     };
   }
   return { ok: true, acao, dados: {} };
@@ -791,11 +961,75 @@ export function observacaoEvidenciaInstalacao(resultado, autorizado, instalacaoI
   };
 }
 
+const HOST_BIBLIOTECA_SANDBOX = /tpgweb\.io|pos-transac-sb|sandbox|homolog/i;
+
+export function diagnosticarBibliotecaPayGo(obs = null) {
+  const ponto = String(obs?.pontoSolicitado ?? obs?.pontoCaptura ?? "").trim();
+  const servidor = String(obs?.servidorSolicitado ?? obs?.servidor ?? "").trim();
+  const ambiente = String(obs?.ambienteSolicitado ?? obs?.ambiente ?? "").trim();
+  const instalada =
+    obs?.bibliotecaInstalada === true ? true : obs?.bibliotecaInstalada === false ? false : null;
+  const setou = obs?.setEnvironmentExecutado === true;
+  const retorno = Number(obs?.retornoSetEnvironment);
+  const codigo = Number(obs?.codigoAmbiente);
+  const instalacao = obs?.instalacaoConcluida === true;
+  const diagnostico = {
+    pontoSolicitado: ponto,
+    servidorSolicitado: servidor,
+    ambienteSolicitado: ambiente,
+    bibliotecaInstalada: instalada,
+    setEnvironmentExecutado: setou,
+    retornoSetEnvironment: Number.isFinite(retorno) ? retorno : null,
+    codigoAmbiente: Number.isFinite(codigo) ? codigo : null,
+    instalacaoConcluida: instalacao,
+    diretorioBiblioteca: tokenDiretorioInformado(obs?.diretorioBiblioteca),
+    origemComprovacao: "ausente",
+    cobrancaPermitida: false,
+    motivo:
+      "A PGWebLib não comprovou o ponto e o servidor de produção. A cobrança não foi iniciada.",
+  };
+  if (!obs) {
+    return diagnostico;
+  }
+  if (ambiente !== "producao" || !ponto || !servidor) {
+    diagnostico.motivo =
+      "A inicialização não informou ponto, servidor e ambiente de produção. A cobrança não foi iniciada.";
+    return diagnostico;
+  }
+  if (HOST_BIBLIOTECA_SANDBOX.test(servidor) || codigo === 1) {
+    diagnostico.motivo =
+      "A biblioteca está apontada para homologação. A cobrança não foi iniciada.";
+    return diagnostico;
+  }
+  if (diagnostico.diretorioBiblioteca !== "producao") {
+    diagnostico.motivo =
+      "A PGWebLib não foi inicializada na pasta de produção. A pasta de homologação permanece sem uso para cobrança.";
+    return diagnostico;
+  }
+  if (obs?.evidenciaConfirmada === true && instalada === true && !setou) {
+    diagnostico.origemComprovacao = "instalacao_assinada";
+    diagnostico.cobrancaPermitida = true;
+    diagnostico.motivo =
+      `A instalação assinada comprova o ponto ${ponto} em ${servidor}. ` +
+      "A PGWebLib não informa o servidor de novo depois que o ponto já está instalado.";
+    return diagnostico;
+  }
+  if (instalada !== false || !setou || retorno !== 0 || codigo !== 0 || !instalacao) {
+    diagnostico.motivo =
+      "A PGWebLib manteve a instalação existente e não aplicou o servidor de produção. A cobrança não foi iniciada.";
+    return diagnostico;
+  }
+  diagnostico.origemComprovacao = "set_environment";
+  diagnostico.cobrancaPermitida = true;
+  diagnostico.motivo = `A biblioteca aplicou o ponto ${ponto} em ${servidor}.`;
+  return diagnostico;
+}
+
 export function apresentarStatusTef(tef = {}) {
   const processo = ESTADOS_PROCESSO_TEF.includes(tef?.processo)
     ? tef.processo
     : "nao_instalado";
-  return {
+  const base = {
     disponivel: processo === "executando",
     executavelEncontrado: tef?.executavelEncontrado === true,
     processo,
@@ -806,7 +1040,35 @@ export function apresentarStatusTef(tef = {}) {
     // A biblioteca não exporta consulta do ambiente em execução.
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
+    ...(typeof tef?.erroInicializacao === "string" && tef.erroInicializacao.trim()
+      ? { erroInicializacao: tef.erroInicializacao.trim().slice(0, 400) }
+      : {}),
+    ...(typeof tef?.diretorioTrabalho === "string" && tef.diretorioTrabalho.trim()
+      ? { diretorioTrabalho: tef.diretorioTrabalho.trim().slice(0, 260) }
+      : {}),
+    ...(typeof tef?.diretorioPwInit === "string" && tef.diretorioPwInit.trim()
+      ? { diretorioPwInit: tef.diretorioPwInit.trim().slice(0, 260) }
+      : {}),
+    ...(Number.isFinite(tef?.retornoPwInit)
+      ? {
+          retornoPwInit: Math.round(Number(tef.retornoPwInit)),
+          retornoPwInitNome: String(tef?.retornoPwInitNome ?? "").trim().slice(0, 40),
+        }
+      : {}),
+    agente:
+      tef?.agente && typeof tef.agente === "object" && !("caminhoAgente" in tef)
+        ? tef.agente
+        : descreverAgenteTef({
+            caminho: tef?.caminhoAgente ?? "",
+            versaoEsperada: tef?.versaoAgente ?? "",
+            antigoEncontrado: tef?.agenteAntigoEncontrado === true,
+            diretorioBiblioteca: tef?.diretorioBiblioteca ?? "",
+          }),
   };
+  if (tef?.biblioteca && typeof tef.biblioteca === "object") {
+    base.biblioteca = tef.biblioteca;
+  }
+  return base;
 }
 
 function timeoutDaAcao(acao) {
@@ -914,15 +1176,43 @@ export class GerenciadorTefNativo {
     this.filho = null;
     this.buffer = "";
     this.pendente = null;
+    this.chamadaNativaEmAberto = null;
+    this.ultimoPinpad = null;
     this.encerramentoControlado = false;
     this.promessaEncerrar = null;
     this.codigoSaida = null;
     this.inicializado = false;
     this.identidadeProcesso = null;
+    this.observacaoBiblioteca = null;
+    this.observacaoBruta = null;
+    this.bibliotecaVisivel = false;
+    this.versaoAgente = deps.versaoAgente ?? versaoAgenteEsperada();
+    this.agenteAntigoEncontrado = false;
+    this.caminhoObservado = "";
+    this.diretorioBiblioteca = "";
+    this.diretorioTrabalho = "";
+    this.diretorioPwInit = "";
+    this.retornoPwInit = null;
+    this.retornoPwInitNome = "";
+    this.erroInicializacao = "";
+    this.listarDiretorioBiblioteca = deps.listarDiretorioBiblioteca ?? ((pasta) => fs.readdir(pasta));
+    this.arquivoChave = deps.arquivoChave ?? arquivoChaveTef();
     this.credencialEphemera = "";
     this.transacaoPendente = null;
     this.pendenciaIlegivel = false;
     this.arquivoPendencia = deps.arquivoPendencia ?? arquivoPendenciaTef();
+    this.arquivoPasta = deps.arquivoPasta ?? arquivoPastaTef();
+    this.env = deps.env ?? process.env;
+    this.instalacaoAutomatica = deps.instalacaoAutomatica !== false;
+    this.instalarPastaPadrao = deps.instalarPastaPadrao ?? instalarPastaPadrao;
+    this.validarPastaConfirmada = deps.validarPastaConfirmada ?? validarPastaConfirmada;
+    this.concederPasta = deps.concederPasta;
+    this.restringirDiretorioPasta = deps.restringirDiretorioPasta;
+    this.classificarUnidadePasta = deps.classificarUnidadePasta;
+    this.restringirPasta = deps.restringirPasta;
+    this.arquivoBiblioteca =
+      deps.arquivoBiblioteca ??
+      path.join(path.dirname(this.arquivoPendencia), "tef-biblioteca.json");
     this.fsPendencia = deps.fsPendencia ?? fs;
     this.cargaPendencia = null;
     this.filaPendencia = Promise.resolve();
@@ -939,6 +1229,18 @@ export class GerenciadorTefNativo {
       reconciliacaoNecessaria:
         this.pendenciaIlegivel === true ||
         this.transacaoPendente?.reconciliacaoNecessaria === true,
+      biblioteca: this.bibliotecaVisivel ? this.observacaoBiblioteca : undefined,
+      caminhoAgente: this.executavelEncontrado
+        ? this.caminho
+        : this.caminhoObservado,
+      versaoAgente: this.versaoAgente,
+      agenteAntigoEncontrado: this.agenteAntigoEncontrado === true,
+      diretorioBiblioteca: this.diretorioBiblioteca,
+      diretorioTrabalho: this.diretorioTrabalho,
+      diretorioPwInit: this.diretorioPwInit,
+      retornoPwInit: this.retornoPwInit,
+      retornoPwInitNome: this.retornoPwInitNome,
+      erroInicializacao: this.erroInicializacao,
     });
   }
 
@@ -1042,6 +1344,23 @@ export class GerenciadorTefNativo {
   }
 
   bloqueioAntesDeEnviar(acao, correlationId = "") {
+    if (this.chamadaNativaEmAberto) {
+      const bloqueada =
+        acao === "pagamento" ||
+        acao === "confirmar" ||
+        acao === "desfazer" ||
+        acao === "instalar" ||
+        acao === "inicializar" ||
+        acao === "pinpad-diagnostico" ||
+        acao === "pinpad-testar-comunicacao";
+      if (bloqueada) {
+        return {
+          ok: false,
+          codigo: CODIGOS_TEF.OCUPADO,
+          erro: MENSAGEM_TEF_PINPAD_EM_EXECUCAO,
+        };
+      }
+    }
     const temJournal = this.pendenciaIlegivel === true || this.transacaoPendente != null;
     if (!temJournal) {
       return null;
@@ -1244,10 +1563,12 @@ export class GerenciadorTefNativo {
     }
     const bloqueio = this.bloqueioAntesDeEnviar(acao);
     if (bloqueio) {
+      const chamadaAberta = this.chamadaNativaEmAberto != null;
       const financeiro =
-        bloqueio.codigo === CODIGOS_TEF.OCUPADO ||
-        bloqueio.codigo === CODIGOS_TEF.TRANSACAO_PENDENTE ||
-        bloqueio.codigo === CODIGOS_TEF.RECONCILIACAO_NECESSARIA;
+        !chamadaAberta &&
+        (bloqueio.codigo === CODIGOS_TEF.OCUPADO ||
+          bloqueio.codigo === CODIGOS_TEF.TRANSACAO_PENDENTE ||
+          bloqueio.codigo === CODIGOS_TEF.RECONCILIACAO_NECESSARIA);
       return {
         ok: false,
         statusHttp: statusHttpDoCodigo(bloqueio.codigo),
@@ -1310,6 +1631,136 @@ export class GerenciadorTefNativo {
     };
   }
 
+  async registrarObservacaoBiblioteca(bruto) {
+    if (!bruto || typeof bruto !== "object" || typeof bruto.bibliotecaInstalada !== "boolean") {
+      this.bibliotecaVisivel = false;
+      this.observacaoBruta = null;
+      this.observacaoBiblioteca = null;
+      return;
+    }
+    const concluida = this.observacaoBruta?.instalacaoConcluida === true;
+    this.observacaoBruta = { ...bruto, instalacaoConcluida: concluida || bruto.instalacaoConcluida === true };
+    const evidenciaConfirmada = await this.confirmarEvidenciaBiblioteca(this.observacaoBruta);
+    this.bibliotecaVisivel = true;
+    this.observacaoBiblioteca = diagnosticarBibliotecaPayGo({
+      ...this.observacaoBruta,
+      evidenciaConfirmada,
+    });
+  }
+
+  async lerEvidenciaBiblioteca() {
+    let bruto;
+    try {
+      bruto = JSON.parse(await this.fsPendencia.readFile(this.arquivoBiblioteca, "utf8"));
+    } catch (erro) {
+      if (erro?.code === "ENOENT") {
+        return {
+          ok: false,
+          statusHttp: 404,
+          erro: "A prova assinada da biblioteca não está neste computador.",
+        };
+      }
+      return {
+        ok: false,
+        statusHttp: 409,
+        erro: "A prova assinada da biblioteca não pôde ser lida.",
+      };
+    }
+    const origem = bruto?.campos;
+    const assinatura = String(bruto?.assinatura ?? "").trim();
+    const campos =
+      origem && typeof origem === "object"
+        ? {
+            pontoCaptura: String(origem.pontoCaptura ?? "").trim(),
+            servidor: String(origem.servidor ?? "").trim(),
+            ambiente: String(origem.ambiente ?? "").trim(),
+            retornoSetEnvironment: Number(origem.retornoSetEnvironment),
+            codigoAmbiente: Number(origem.codigoAmbiente),
+            diretorio: String(origem.diretorio ?? "").trim(),
+          }
+        : null;
+    if (bruto?.versao !== 2 || !campos || !assinatura || /private key/i.test(assinatura)) {
+      return {
+        ok: false,
+        statusHttp: 409,
+        erro: "A prova armazenada não é a versão 2 da biblioteca.",
+      };
+    }
+    return { ok: true, statusHttp: 200, versao: 2, campos, assinatura };
+  }
+
+  async confirmarEvidenciaBiblioteca(obs) {
+    if (obs?.bibliotecaInstalada !== true || obs?.setEnvironmentExecutado === true) {
+      return false;
+    }
+    let bruto;
+    try {
+      bruto = JSON.parse(await this.fsPendencia.readFile(this.arquivoBiblioteca, "utf8"));
+    } catch {
+      return false;
+    }
+    const campos = bruto?.campos;
+    const assinatura = String(bruto?.assinatura ?? "");
+    if (!campos || typeof campos !== "object" || !assinatura) {
+      return false;
+    }
+    let publica = "";
+    try {
+      const chave = JSON.parse(await this.fsPendencia.readFile(this.arquivoChave, "utf8"));
+      publica = String(chave?.publica ?? "");
+    } catch {
+      return false;
+    }
+    if (!publica || !verificarBibliotecaTef(publica, campos, assinatura)) {
+      return false;
+    }
+    const ponto = String(obs.pontoSolicitado ?? obs.pontoCaptura ?? "").trim();
+    const servidor = String(obs.servidorSolicitado ?? obs.servidor ?? "").trim();
+    const ambiente = String(obs.ambienteSolicitado ?? obs.ambiente ?? "").trim();
+    return (
+      campos.ambiente === "producao" &&
+      campos.diretorio === "producao" &&
+      obs?.diretorioBiblioteca === "producao" &&
+      Number(campos.retornoSetEnvironment) === 0 &&
+      Number(campos.codigoAmbiente) === 0 &&
+      String(campos.pontoCaptura ?? "").trim() === ponto &&
+      String(campos.servidor ?? "").trim() === servidor &&
+      ambiente === "producao" &&
+      !HOST_BIBLIOTECA_SANDBOX.test(servidor)
+    );
+  }
+
+  async gravarEvidenciaBiblioteca(chavePrivada) {
+    const bruto = this.observacaoBruta;
+    if (!bruto || typeof chavePrivada !== "string" || !chavePrivada.includes("-----BEGIN")) {
+      return;
+    }
+    const campos = {
+      pontoCaptura: String(bruto.pontoSolicitado ?? bruto.pontoCaptura ?? "").trim(),
+      servidor: String(bruto.servidorSolicitado ?? bruto.servidor ?? "").trim(),
+      ambiente: "producao",
+      retornoSetEnvironment: 0,
+      codigoAmbiente: 0,
+      diretorio: "producao",
+    };
+    if (bruto.diretorioBiblioteca !== "producao") {
+      return;
+    }
+    let assinatura = "";
+    try {
+      assinatura = assinarBibliotecaTef(chavePrivada, campos);
+    } catch {
+      return;
+    }
+    if (!assinatura) {
+      return;
+    }
+    const corpo = JSON.stringify({ versao: 2, campos, assinatura });
+    const temporario = `${this.arquivoBiblioteca}.tmp`;
+    await this.fsPendencia.writeFile(temporario, corpo, "utf8");
+    await this.fsPendencia.rename(temporario, this.arquivoBiblioteca);
+  }
+
   async inicializar(autorizado = null) {
     const previo = await this.consultar();
     if (!previo.executavelEncontrado || previo.processo === "nao_instalado") {
@@ -1332,11 +1783,13 @@ export class GerenciadorTefNativo {
         tef: previo,
       };
     }
-    if (
+    const ambiente = identidade.identidade?.ambiente || "";
+    const diretorio = tokenDiretorioBiblioteca(ambiente);
+    const sessaoVinculada =
       this.inicializado &&
-      this.identidadeProcesso &&
-      !mesmaIdentidade(this.identidadeProcesso, identidade.identidade)
-    ) {
+      this.identidadeProcesso?.modo === "novo" &&
+      !mesmaIdentidade(this.identidadeProcesso, identidade.identidade);
+    if (sessaoVinculada) {
       return {
         ok: false,
         statusHttp: statusHttpDoCodigo(CODIGOS_TEF.OPERACAO_NAO_PERMITIDA),
@@ -1345,7 +1798,243 @@ export class GerenciadorTefNativo {
         tef: this.snapshot(),
       };
     }
-    const resposta = await this.executar({ acao: "inicializar", dados: identidade.dados });
+    const ambientePasta = diretorio === "producao" ? "producao" : "homologacao";
+    const producaoPgWeb = diretorioProducaoPgWeb(this.env);
+    const paiPadrao =
+      diretorio === "producao"
+        ? path.win32.dirname(producaoPgWeb || "")
+        : this.caminho
+          ? path.win32.resolve(path.win32.dirname(this.caminho), "TEF")
+          : "";
+    const bloqueadoPasta =
+      this.inicializado === true ||
+      this.pendente != null ||
+      this.transacaoPendente != null ||
+      this.pendenciaIlegivel === true;
+    const planoPasta = await planejarDiretorioInicial({
+      arquivo: this.arquivoPasta,
+      fsApi: this.fsPendencia,
+      ambiente: ambientePasta,
+      paiPadrao,
+      bloqueado: bloqueadoPasta,
+      raizExecutavel: this.caminho ? path.win32.dirname(this.caminho) : "",
+      producaoPai: path.win32.dirname(producaoPgWeb || "C:\\ProgramData\\UltraPDV\\TEF\\Producao"),
+      sandboxPai: paiPadrao && diretorio !== "producao" ? paiPadrao : path.win32.resolve(this.caminho ? path.win32.dirname(this.caminho) : ".", "TEF"),
+      programFiles: [process.env.ProgramFiles, process.env["ProgramFiles(x86)"]].filter(Boolean),
+      classificarUnidade: this.classificarUnidadePasta,
+      restringir: this.restringirPasta,
+    });
+    if (!planoPasta.ok) {
+      this.erroInicializacao = planoPasta.mensagem;
+      return {
+        ok: false,
+        statusHttp: 409,
+        codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+        erro: planoPasta.mensagem,
+        tef: this.snapshot(),
+      };
+    }
+    const pastaPersonalizadaConfirmada =
+      Boolean(planoPasta.diretorioPai) &&
+      planoPasta.tentativa !== true &&
+      String(planoPasta.diretorioPai).replace(/[\\/]+$/u, "").toLowerCase() !==
+        String(paiPadrao).replace(/[\\/]+$/u, "").toLowerCase();
+    if (
+      this.instalacaoAutomatica === true &&
+      diretorio === "producao" &&
+      planoPasta.adiada !== true &&
+      bloqueadoPasta !== true &&
+      paiPadrao
+    ) {
+      if (pastaPersonalizadaConfirmada) {
+        const acesso = await this.validarPastaConfirmada({
+          pai: planoPasta.diretorioPai,
+          efetivoEsperado: planoPasta.efetivoEsperado,
+          efetivoRegistrado: planoPasta.efetivoRegistrado,
+          fsApi: this.fsPendencia,
+        });
+        if (!acesso.ok) {
+          this.erroInicializacao = acesso.mensagem;
+          return {
+            ok: false,
+            statusHttp: 409,
+            codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+            erro: acesso.mensagem,
+            tef: this.snapshot(),
+          };
+        }
+      } else {
+        const paiInstalacao = planoPasta.diretorioPai || paiPadrao;
+        const instalacao = await this.instalarPastaPadrao({
+          pai: paiInstalacao,
+          fsApi: this.fsPendencia,
+          ambiente: "producao",
+          conceder: this.concederPasta,
+          restringirDiretorio: this.restringirDiretorioPasta,
+        });
+        if (!instalacao.ok) {
+          this.erroInicializacao = instalacao.mensagem;
+          return {
+            ok: false,
+            statusHttp: 409,
+            codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+            erro: instalacao.mensagem,
+            tef: this.snapshot(),
+          };
+        }
+        if (!planoPasta.diretorioPai) {
+          planoPasta.diretorioPai = paiInstalacao;
+        }
+      }
+    }
+    const pastaPersonalizada = Boolean(planoPasta.diretorioPai) &&
+      String(planoPasta.diretorioPai).replace(/[\\/]+$/u, "").toLowerCase() !==
+        String(paiPadrao).replace(/[\\/]+$/u, "").toLowerCase();
+    if (diretorio === "producao" && !pastaPersonalizada) {
+      const isolamento = await this.isolamentoProducao();
+      if (!isolamento.ok) {
+        return {
+          ok: false,
+          statusHttp: 409,
+          codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: isolamento.motivo,
+          tef: this.snapshot(),
+        };
+      }
+      if (this.inicializado && this.diretorioBiblioteca !== "producao") {
+        const bloqueioDiretorio = this.bloqueioAntesDeEnviar("inicializar");
+        if (bloqueioDiretorio) {
+          return {
+            ok: false,
+            statusHttp: statusHttpDoCodigo(bloqueioDiretorio.codigo),
+            codigo: bloqueioDiretorio.codigo,
+            erro: bloqueioDiretorio.erro,
+            tef: this.snapshot(),
+          };
+        }
+        const reinicio = await this.reiniciar();
+        if (!reinicio?.ok) {
+          return {
+            ok: false,
+            statusHttp: 409,
+            codigo: reinicio.codigo || CODIGOS_TEF.PROCESSO_ENCERRADO,
+            erro: reinicio.erro || "Não foi possível reiniciar o agente na pasta de produção.",
+            tef: this.snapshot(),
+          };
+        }
+      }
+    }
+    const dadosInit = { ...identidade.dados, diretorio };
+    if (planoPasta.diretorioPai) {
+      dadosInit.diretorioPai = planoPasta.diretorioPai;
+    }
+    const resposta = await this.executar({
+      acao: "inicializar",
+      dados: dadosInit,
+    });
+    if (resposta?.ok === true) {
+      const eco = tokenDiretorioInformado(resposta.resultado?.diretorioBiblioteca);
+      if (eco) {
+        this.diretorioBiblioteca = eco;
+      }
+      if ((diretorio === "producao" && eco !== "producao") || (eco && eco !== diretorio)) {
+        this.diretorioBiblioteca = "";
+        this.erroInicializacao =
+          "O agente não confirmou a pasta de produção. A cobrança não foi iniciada.";
+        if (planoPasta.tentativa === true) {
+          await registrarResultadoAtivacao({
+            arquivo: this.arquivoPasta,
+            fsApi: this.fsPendencia,
+            ambiente: ambientePasta,
+            solicitado: true,
+            efetivoEsperado: planoPasta.efetivoEsperado,
+            sucesso: false,
+            diretorioObservado: String(resposta?.resultado?.diretorioTrabalho ?? ""),
+            retornoPwInit: resposta?.resultado?.retornoPwInit,
+            retornoPwInitNome: resposta?.resultado?.retornoPwInitNome,
+            diagnostico: this.erroInicializacao,
+          });
+        }
+        await this.encerrar();
+        return {
+          ok: false,
+          statusHttp: 409,
+          codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: this.erroInicializacao,
+          tef: this.snapshot(),
+        };
+      }
+      if (resposta?.resultado?.inicializado === true && this.inicializado === true) {
+        this.erroInicializacao = "";
+      }
+    } else {
+      this.erroInicializacao = mensagemFalhaInicializacao(resposta?.erro);
+    }
+    const observadoPwInit = String(
+      resposta?.resultado?.diretorioPwInit ?? resposta?.resultado?.diretorioTrabalho ?? ""
+    ).trim();
+    if (resposta?.resultado && typeof resposta.resultado === "object") {
+      const caminhoTrabalho = String(resposta.resultado.diretorioTrabalho ?? "").trim();
+      if (caminhoTrabalho) {
+        this.diretorioTrabalho = caminhoTrabalho.slice(0, 260);
+      }
+      const caminhoPwInit = String(resposta.resultado.diretorioPwInit ?? "").trim();
+      if (caminhoPwInit) {
+        this.diretorioPwInit = caminhoPwInit.slice(0, 260);
+      }
+      if (Number.isFinite(Number(resposta.resultado.retornoPwInit))) {
+        this.retornoPwInit = Math.round(Number(resposta.resultado.retornoPwInit));
+        this.retornoPwInitNome = String(resposta.resultado.retornoPwInitNome ?? "").trim().slice(0, 40);
+      }
+      await this.registrarObservacaoBiblioteca(resposta.resultado);
+    }
+    const codigoInformado = Number(resposta?.resultado?.retornoPwInit);
+    const codigoBiblioteca = Number.isFinite(codigoInformado) ? Math.round(codigoInformado) : null;
+    const bibliotecaRecusou = codigoBiblioteca !== null && codigoBiblioteca !== 0;
+    if (bibliotecaRecusou) {
+      this.inicializado = false;
+      this.erroInicializacao = mensagemRetornoBiblioteca(
+        codigoBiblioteca,
+        this.retornoPwInitNome,
+        this.diretorioPwInit || observadoPwInit
+      );
+    }
+    const ativacao = await registrarResultadoAtivacao({
+      arquivo: this.arquivoPasta,
+      fsApi: this.fsPendencia,
+      ambiente: ambientePasta,
+      solicitado: planoPasta.tentativa === true,
+      efetivoEsperado: planoPasta.efetivoEsperado,
+      sucesso:
+        !bibliotecaRecusou &&
+        resposta?.ok === true &&
+        resposta?.resultado?.inicializado === true,
+      diretorioObservado: observadoPwInit,
+      retornoPwInit: resposta?.resultado?.retornoPwInit,
+      retornoPwInitNome: resposta?.resultado?.retornoPwInitNome,
+      diagnostico: bibliotecaRecusou || resposta?.ok !== true ? this.erroInicializacao : "",
+    });
+    if (planoPasta.tentativa === true && ativacao.promovida !== true && !bibliotecaRecusou) {
+      const codigoInit = Number(resposta?.resultado?.retornoPwInit);
+      const nomeInit = String(resposta?.resultado?.retornoPwInitNome ?? "").trim();
+      const codigoTexto = Number.isFinite(codigoInit)
+        ? ` Código ${Math.round(codigoInit)}${nomeInit ? ` ${nomeInit}` : ""}.`
+        : "";
+      if (resposta?.ok === true) {
+        this.erroInicializacao =
+          "O agente não usou a pasta salva. A configuração anterior foi mantida.";
+        await this.encerrar();
+        return {
+          ok: false,
+          statusHttp: 409,
+          codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: this.erroInicializacao,
+          tef: this.snapshot(),
+        };
+      }
+      this.erroInicializacao =
+        `${this.erroInicializacao || "A biblioteca não confirmou a pasta salva."}${codigoTexto} A configuração anterior foi mantida.`;
+    }
     if (
       resposta?.ok === true &&
       resposta?.resultado?.inicializado === true &&
@@ -1356,20 +2045,35 @@ export class GerenciadorTefNativo {
     if (resposta?.ok === true) {
       await this.absorverPendenciaNativa(resposta.resultado);
     }
+    if (bibliotecaRecusou) {
+      const codigo =
+        resposta?.ok === true
+          ? CODIGOS_TEF.OPERACAO_NAO_PERMITIDA
+          : resposta?.codigo || CODIGOS_TEF.OPERACAO_NAO_PERMITIDA;
+      return {
+        ok: false,
+        statusHttp: statusHttpDoCodigo(codigo),
+        codigo,
+        erro: this.erroInicializacao,
+        tef: this.snapshot(),
+      };
+    }
     const tef = this.snapshot();
+    const erroInicializacao =
+      resposta?.ok === true ? undefined : this.erroInicializacao || resposta?.erro;
     if (resposta?.codigo && resposta.ok !== true) {
       return {
         ok: false,
         statusHttp: statusHttpDoCodigo(resposta.codigo),
         codigo: resposta.codigo,
-        erro: resposta.erro,
+        erro: erroInicializacao,
         tef,
       };
     }
     return {
       ok: resposta?.ok === true,
       statusHttp: 200,
-      erro: resposta?.ok === true ? undefined : resposta?.erro,
+      erro: erroInicializacao,
       resultado:
         resposta?.resultado && typeof resposta.resultado === "object"
           ? resposta.resultado
@@ -1402,6 +2106,28 @@ export class GerenciadorTefNativo {
         tef: this.snapshot(),
         evidencia: null,
       };
+    }
+
+    const preparo = identidadeInicial(autorizado);
+    const jaNaProducao =
+      preparo.ok &&
+      preparo.identidade?.ambiente === "producao" &&
+      this.inicializado === true &&
+      this.diretorioBiblioteca === "producao" &&
+      this.identidadeProcesso &&
+      mesmaIdentidade(this.identidadeProcesso, preparo.identidade);
+    if (preparo.ok && preparo.identidade?.ambiente === "producao" && !jaNaProducao) {
+      const inicio = await this.inicializar(autorizado);
+      if (!inicio.ok || this.diretorioBiblioteca !== "producao") {
+        return {
+          ok: false,
+          statusHttp: inicio.statusHttp || 409,
+          codigo: inicio.codigo || CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: inicio.erro || "A pasta de produção não foi confirmada. A instalação não começou.",
+          tef: this.snapshot(),
+          evidencia: null,
+        };
+      }
     }
 
     if (!(this.estado === "executando" && this.filho && this.filho.exitCode == null && this.inicializado === true)) {
@@ -1447,7 +2173,10 @@ export class GerenciadorTefNativo {
       };
     }
     const credencial = credencialTecnicaInformada(autorizado.credencial);
-    const dados = { ...autorizada.dados };
+    const dados = {
+      ...autorizada.dados,
+      diretorio: tokenDiretorioBiblioteca(autorizada.dados.ambiente),
+    };
     if (credencial) {
       dados.credencial = credencial;
     }
@@ -1468,6 +2197,26 @@ export class GerenciadorTefNativo {
     delete resultado.evidencia;
     delete resultado.instalacaoId;
     let evidencia = null;
+    if (resposta?.ok === true && resultado?.instalacaoConcluida === true && this.observacaoBruta) {
+      this.observacaoBruta = { ...this.observacaoBruta, instalacaoConcluida: true };
+      this.observacaoBiblioteca = diagnosticarBibliotecaPayGo(this.observacaoBruta);
+      if (
+        this.observacaoBiblioteca?.cobrancaPermitida === true &&
+        this.observacaoBiblioteca?.origemComprovacao === "set_environment"
+      ) {
+        try {
+          await this.gravarEvidenciaBiblioteca(autorizado?.chavePrivada);
+        } catch {
+          this.observacaoBiblioteca = {
+            ...this.observacaoBiblioteca,
+            cobrancaPermitida: false,
+            origemComprovacao: "ausente",
+            motivo:
+              "A instalação foi observada, mas a prova assinada não foi gravada. A cobrança não foi iniciada.",
+          };
+        }
+      }
+    }
     if (resposta?.ok === true && autorizado?.chavePrivada) {
       const observacao = observacaoEvidenciaInstalacao(resultado, autorizado, randomUUID());
       const assinada = observacao
@@ -1495,7 +2244,7 @@ export class GerenciadorTefNativo {
       statusHttp: 200,
       erro: resposta?.ok === true ? undefined : resposta?.erro,
       resultado,
-      tef,
+      tef: this.snapshot(),
       evidencia,
     };
   }
@@ -1514,6 +2263,19 @@ export class GerenciadorTefNativo {
     }
 
     await this.garantirPendencia();
+    if (!this.agenteEhCompativel()) {
+      await this.consultar();
+    }
+    if (!this.agenteEhCompativel()) {
+      const agente = this.snapshot().agente;
+      return {
+        ok: false,
+        statusHttp: 409,
+        codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+        erro: mensagemAgenteIncompativel(agente),
+        tef: this.snapshot(),
+      };
+    }
     const bloqueio = this.bloqueioAntesDeEnviar("pagamento");
     if (bloqueio) {
       return {
@@ -1545,6 +2307,18 @@ export class GerenciadorTefNativo {
       };
     }
 
+    if (this.bibliotecaVisivel && this.observacaoBiblioteca?.cobrancaPermitida !== true) {
+      return {
+        ok: false,
+        statusHttp: 409,
+        codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+        erro:
+          this.observacaoBiblioteca?.motivo ||
+          "A PGWebLib não comprovou o ponto e o servidor de produção. A cobrança não foi iniciada.",
+        tef: this.snapshot(),
+      };
+    }
+
     const correlationId = String(this.criarId());
     this.pendenciaIlegivel = false;
     this.transacaoPendente = montarJournalPagamento({
@@ -1571,6 +2345,7 @@ export class GerenciadorTefNativo {
       dados: {
         identificador: validado.identificador,
         valor: validado.valor,
+        ...(validado.preferencia ? { preferencia: validado.preferencia } : {}),
       },
     });
     await this.concluirJournalPagamento(resposta);
@@ -1860,6 +2635,7 @@ export class GerenciadorTefNativo {
       this.pendente = {
         id,
         acao: montado.acao,
+        inicio: Date.now(),
         resolve,
         liquidado: false,
         timer: null,
@@ -1935,6 +2711,7 @@ export class GerenciadorTefNativo {
       this.buffer = "";
       this.inicializado = false;
       this.identidadeProcesso = null;
+      this.diretorioBiblioteca = "";
       if (this.pendente) {
         this.resolverPendente({
           ok: false,
@@ -2182,14 +2959,28 @@ export class GerenciadorTefNativo {
       void this.registrar("tef-stdout-invalido", bruto);
       return;
     }
-    if (!this.pendente || this.pendente.id !== json.id) {
-      void this.registrar("tef-resposta-inesperada", `id=${json.id}`);
-      return;
-    }
     const resultado =
       json.resultado && typeof json.resultado === "object" && !Array.isArray(json.resultado)
         ? json.resultado
         : {};
+    if (!this.pendente || this.pendente.id !== json.id) {
+      if (this.chamadaNativaEmAberto?.id === json.id) {
+        const biblioteca = Number(resultado.codigoBiblioteca);
+        this.ultimoPinpad = {
+          ...resultado,
+          duracaoMs: Math.max(0, Date.now() - this.chamadaNativaEmAberto.inicio),
+          recebidoAposTimeout: true,
+        };
+        if (!Number.isInteger(biblioteca)) {
+          delete this.ultimoPinpad.codigoBiblioteca;
+        }
+        this.chamadaNativaEmAberto = null;
+        void this.registrar("tef-pinpad-tardio", `id=${json.id}`);
+        return;
+      }
+      void this.registrar("tef-resposta-inesperada", `id=${json.id}`);
+      return;
+    }
     this.resolverPendente({
       ok: json.ok,
       id: json.id,
@@ -2229,6 +3020,22 @@ export class GerenciadorTefNativo {
         return;
       }
       const acaoTimeout = this.pendente.acao;
+      const inicio = this.pendente.inicio || Date.now();
+      if (acaoTimeout === "pinpad-diagnostico" || acaoTimeout === "pinpad-testar-comunicacao") {
+        this.chamadaNativaEmAberto = { id, acao: acaoTimeout, inicio };
+        this.resolverPendente({
+          ok: false,
+          codigo: CODIGOS_TEF.TIMEOUT,
+          erro: MENSAGEM_TEF_PINPAD_TIMEOUT,
+          id,
+          resultado: {
+            comunicacao: "timeout",
+            duracaoMs: Math.max(0, Date.now() - inicio),
+            chamadaNativaEmExecucao: true,
+          },
+        });
+        return;
+      }
       if (acaoTimeout === "pagamento") {
         void this.marcarResultadoDesconhecido();
       } else if (acaoTimeout === "confirmar" || acaoTimeout === "desfazer") {
@@ -2269,6 +3076,7 @@ export class GerenciadorTefNativo {
       void this.marcarResultadoDesconhecido();
     }
     this.menuInterativo = null;
+    this.chamadaNativaEmAberto = null;
     this.inicializado = false;
     this.identidadeProcesso = null;
     const controlado = this.encerramentoControlado;
@@ -2298,11 +3106,45 @@ export class GerenciadorTefNativo {
     }
   }
 
+  async isolamentoProducao() {
+    const raiz = path.dirname(String(this.caminho ?? ""));
+    const destino = diretorioProducaoPgWeb(this.env);
+    if (!destino) {
+      return {
+        ok: false,
+        motivo: "A pasta de produção da PGWebLib não está em ProgramData. A inicialização não começou.",
+      };
+    }
+    let nomes = [];
+    try {
+      const lista = await this.listarDiretorioBiblioteca(destino);
+      nomes = Array.isArray(lista) ? lista : [];
+    } catch (erro) {
+      if (erro?.code !== "ENOENT") {
+        return {
+          ok: false,
+          motivo: "Não foi possível verificar a pasta de produção. A inicialização não começou.",
+        };
+      }
+    }
+    return avaliarIsolamentoProducao({ raizExecutavel: raiz, nomes, env: this.env });
+  }
+
+  agenteEhCompativel() {
+    return (
+      this.executavelEncontrado === true &&
+      exeTefPermitido(this.caminho, this.versaoAgente)
+    );
+  }
+
   aplicarLocal(local) {
     const caminho = local?.caminho;
-    const ok = local?.encontrado === true && exeTefPermitido(caminho);
+    const ok =
+      local?.encontrado === true && exeTefPermitido(caminho, this.versaoAgente);
     this.executavelEncontrado = ok;
     this.caminho = ok ? caminho : null;
+    this.caminhoObservado = !ok && local?.encontrado === true && caminho ? caminho : "";
+    this.agenteAntigoEncontrado = local?.antigoEncontrado === true;
   }
 
   async localizarSeguro() {

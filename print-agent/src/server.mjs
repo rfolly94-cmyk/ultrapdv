@@ -69,11 +69,15 @@ import {
 } from "./tef-vinculo.mjs";
 import {
   arquivoChaveTef,
+  assinarAmbienteTef,
+  assinarModalidadeTef,
   assinarIdentidadeTef,
   assinarPareamentoTef,
   assinarProvaTef,
   dadosFiscaisProvaTef,
   hashCodigoPareamento,
+  hashComprovanteTef,
+  juntarComprovanteTef,
   lerOuCriarChaveTef,
 } from "./tef-prova.mjs";
 import {
@@ -86,11 +90,14 @@ import {
 } from "./tef-pareamento.mjs";
 import {
   arquivoRecuperacaoTef,
+  cobrancaBloqueadaPorRecuperacao,
   gravarRecuperacaoTef,
   lerRecuperacaoTef,
   registroRecuperacaoTef,
   removerRecuperacaoTef,
 } from "./tef-recuperacao.mjs";
+import { arquivoPendenciaTef, lerPendenciaTef } from "./tef-pendencia.mjs";
+import { criarServicoPastaTef } from "./tef-pasta.mjs";
 import { iniciarTray } from "./tray.mjs";
 import { APP_CONECTOR, carregarVersao, NOME_CONECTOR, SERVICO_CONECTOR } from "./versao.mjs";
 
@@ -102,6 +109,20 @@ const PAGINA_STATUS = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "pagina-status.html"),
   "utf8"
 );
+
+const CABECALHOS_CORS_PERMITIDOS = [
+  "Content-Type",
+  "Cache-Control",
+  "Pragma",
+  "x-ultrapdv-empresa",
+  "x-ultrapdv-terminal",
+  "x-ultrapdv-desafio",
+  "x-ultrapdv-identificador",
+  "x-ultrapdv-valor-centavos",
+  "x-ultrapdv-autorizacao",
+  "x-ultrapdv-estabelecimento",
+  "x-ultrapdv-dispositivo",
+].join(", ");
 
 function aplicarCors(headers, origem, origens) {
   if (origem && origemPermitidaCors(origem, origens)) {
@@ -367,6 +388,12 @@ export function criarServidor(deps = {}) {
     ((registro) => gravarRecuperacaoTef(arquivoRecuperacao, registro));
   const removerRecuperacao =
     deps.removerRecuperacaoTef ?? (() => removerRecuperacaoTef(arquivoRecuperacao));
+  const servicoPasta =
+    deps.servicoPastaTef ??
+    criarServicoPastaTef({
+      arquivo: deps.arquivoPastaTef,
+      raizExecutavel: path.join(RAIZ, "bin", "tef"),
+    });
   function origemLoopback(origem) {
     if (!origem) {
       return true;
@@ -397,6 +424,66 @@ export function criarServidor(deps = {}) {
     }
     return { ok: true, desafio };
   }
+  async function montarContextoPasta(req, origemInformada) {
+    if (!origemInformada) {
+      return { ok: false, status: 403, erro: "Abra esta tela pelo UltraPDV." };
+    }
+    if (!hostLocal(req)) {
+      return {
+        ok: false,
+        status: 403,
+        erro: "A pasta só pode ser escolhida neste computador.",
+      };
+    }
+    const dispositivo = headerTef(req, "x-ultrapdv-dispositivo");
+    const local = String(await obterId());
+    if (!dispositivo || dispositivo !== local) {
+      return {
+        ok: false,
+        status: 403,
+        erro: "Este computador não está vinculado ao UltraPDV.",
+      };
+    }
+    const financeiro = await contextoFinanceiroTef(req);
+    if (!financeiro.ok) {
+      return { ok: false, status: 403, erro: financeiro.erro };
+    }
+    const vinculo = await lerVinculo();
+    if (!vinculo?.ambiente) {
+      return {
+        ok: false,
+        status: 403,
+        erro: "Vincule este computador antes de escolher a pasta.",
+      };
+    }
+    const statusTef = await consultarStatusTef();
+    const pendencia = await lerPendenciaTef(
+      deps.arquivoPendenciaTef ?? gerenciadorTef.arquivoPendencia ?? arquivoPendenciaTef()
+    );
+    const recuperacao = await lerRecuperacao();
+    return {
+      ok: true,
+      ctx: {
+        ambiente: vinculo.ambiente === "producao" ? "producao" : "homologacao",
+        inicializado:
+          statusTef?.inicializado === true || gerenciadorTef.inicializado === true,
+        emUso:
+          gerenciadorTef.pendente != null ||
+          statusTef?.processo === "executando" ||
+          statusTef?.processo === "iniciando",
+        journal: pendencia?.ok ? pendencia.registro : null,
+        journalIlegivel: pendencia?.ok !== true,
+        recuperacao,
+        diretorioTrabalho:
+          statusTef?.diretorioTrabalho ?? gerenciadorTef.diretorioTrabalho ?? "",
+        diretorioPwInit:
+          statusTef?.diretorioPwInit ?? gerenciadorTef.diretorioPwInit ?? "",
+        retornoPwInit: statusTef?.retornoPwInit ?? gerenciadorTef.retornoPwInit,
+        retornoPwInitNome:
+          statusTef?.retornoPwInitNome ?? gerenciadorTef.retornoPwInitNome ?? "",
+      },
+    };
+  }
   async function anexarProvaTef(corpo, campos) {
     if (!campos.desafio) {
       return corpo;
@@ -405,10 +492,17 @@ export function criarServidor(deps = {}) {
     if (!chave?.privada) {
       return corpo;
     }
-    return {
+    const assinado = {
       ...corpo,
       prova: assinarProvaTef(chave.privada, campos),
     };
+    if (campos.acao === "pagamento" && campos.ambiente) {
+      assinado.provaAmbiente = assinarAmbienteTef(chave.privada, campos.ambiente);
+    }
+    if (campos.acao === "pagamento" && campos.modalidade) {
+      assinado.provaModalidade = assinarModalidadeTef(chave.privada, campos.modalidade);
+    }
+    return assinado;
   }
   const aoTestarImpressao = deps.aoTestarImpressao ?? (async (input) => {
     const motor = await localizar();
@@ -471,8 +565,7 @@ export function criarServidor(deps = {}) {
       const headers = aplicarCors(
         {
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers":
-            "Content-Type, Cache-Control, Pragma, x-ultrapdv-empresa, x-ultrapdv-terminal, x-ultrapdv-desafio, x-ultrapdv-identificador, x-ultrapdv-valor-centavos, x-ultrapdv-autorizacao, x-ultrapdv-estabelecimento",
+          "Access-Control-Allow-Headers": CABECALHOS_CORS_PERMITIDOS,
           "Access-Control-Max-Age": "600",
         },
         origemCheck.origem,
@@ -883,6 +976,74 @@ export function criarServidor(deps = {}) {
         return;
       }
 
+      if (
+        (req.method === "GET" && url.pathname === "/tef/pasta") ||
+        (req.method === "POST" &&
+          (url.pathname === "/tef/pasta/escolher" ||
+            url.pathname === "/tef/pasta/recomendada" ||
+            url.pathname === "/tef/pasta/salvar"))
+      ) {
+        const acessoPasta = await montarContextoPasta(req, origemCheck.origem);
+        if (!acessoPasta.ok) {
+          json(
+            res,
+            acessoPasta.status,
+            { ok: false, pronto: false, erro: acessoPasta.erro },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        let corpoPasta = {};
+        if (req.method === "POST") {
+          const brutoPasta = await lerBody(req);
+          try {
+            corpoPasta = JSON.parse(brutoPasta.toString("utf8") || "{}");
+          } catch {
+            json(
+              res,
+              400,
+              { ok: false, pronto: false, erro: "Payload inválido." },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+        }
+        const resultadoPasta =
+          url.pathname === "/tef/pasta"
+            ? await servicoPasta.consultar(acessoPasta.ctx)
+            : url.pathname === "/tef/pasta/escolher"
+              ? await servicoPasta.escolher(acessoPasta.ctx, corpoPasta)
+              : url.pathname === "/tef/pasta/recomendada"
+                ? await servicoPasta.recomendada(acessoPasta.ctx, corpoPasta)
+                : await servicoPasta.salvar(acessoPasta.ctx, corpoPasta);
+        const statusPasta =
+          resultadoPasta.ok === true
+            ? 200
+            : resultadoPasta.codigo === "bloqueado"
+              ? 409
+              : resultadoPasta.codigo === "payload" || resultadoPasta.codigo === "selecao"
+                ? 400
+                : 422;
+        json(res, statusPasta, resultadoPasta, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/tef/biblioteca/evidencia") {
+        const prova = await gerenciadorTef.lerEvidenciaBiblioteca();
+        json(
+          res,
+          prova.statusHttp,
+          prova.ok
+            ? { ok: true, versao: prova.versao, campos: prova.campos, assinatura: prova.assinatura }
+            : { ok: false, erro: prova.erro },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/tef/identidade") {
         const chave = await lerChave();
         const dispositivoId = String(await obterId());
@@ -1263,7 +1424,11 @@ export function criarServidor(deps = {}) {
         }
         if (
           Object.keys(payloadPagamento).some(
-            (chave) => chave !== "acao" && chave !== "identificador" && chave !== "valor"
+            (chave) =>
+              chave !== "acao" &&
+              chave !== "identificador" &&
+              chave !== "valor" &&
+              chave !== "preferencia"
           )
         ) {
           json(
@@ -1288,30 +1453,131 @@ export function criarServidor(deps = {}) {
           return;
         }
 
+        const recuperacaoPendente = await lerRecuperacao();
+        const bloqueioRecuperacao = cobrancaBloqueadaPorRecuperacao(
+          recuperacaoPendente,
+          payloadPagamento.identificador
+        );
+        if (bloqueioRecuperacao?.acao === "bloquear") {
+          json(
+            res,
+            409,
+            {
+              ok: false,
+              codigo: "TEF_TRANSACAO_PENDENTE",
+              erro: "Existe autorização TEF pendente neste terminal. Nenhuma nova cobrança foi iniciada.",
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (bloqueioRecuperacao?.acao === "reapresentar") {
+          const guardada = bloqueioRecuperacao.registro;
+          json(
+            res,
+            200,
+            {
+              ok: true,
+              recuperada: true,
+              codigo: guardada.codigo || "",
+              prova: guardada.prova,
+              provaAmbiente: guardada.provaAmbiente || "",
+              provaModalidade: guardada.provaModalidade || "",
+              resultado: {
+                sucessoTransacao: true,
+                identificador: guardada.identificador,
+                nsu: guardada.nsu,
+                codigoAutorizacao: guardada.autorizacao,
+                autorizacao: guardada.autorizacao,
+                rede: guardada.rede,
+                codigoFinalizacao: guardada.finalizacao,
+                finalizacao: guardada.finalizacao,
+                valor: guardada.valor,
+                confirmar: guardada.confirmar === true,
+                precisaConfirmacao: guardada.precisaConfirmacao === true,
+                transacaoPendenteConfirmacao: guardada.transacaoPendenteConfirmacao === true,
+                cancelada: false,
+                codigo: guardada.codigo || "",
+                bandeira: guardada.bandeira,
+                nomeBandeiraPadrao: guardada.nomeBandeiraPadrao,
+                cnpjCredenciadora: guardada.cnpjCredenciadora,
+                cnpjRecebedor: guardada.cnpjRecebedor,
+                instituicao: guardada.instituicao,
+                host: guardada.host,
+                pontoCaptura: guardada.pontoCaptura,
+                comprovante1Via: guardada.comprovante1Via,
+                comprovante2Via: guardada.comprovante2Via,
+                ...(guardada.tipoCartaoInformado === true ? { tipoCartao: guardada.tipoCartao } : {}),
+              },
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+
         const resultadoPagamento = await executarPagamentoTef({
           identificador: payloadPagamento.identificador,
           valor: payloadPagamento.valor,
+          ...(payloadPagamento.preferencia == null || payloadPagamento.preferencia === ""
+            ? {}
+            : { preferencia: payloadPagamento.preferencia }),
         });
         const httpPagamento = respostaOperacaoTef(resultadoPagamento);
         const resultadoBruto = httpPagamento.corpo.resultado ?? {};
         const valorResultado = Number(resultadoBruto.valor);
         const fiscalPagamento = dadosFiscaisProvaTef(resultadoBruto);
-        httpPagamento.corpo = await anexarProvaTef(httpPagamento.corpo, {
-          acao: "pagamento",
+        const valorCentavosPagamento = Number.isFinite(valorResultado)
+          ? Math.round(valorResultado * 100)
+          : Math.round(Number(payloadPagamento.valor) * 100);
+        const camposFinanceirosPagamento = {
           desafio: bloqueioVinculoPagamento.desafio,
           identificador: payloadPagamento.identificador,
-          valorCentavos: Number.isFinite(valorResultado)
-            ? Math.round(valorResultado * 100)
-            : Math.round(Number(payloadPagamento.valor) * 100),
+          valorCentavos: valorCentavosPagamento,
           nsu: resultadoBruto.nsu,
           autorizacao: resultadoBruto.codigoAutorizacao || resultadoBruto.autorizacao,
           rede: resultadoBruto.rede,
           finalizacao: resultadoBruto.codigoFinalizacao || resultadoBruto.finalizacao,
+        };
+        const comprovantePagamento = juntarComprovanteTef(
+          resultadoBruto.comprovante1Via,
+          resultadoBruto.comprovante2Via
+        );
+        httpPagamento.corpo = await anexarProvaTef(httpPagamento.corpo, {
+          acao: "pagamento",
+          ...camposFinanceirosPagamento,
           sucesso: resultadoBruto.sucessoTransacao === true,
           codigo: httpPagamento.corpo.codigo || "",
           ...fiscalPagamento,
+          ambiente: {
+            ...camposFinanceirosPagamento,
+            pontoCaptura: String(resultadoBruto.pontoCaptura ?? ""),
+            host: String(resultadoBruto.host || resultadoBruto.servidor || ""),
+            comprovanteSha256: hashComprovanteTef(comprovantePagamento),
+          },
+          ...(Object.prototype.hasOwnProperty.call(resultadoBruto, "tipoCartao")
+            ? {
+                modalidade: {
+                  ...camposFinanceirosPagamento,
+                  tipoCartao:
+                    Number.isInteger(resultadoBruto.tipoCartao) &&
+                    resultadoBruto.tipoCartao >= 0 &&
+                    resultadoBruto.tipoCartao <= 255
+                      ? resultadoBruto.tipoCartao
+                      : null,
+                },
+              }
+            : {}),
         });
         if (httpPagamento.corpo.prova) {
+          const tipoInformado = Object.prototype.hasOwnProperty.call(resultadoBruto, "tipoCartao");
+          const tipoOficial =
+            Number.isInteger(resultadoBruto.tipoCartao) &&
+            resultadoBruto.tipoCartao >= 0 &&
+            resultadoBruto.tipoCartao <= 255
+              ? resultadoBruto.tipoCartao
+              : null;
           const recuperacao = registroRecuperacaoTef({
             identificador: payloadPagamento.identificador,
             prova: httpPagamento.corpo.prova,
@@ -1330,6 +1596,16 @@ export function criarServidor(deps = {}) {
             precisaConfirmacao: resultadoBruto.precisaConfirmacao === true,
             transacaoPendenteConfirmacao: resultadoBruto.transacaoPendenteConfirmacao === true,
             cancelada: resultadoBruto.cancelada === true,
+            ...(tipoInformado ? { tipoCartao: tipoOficial } : {}),
+            modalidadeSolicitada: payloadPagamento.preferencia,
+            modalidadeEfetiva: tipoOficial === 1 ? "credito" : tipoOficial === 2 ? "debito" : "",
+            provaModalidade: httpPagamento.corpo.provaModalidade,
+            provaAmbiente: httpPagamento.corpo.provaAmbiente,
+            host: String(resultadoBruto.host || resultadoBruto.servidor || ""),
+            pontoCaptura: String(resultadoBruto.pontoCaptura ?? ""),
+            comprovanteSha256: hashComprovanteTef(comprovantePagamento),
+            comprovante1Via: resultadoBruto.comprovante1Via,
+            comprovante2Via: resultadoBruto.comprovante2Via,
           });
           if (recuperacao) {
             await gravarRecuperacao(recuperacao).catch(() => {});
@@ -1584,12 +1860,30 @@ export function criarServidor(deps = {}) {
           );
           return;
         }
-        await gravarVinculo(validadoVinculo.vinculo);
+        const preservado = { ...validadoVinculo.vinculo };
+        if (atual?.terminalId && !preservado.terminalId) {
+          preservado.terminalId = atual.terminalId;
+        }
+        if (atual?.ambiente && !preservado.ambiente) {
+          preservado.ambiente = atual.ambiente;
+        }
+        if (atual?.cnpj && !preservado.cnpj) {
+          preservado.cnpj = atual.cnpj;
+        }
+        if (atual?.servidor && !preservado.servidor) {
+          preservado.servidor = atual.servidor;
+        }
+        const mesclado = validarVinculoTef(preservado);
+        if (!mesclado.ok) {
+          json(res, 400, { ok: false, erro: mesclado.erro }, origemCheck.origem, origens);
+          return;
+        }
+        await gravarVinculo(mesclado.vinculo);
         await gravarPareamento(consumirPareamento(conferenciaCodigoVinculo.atual));
         json(
           res,
           200,
-          { ok: true, vinculo: apresentarVinculoTef(validadoVinculo.vinculo) },
+          { ok: true, vinculo: apresentarVinculoTef(mesclado.vinculo) },
           origemCheck.origem,
           origens
         );

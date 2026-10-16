@@ -72,6 +72,27 @@ export function conferirServidorAutorizado(input: {
   return { ok: true as const, servidor: autorizado.servidor };
 }
 
+export function confirmarServidorPersistido(input: {
+  ambiente: AmbienteServidorPayGo;
+  informado: string;
+  gravadoHomologacao: string;
+  gravadoProducao: string;
+}): { ok: true; servidor: string } | { ok: false; motivo: string } {
+  const esperado = validarServidorPayGo(input.informado);
+  if (!esperado.ok) {
+    return { ok: false, motivo: esperado.motivo };
+  }
+  const gravado =
+    input.ambiente === "producao" ? input.gravadoProducao : input.gravadoHomologacao;
+  if (String(gravado ?? "").trim() !== esperado.servidor) {
+    return {
+      ok: false,
+      motivo: "O servidor não foi gravado. A etapa não foi concluída.",
+    };
+  }
+  return { ok: true, servidor: esperado.servidor };
+}
+
 export function decidirGravacaoServidor(input: {
   perfil: string;
   confirmacaoExplicita: boolean;
@@ -96,9 +117,37 @@ export function decidirGravacaoServidor(input: {
     };
   }
   if (input.empresaJaHabilitada) {
+    const oficial = validarServidorPayGo(input.servidorNovo);
+    if (!oficial.ok) {
+      return { efeito: "recusar", motivo: oficial.motivo };
+    }
+    const gravado = String(input.servidorAtual ?? "").trim();
+    if (input.pendenciaFinanceira && gravado && gravado !== oficial.servidor) {
+      return {
+        efeito: "recusar",
+        motivo: "Há transação TEF pendente. O servidor não pode ser alterado.",
+      };
+    }
+    if (
+      input.terminalPareado &&
+      input.ambienteAtual &&
+      input.ambienteAtual !== input.ambienteNovo
+    ) {
+      return {
+        efeito: "recusar",
+        motivo: "O ambiente do terminal pareado diverge do ambiente informado.",
+      };
+    }
+    if (!gravado) {
+      return { efeito: "gravar", motivo: "" };
+    }
+    if (gravado === oficial.servidor) {
+      return { efeito: "preservar", motivo: "" };
+    }
     return {
-      efeito: "preservar",
-      motivo: "A empresa já possui TEF habilitado. O servidor permanece o que estiver gravado.",
+      efeito: "recusar",
+      motivo:
+        "O servidor oficial já gravado é outro. Esta confirmação não troca o servidor de uma empresa com TEF habilitado.",
     };
   }
   if (input.pendenciaFinanceira) {

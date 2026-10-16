@@ -11,12 +11,28 @@ function texto(valor) {
   return typeof valor === "string" ? valor.trim() : "";
 }
 
+function tipoCartaoArquivo(valor) {
+  if (typeof valor !== "number" || !Number.isInteger(valor) || valor < 0 || valor > 255) {
+    return null;
+  }
+  return valor;
+}
+
+function modalidadeArquivo(valor) {
+  return valor === "debito" || valor === "credito" ? valor : "";
+}
+
+function textoLimitado(valor, limite) {
+  return texto(valor).slice(0, limite);
+}
+
 export function registroRecuperacaoTef(dados = {}) {
   const identificador = texto(dados.identificador);
   const prova = texto(dados.prova);
   if (!identificador || !prova) {
     return null;
   }
+  const tipoInformado = Object.prototype.hasOwnProperty.call(dados, "tipoCartao");
   return {
     versao: 1,
     identificador,
@@ -37,8 +53,29 @@ export function registroRecuperacaoTef(dados = {}) {
     precisaConfirmacao: dados.precisaConfirmacao === true,
     transacaoPendenteConfirmacao: dados.transacaoPendenteConfirmacao === true,
     cancelada: dados.cancelada === true,
+    tipoCartaoInformado: tipoInformado,
+    tipoCartao: tipoInformado ? tipoCartaoArquivo(dados.tipoCartao) : null,
+    modalidadeSolicitada: modalidadeArquivo(dados.modalidadeSolicitada),
+    modalidadeEfetiva: modalidadeArquivo(dados.modalidadeEfetiva),
+    provaModalidade: textoLimitado(dados.provaModalidade, 4096),
+    provaAmbiente: textoLimitado(dados.provaAmbiente, 4096),
+    host: textoLimitado(dados.host, 120),
+    pontoCaptura: textoLimitado(dados.pontoCaptura, 32),
+    comprovanteSha256: textoLimitado(dados.comprovanteSha256, 64),
+    comprovante1Via: textoLimitado(dados.comprovante1Via, 24000),
+    comprovante2Via: textoLimitado(dados.comprovante2Via, 24000),
     gravadoEm: texto(dados.gravadoEm) || new Date().toISOString(),
   };
+}
+
+export function cobrancaBloqueadaPorRecuperacao(registro, identificador) {
+  if (!registro || registro.sucessoTransacao !== true || registro.cancelada === true) {
+    return null;
+  }
+  if (texto(registro.identificador) && texto(registro.identificador) === texto(identificador)) {
+    return { acao: "reapresentar", registro };
+  }
+  return { acao: "bloquear", registro };
 }
 
 export async function lerRecuperacaoTef(arquivo, fsApi = fs) {

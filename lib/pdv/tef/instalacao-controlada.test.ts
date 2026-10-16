@@ -6,13 +6,19 @@ import { fonte } from "@/lib/multiempresa/fonte";
 
 import {
   decidirInstalacaoControlada,
+  decidirInstalacaoProducaoIsolada,
   decidirMigracaoPonto,
   efeitoAposFalhaInstalacao,
 } from "./instalacao-controlada";
 
 const CNPJ = "11222333000181";
 
-function base(parcial: Partial<Parameters<typeof decidirInstalacaoControlada>[0]> = {}) {
+function base(
+  parcial: Partial<
+    Parameters<typeof decidirInstalacaoControlada>[0] &
+      Parameters<typeof decidirInstalacaoProducaoIsolada>[0]
+  > = {}
+) {
   return {
     empresaSessaoId: empresaA,
     empresaInformada: "",
@@ -38,6 +44,8 @@ function base(parcial: Partial<Parameters<typeof decidirInstalacaoControlada>[0]
     servidorVinculado: "tef.cliente.example:31735",
     dispositivoPareado: true,
     dispositivoOutraEmpresa: false,
+    diretorioSandbox: "",
+    diretorioProducao: "",
     ...parcial,
   };
 }
@@ -133,17 +141,65 @@ test("isolamento multiempresa recusa empresa informada diferente da sessão", ()
   assert.equal(propria.efeito, "instalar");
 });
 
+test("produção isolada preserva a homologação e exige confirmação do administrador", () => {
+  const pastas = {
+    diretorioSandbox: "C:\\Program Files\\UltraPDV Connector\\bin\\tef\\TEF\\PGWeb",
+    diretorioProducao: "C:\\Program Files\\UltraPDV Connector\\bin\\tef\\producao\\PGWeb",
+  };
+  const oficial = {
+    pontoOficial: "6696546",
+    pontoVinculado: "6696546",
+    ambienteOficial: "producao" as const,
+    ambienteVinculado: "producao",
+    servidorOficial: "pos-transac.pgweb.io:31735",
+    servidorVinculado: "pos-transac.pgweb.io:31735",
+    ...pastas,
+  };
+  const pronta = decidirInstalacaoProducaoIsolada(base(oficial));
+  assert.equal(pronta.efeito, "instalar");
+  assert.match(pronta.motivo, /pasta de homologação permanece intacta/);
+
+  const semConfirmacao = decidirInstalacaoProducaoIsolada(
+    base({ ...oficial, confirmacaoExplicita: false })
+  );
+  assert.equal(semConfirmacao.efeito, "recusar");
+
+  const mesmaPasta = decidirInstalacaoProducaoIsolada(
+    base({
+      ...oficial,
+      diretorioProducao: pastas.diretorioSandbox,
+    })
+  );
+  assert.equal(mesmaPasta.efeito, "recusar");
+  assert.match(mesmaPasta.motivo, /separada/);
+
+  const ui = fonte("components/pdv/tef-producao-isolada.tsx");
+  const instalar = ui.indexOf("await fetch(`${descoberta.origem}/tef/instalar`");
+  const decisao = ui.indexOf("await prepararBibliotecaProducao");
+  const guardaPasta = ui.indexOf("ainda não informa a pasta de produção");
+  const guardaVinculo = ui.indexOf("Use Sincronizar Connector antes de instalar");
+  assert.ok(
+    guardaPasta > 0 &&
+      guardaVinculo > guardaPasta &&
+      decisao > guardaVinculo &&
+      decisao < instalar
+  );
+  assert.doesNotMatch(ui, /copyFile|PWOPER_MAINTENANCE|rmSync|unlink/);
+});
+
 test("o assistente só chama instalar após a decisão e não executa manutenção", () => {
   const ui = fonte("components/pdv/tef-assistente.tsx");
   const sessao = fonte("lib/pdv/tef/assistente-sessao.ts");
   const politica = fonte("lib/pdv/tef/instalacao-controlada.ts");
-  const instalar = ui.slice(ui.indexOf("async function instalarPonto"), ui.indexOf("async function ativar"));
+  const producao = fonte("components/pdv/tef-producao-isolada.tsx");
+  const persistir = ui.slice(ui.indexOf("async function persistir"), ui.indexOf("async function verificarConnector"));
   const preparar = sessao.slice(sessao.indexOf("export async function prepararInstalacaoAssistenteSessao"));
-  assert.match(instalar, /\/tef\/instalar/);
-  assert.match(instalar, /acao: "instalar"/);
-  assert.match(instalar, /confirmacao: true/);
-  assert.doesNotMatch(instalar, /ativarAssistente|pontoCaptura|empresaId|servidor/);
-  assert.doesNotMatch(ui, /localStorage|sessionStorage|PW_iInit|PWOPER_MAINTENANCE/);
+  assert.doesNotMatch(persistir, /\/tef\/instalar/);
+  assert.match(ui, /TefProducaoIsolada/);
+  assert.match(producao, /Instalar PayGoWeb/);
+  assert.match(producao, /acao: "instalar"/);
+  assert.match(producao, /confirmacao: true/);
+  assert.doesNotMatch(ui, /localStorage|sessionStorage|PW_iInit|PWOPER_MAINTENANCE|Servidor novo/);
   assert.match(preparar, /procedimentoOficialConfirmado: false/);
   assert.doesNotMatch(preparar, /input\.empresaId|credencial:/);
   assert.match(preparar, /credencialInformada/);

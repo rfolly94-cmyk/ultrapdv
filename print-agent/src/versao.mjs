@@ -17,12 +17,17 @@ export function carregarVersao(raiz, ler = fs.readFileSync) {
       const version = String(bruto.version ?? "").trim();
       const name = String(bruto.name ?? NOME_CONECTOR).trim();
       if (version) {
-        return { name: name || NOME_CONECTOR, version };
+        const agenteTef = String(bruto.agenteTef ?? "").trim();
+        return {
+          name: name || NOME_CONECTOR,
+          version,
+          agenteTef: /^UltraPDVTef_\d+\.exe$/i.test(agenteTef) ? agenteTef : "",
+        };
       }
     } catch {
       continue;
     }
   }
 
-  return { name: NOME_CONECTOR, version: "0.0.0-dev" };
+  return { name: NOME_CONECTOR, version: "0.0.0-dev", agenteTef: "" };
 }

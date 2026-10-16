@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 
+import { origemProducaoComprovada } from "@/lib/pdv/tef/ambiente-transacao";
 import { assinarProvaTef, dadosFiscaisProvaTef, verificarProvaTef } from "@/lib/pdv/tef/prova";
 import { registrarResultado, memoriaTefVazia, type OperacaoTef } from "@/lib/pdv/tef/orquestracao";
 import { pagamentoEletronicoTemDadosReais, pagamentoPixTefComprovado, validarPagamentosEletronicosParaEmissao } from "@/lib/fiscal/validar-pagamentos-eletronicos";
@@ -290,6 +291,8 @@ test("prova trocada na recuperação não grava os dados fiscais", () => {
       instituicao: "ELO",
     },
     provaValida: true,
+    origem: origemProducaoComprovada(),
+    modalidadeOficial: { provaValida: true, tipoCartao: 2 },
   });
   assert.equal(aceito.ok, true);
   assert.equal(operacaoMemoria.status, "autorizada");
@@ -403,6 +406,8 @@ test("resposta sem CNPJ da credenciadora completa C6 PAY pela tabela e preserva 
       instituicao: "DEBITO A VISTA",
     },
     provaValida: true,
+    origem: origemProducaoComprovada(),
+    modalidadeOficial: { provaValida: true, tipoCartao: 2 },
   });
   assert.equal(aceito.ok, true);
   assert.equal(operacaoMemoria.cnpjCredenciadora, "31872495000172");
@@ -532,4 +537,24 @@ test("venda persistida com TEF de homologação não financia NFC-e de produçã
     }),
     "Não foi possível confirmar o ambiente do TEF. A NFC-e de produção não foi emitida."
   );
+});
+
+test("texto CREDITO A VISTA não troca o tPag do pagamento", () => {
+  const avaliacao = avaliarPagamentosFiscaisTef({
+    pagamentos: [pagamento({ codigo_fiscal: "04", valor: 1, nome: "Cartão de Débito" })],
+    operacoes: [
+      operacao({
+        instituicao: "CREDITO A VISTA",
+        bandeiraNome: "Mastercard",
+      }),
+    ],
+  });
+  assert.equal(avaliacao.erro, null);
+  assert.equal(avaliacao.pagamentos[0].codigo_fiscal, "04");
+  const detalhe = detalhePagamentoGeranet(
+    avaliacao.pagamentos[0],
+    1,
+    "0"
+  );
+  assert.equal(detalhe.tipo, "04");
 });

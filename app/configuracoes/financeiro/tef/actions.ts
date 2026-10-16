@@ -5,10 +5,12 @@ import { redirect } from "next/navigation";
 import {
   ativarAssistenteTefSessao,
   avaliarAssistenteTefSessao,
+  prepararBibliotecaProducaoSessao,
   prepararInstalacaoAssistenteSessao,
   salvarRascunhoAssistenteSessao,
   type ObservacaoAssistente,
 } from "@/lib/pdv/tef/assistente-sessao";
+import { validarProvaBibliotecaSessao } from "@/lib/pdv/tef/prova-biblioteca-sessao";
 import { ErroTef, salvarConfigTefSessao, autorizarPareamentoTefSessao, concluirPareamentoTefSessao, diagnosticarRecuperacaoTefSessao, prepararSincronizacaoVinculoTefSessao, recuperarAutorizacaoTefSessao, revogarTerminalTefSessao, verificarComputadorTefSessao } from "@/lib/pdv/tef/servico";
 
 export async function salvarTefEmpresa(formData: FormData) {
@@ -30,6 +32,30 @@ export async function salvarTefEmpresa(formData: FormData) {
     redirect(`/configuracoes/financeiro/tef?erro=${encodeURIComponent(mensagem)}`);
   }
   redirect("/configuracoes/financeiro/tef?sucesso=1");
+}
+
+export async function prepararBibliotecaProducao(input: {
+  confirmacaoExplicita: boolean;
+  dispositivoId: string;
+  credencialInformada: boolean;
+}) {
+  try {
+    return await prepararBibliotecaProducaoSessao(input);
+  } catch (error) {
+    return {
+      ok: false as const,
+      efeito: "recusar" as const,
+      motivo: error instanceof ErroTef ? error.message : "Não foi possível preparar a pasta de produção.",
+      diretorio: "" as const,
+      pastaSandbox: "bin/tef/TEF/PGWeb",
+      pastaProducao: "C:/ProgramData/UltraPDV/TEF/Producao/PGWeb",
+      pontoCaptura: "",
+      servidor: "",
+      estabelecimento: "",
+      gravaBanco: false as const,
+      apagaSandbox: false as const,
+    };
+  }
 }
 
 export async function autorizarPareamentoEmpresa(codigo: string) {
@@ -159,6 +185,28 @@ export async function salvarRascunhoAssistente(input: {
       ok: false as const,
       etapa: "credenciamento" as const,
       pendencias: [error instanceof ErroTef ? error.message : "Não foi possível salvar o andamento."],
+    };
+  }
+}
+
+export async function validarProvaBiblioteca(input: {
+  dispositivoId: string;
+  versao: number | null;
+  campos: unknown;
+  assinatura: string;
+}) {
+  try {
+    return await validarProvaBibliotecaSessao(input);
+  } catch (error) {
+    return {
+      ok: false as const,
+      efeito: "recusar" as const,
+      motivo: error instanceof ErroTef ? error.message : "Não foi possível validar a prova da biblioteca.",
+      instalacaoTecnica: "pendente" as const,
+      ambienteBiblioteca: "ausente" as const,
+      adquirente: "desconhecida" as const,
+      cobrancaLiberada: false as const,
+      nfceLiberada: false as const,
     };
   }
 }

@@ -174,11 +174,10 @@ export function planejarSincronizacaoVinculo(
   if (!servidorOficial.ok) {
     return recusar("O servidor oficial da empresa é inválido.");
   }
-  if (
-    servidorTerminal.servidor &&
-    servidorOficial.servidor &&
-    servidorTerminal.servidor !== servidorOficial.servidor
-  ) {
+  if (!servidorOficial.servidor) {
+    return recusar("O servidor oficial da empresa não está definido.");
+  }
+  if (servidorTerminal.servidor && servidorTerminal.servidor !== servidorOficial.servidor) {
     return recusar("O servidor do terminal não confere com o servidor oficial.");
   }
   return {
@@ -193,7 +192,7 @@ export function planejarSincronizacaoVinculo(
       pontoCaptura: pontoOficial,
       ambiente: input.config.ambiente,
       cnpj: cnpjEmpresa,
-      servidor: servidorTerminal.servidor || servidorOficial.servidor,
+      servidor: servidorOficial.servidor,
     },
     ativaEmpresa: false,
     executaInstalacao: false,
@@ -209,13 +208,121 @@ export type LeituraProcessoTef = {
   reconciliacaoNecessaria: boolean;
 };
 
+export type CampoVinculo =
+  | "terminalCodigo"
+  | "pontoCaptura"
+  | "estabelecimento"
+  | "ambiente"
+  | "servidor"
+  | "cnpj";
+
 export type LeituraVinculoLocal = {
   vinculado: boolean;
   empresaId: string;
   terminalCodigo: string;
   pontoCaptura: string;
   estabelecimento: string;
+  informaIdentidadeFiscal: boolean;
+  ambiente: string;
+  servidor: string;
+  cnpjInformado: boolean;
 };
+
+const ROTULOS_VINCULO: Record<CampoVinculo, string> = {
+  terminalCodigo: "código lógico",
+  pontoCaptura: "ponto de captura",
+  estabelecimento: "estabelecimento",
+  ambiente: "ambiente",
+  servidor: "servidor",
+  cnpj: "CNPJ",
+};
+
+export function rotuloCampoVinculo(campo: CampoVinculo) {
+  return ROTULOS_VINCULO[campo];
+}
+
+export function descreverDivergencias(campos: CampoVinculo[]) {
+  if (campos.length === 0) {
+    return "";
+  }
+  return `Ainda divergem: ${campos.map((campo) => ROTULOS_VINCULO[campo]).join(", ")}.`;
+}
+
+export function versaoInformaIdentidadeFiscal(versao: string | null | undefined) {
+  const partes = String(versao ?? "")
+    .trim()
+    .split(".");
+  if (partes.length < 3) {
+    return false;
+  }
+  const numeros = partes.slice(0, 3).map((parte) => Number(parte));
+  if (numeros.some((numero) => !Number.isInteger(numero) || numero < 0)) {
+    return false;
+  }
+  const [maior, menor, correcao] = numeros;
+  if (maior !== 1) {
+    return maior > 1;
+  }
+  if (menor !== 3) {
+    return menor > 3;
+  }
+  return correcao >= 5;
+}
+
+export function lerVinculoDoStatus(vinculo: {
+  vinculado?: boolean;
+  empresaId?: string;
+  terminalCodigo?: string;
+  pontoCaptura?: string;
+  estabelecimento?: string;
+  ambiente?: string;
+  servidor?: string;
+  cnpjInformado?: boolean;
+} | null | undefined): LeituraVinculoLocal | null {
+  if (!vinculo?.vinculado) {
+    return null;
+  }
+  const informaIdentidadeFiscal =
+    Object.prototype.hasOwnProperty.call(vinculo, "ambiente") ||
+    Object.prototype.hasOwnProperty.call(vinculo, "servidor") ||
+    Object.prototype.hasOwnProperty.call(vinculo, "cnpjInformado");
+  return {
+    vinculado: true,
+    empresaId: String(vinculo.empresaId ?? ""),
+    terminalCodigo: String(vinculo.terminalCodigo ?? ""),
+    pontoCaptura: String(vinculo.pontoCaptura ?? ""),
+    estabelecimento: String(vinculo.estabelecimento ?? ""),
+    informaIdentidadeFiscal,
+    ambiente: informaIdentidadeFiscal ? String(vinculo.ambiente ?? "") : "",
+    servidor: informaIdentidadeFiscal ? String(vinculo.servidor ?? "") : "",
+    cnpjInformado: informaIdentidadeFiscal ? vinculo.cnpjInformado === true : false,
+  };
+}
+
+export function exigirIdentidadeFiscalDoStatus(status: {
+  tef?: { agente?: { versao?: string } };
+  vinculo?: {
+    ambiente?: string;
+    servidor?: string;
+    cnpjInformado?: boolean;
+  };
+} | null | undefined) {
+  if (!status) {
+    return false;
+  }
+  if (versaoInformaIdentidadeFiscal(status.tef?.agente?.versao)) {
+    return true;
+  }
+  const vinculo = status.vinculo;
+  if (!vinculo || typeof vinculo !== "object") {
+    return false;
+  }
+  return (
+    Object.prototype.hasOwnProperty.call(vinculo, "ambiente") ||
+    Object.prototype.hasOwnProperty.call(vinculo, "servidor") ||
+    Object.prototype.hasOwnProperty.call(vinculo, "cnpjInformado")
+  );
+}
 
 export function processoTefAtivo(leitura: LeituraProcessoTef) {
   return (
@@ -225,21 +332,57 @@ export function processoTefAtivo(leitura: LeituraProcessoTef) {
   );
 }
 
+function servidoresConferem(local: string, esperado: string) {
+  const gravado = servidorInformado(local);
+  const oficial = servidorInformado(esperado);
+  return gravado.ok && oficial.ok && gravado.servidor !== "" && gravado.servidor === oficial.servidor;
+}
+
+export function divergenciasVinculo(
+  local: LeituraVinculoLocal | null,
+  esperado: VinculoAutorizado
+): CampoVinculo[] {
+  const campos: CampoVinculo[] = [];
+  if (!local?.vinculado || local.terminalCodigo.trim() !== esperado.terminalCodigo) {
+    campos.push("terminalCodigo");
+  }
+  if (!local?.vinculado || local.pontoCaptura.trim() !== esperado.pontoCaptura) {
+    campos.push("pontoCaptura");
+  }
+  if (!local?.vinculado || local.estabelecimento.trim() !== esperado.estabelecimento) {
+    campos.push("estabelecimento");
+  }
+  if (local?.informaIdentidadeFiscal) {
+    if (local.ambiente !== esperado.ambiente) {
+      campos.push("ambiente");
+    }
+    if (!servidoresConferem(local.servidor, esperado.servidor)) {
+      campos.push("servidor");
+    }
+    if (local.cnpjInformado !== true) {
+      campos.push("cnpj");
+    }
+  }
+  return campos;
+}
+
 export function avaliarProcessoAntesDeGravar(input: {
   processo: LeituraProcessoTef;
   vinculoLocal: LeituraVinculoLocal | null;
   vinculoAutorizado: VinculoAutorizado;
-}): { efeito: "gravar" | "ja_sincronizado" | "recusar"; motivo: string } {
+}): { efeito: "gravar" | "ja_sincronizado" | "recusar"; motivo: string; divergencias: CampoVinculo[] } {
   if (input.processo.transacaoPendenteConfirmacao) {
     return {
       efeito: "recusar",
       motivo: "O Connector informa transação pendente. Resolva antes de sincronizar.",
+      divergencias: [],
     };
   }
   if (input.processo.reconciliacaoNecessaria) {
     return {
       efeito: "recusar",
       motivo: "O Connector informa reconciliação pendente. Resolva antes de sincronizar.",
+      divergencias: [],
     };
   }
   const local = input.vinculoLocal;
@@ -247,27 +390,29 @@ export function avaliarProcessoAntesDeGravar(input: {
     return {
       efeito: "recusar",
       motivo: "O Connector está vinculado a outra empresa. A sincronização não transfere o terminal.",
+      divergencias: [],
     };
   }
-  const alinhado =
-    local?.vinculado === true &&
-    local.terminalCodigo.trim() === input.vinculoAutorizado.terminalCodigo &&
-    local.pontoCaptura.trim() === input.vinculoAutorizado.pontoCaptura &&
-    local.estabelecimento.trim() === input.vinculoAutorizado.estabelecimento;
-  if (processoTefAtivo(input.processo) && !alinhado) {
+  const divergencias = divergenciasVinculo(local, input.vinculoAutorizado);
+  if (processoTefAtivo(input.processo) && divergencias.length > 0) {
     return {
       efeito: "recusar",
       motivo:
         "O processo TEF está ativo com identidade diferente do ponto oficial. Encerre o processo antes de sincronizar. A instalação não será chamada.",
+      divergencias,
     };
   }
-  if (alinhado) {
-    return { efeito: "ja_sincronizado", motivo: "" };
+  if (divergencias.length === 0) {
+    return { efeito: "ja_sincronizado", motivo: "", divergencias: [] };
   }
-  return { efeito: "gravar", motivo: "" };
+  return { efeito: "gravar", motivo: descreverDivergencias(divergencias), divergencias };
 }
 
-export function montarCorpoVincular(codigoPareamento: string, vinculo: VinculoAutorizado) {
+export function montarCorpoVincular(
+  codigoPareamento: string,
+  vinculo: VinculoAutorizado,
+  opcoes: { identidadeFiscal?: boolean } = {}
+) {
   return {
     codigo: codigoPareamento.trim().toUpperCase(),
     empresaId: vinculo.empresaId,
@@ -275,6 +420,14 @@ export function montarCorpoVincular(codigoPareamento: string, vinculo: VinculoAu
     dispositivoId: vinculo.dispositivoId,
     estabelecimento: vinculo.estabelecimento,
     pontoCaptura: vinculo.pontoCaptura,
+    ...(opcoes.identidadeFiscal
+      ? {
+          ambiente: vinculo.ambiente,
+          cnpj: vinculo.cnpj,
+          servidor: vinculo.servidor,
+          terminalId: vinculo.terminalId,
+        }
+      : {}),
   };
 }
 
@@ -312,7 +465,30 @@ export type VinculoConfirmado = {
   pontoCaptura: string;
   estabelecimento: string;
   processo: string;
+  ambiente: string;
+  servidor: string;
+  cnpjInformado: boolean;
+  identidadeFiscal: boolean;
 };
+
+export function mensagemVinculoConfirmado(
+  efeito: "ja_sincronizado" | "sincronizado" | "recuperado",
+  identidadeFiscal: boolean
+) {
+  if (identidadeFiscal) {
+    if (efeito === "recuperado") {
+      return "A resposta da gravação falhou, mas o status do Connector confirma o vínculo oficial. Nenhuma venda foi ativada.";
+    }
+    return "Vínculo oficial sincronizado. Nenhuma venda foi ativada.";
+  }
+  if (efeito === "recuperado") {
+    return "A resposta da gravação falhou, mas o status do Connector já confirma o ponto e o terminal. Esta versão não confirma ambiente, servidor e CNPJ. Nenhuma venda foi ativada.";
+  }
+  if (efeito === "ja_sincronizado") {
+    return "Este Connector já guarda o ponto e o terminal, mas não confirma ambiente, servidor e CNPJ. Nenhuma venda foi ativada.";
+  }
+  return "Vínculo do Connector atualizado. Esta versão não confirma ambiente, servidor e CNPJ. Nenhuma venda foi ativada e nenhuma transação foi enviada.";
+}
 
 export function concluirSincronizacaoLocal(input: {
   gravacaoOk: boolean;
@@ -324,45 +500,61 @@ export function concluirSincronizacaoLocal(input: {
       terminalCodigo?: string;
       pontoCaptura?: string;
       estabelecimento?: string;
+      ambiente?: string;
+      servidor?: string;
+      cnpjInformado?: boolean;
     };
-    tef?: { processo?: string };
+    tef?: { processo?: string; agente?: { versao?: string } };
   } | null;
   esperado: VinculoAutorizado;
+  exigirIdentidadeFiscal?: boolean;
 }):
-  | { efeito: "sincronizado" | "recuperado"; gravado: VinculoConfirmado }
-  | { efeito: "falhou"; motivo: string; podeRepetir: boolean } {
-  const vinculo = input.status?.vinculo;
-  const confere =
-    vinculo?.vinculado === true &&
-    String(vinculo.empresaId ?? "").trim().toLowerCase() === input.esperado.empresaId.trim().toLowerCase() &&
-    String(vinculo.terminalCodigo ?? "").trim() === input.esperado.terminalCodigo &&
-    String(vinculo.pontoCaptura ?? "").trim() === input.esperado.pontoCaptura &&
-    String(vinculo.estabelecimento ?? "").trim() === input.esperado.estabelecimento;
-  if (confere && vinculo) {
+  | { efeito: "sincronizado" | "recuperado"; gravado: VinculoConfirmado; divergencias: CampoVinculo[] }
+  | { efeito: "falhou"; motivo: string; podeRepetir: boolean; divergencias: CampoVinculo[] } {
+  const lido = lerVinculoDoStatus(input.status?.vinculo);
+  const exigir =
+    input.exigirIdentidadeFiscal === true || lido?.informaIdentidadeFiscal === true;
+  const comparado = lido
+    ? { ...lido, informaIdentidadeFiscal: exigir }
+    : null;
+  const divergencias = divergenciasVinculo(comparado, input.esperado);
+  const identidadeFiscal =
+    exigir &&
+    divergencias.length === 0 &&
+    lido?.informaIdentidadeFiscal === true;
+  if (divergencias.length === 0 && lido && (!exigir || identidadeFiscal)) {
     return {
       efeito: input.gravacaoOk ? "sincronizado" : "recuperado",
+      divergencias: [],
       gravado: {
-        empresaId: String(vinculo.empresaId).trim(),
-        terminalCodigo: String(vinculo.terminalCodigo).trim(),
-        pontoCaptura: String(vinculo.pontoCaptura).trim(),
-        estabelecimento: String(vinculo.estabelecimento ?? "").trim(),
+        empresaId: lido.empresaId.trim(),
+        terminalCodigo: lido.terminalCodigo.trim(),
+        pontoCaptura: lido.pontoCaptura.trim(),
+        estabelecimento: lido.estabelecimento.trim(),
         processo: String(input.status?.tef?.processo ?? ""),
+        ambiente: lido.informaIdentidadeFiscal ? lido.ambiente : "",
+        servidor: lido.informaIdentidadeFiscal ? lido.servidor : "",
+        cnpjInformado: lido.informaIdentidadeFiscal ? lido.cnpjInformado : false,
+        identidadeFiscal,
       },
     };
   }
-  const pontoLido = String(vinculo?.pontoCaptura ?? "").trim();
+  const pontoLido = lido?.pontoCaptura.trim() ?? "";
   const detalhePonto =
     pontoLido && pontoLido !== input.esperado.pontoCaptura
       ? ` O status continua com o ponto ${pontoLido}.`
       : "";
+  const detalheCampos = descreverDivergencias(divergencias);
+  const sufixo = `${detalhePonto}${detalheCampos ? ` ${detalheCampos}` : ""}`;
   return {
     efeito: "falhou",
+    divergencias,
     motivo: input.gravacaoOk
-      ? `O Connector respondeu, mas o status não confirma o ponto oficial.${detalhePonto}`
+      ? `O Connector respondeu, mas o status não confirma o vínculo oficial.${sufixo}`
       : `${descreverRecusaVincular({
           httpStatus: input.recusa?.httpStatus ?? null,
           erro: input.recusa?.erro ?? "",
-        })}${detalhePonto}`,
+        })}${sufixo}`,
     podeRepetir: true,
   };
 }

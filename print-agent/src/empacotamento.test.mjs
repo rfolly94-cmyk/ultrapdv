@@ -25,6 +25,7 @@ test("o grafo do instalador inclui os modulos TEF e deixa os testes de fora", ()
     "tef-prova.mjs",
     "tef-pareamento.mjs",
     "tef-recuperacao.mjs",
+    "tef-pasta.mjs",
     "pagina-status.html",
     "stop.mjs",
     "verify.mjs",
@@ -69,5 +70,10 @@ test("a atualizacao NSIS preserva ProgramData e o executavel PayGo novo", async 
   auditarInstaladorNsi(texto);
   const instalacao = texto.split(/Section "Uninstall"/)[0];
   assert.match(instalacao, /CreateDirectory "\$1\\UltraPDV"/);
+  assert.match(instalacao, /tef-preparar-pasta\.mjs/);
+  assert.doesNotMatch(instalacao, /icacls "\$1\\UltraPDV".*\/T/);
+  assert.match(instalacao, /BackupConnectorAnterior/);
+  assert.match(texto, /tef-biblioteca\.json/);
   assert.doesNotMatch(instalacao, /RMDir/);
+  assert.doesNotMatch(texto, /RMDir\s+\/r\s+"\$INSTDIR"/);
 });

@@ -563,6 +563,7 @@ export async function chamarGeranet({
       timeoutMs
     );
 
+  const inicioRedeMs = performance.now();
   let resposta: Response;
 
   try {
@@ -604,6 +605,7 @@ export async function chamarGeranet({
         ...meta,
         codigo: codigoErroRede(error) || null,
         transmissaoPodeTerSaido: falha.transmissaoPodeTerSaido,
+        duracaoMs: Math.round(performance.now() - inicioRedeMs),
       }
     );
 
@@ -615,6 +617,7 @@ export async function chamarGeranet({
   logFaseGeranet("RESPOSTA_RECEBIDA", {
     ...meta,
     httpStatus: resposta.status,
+    duracaoMs: Math.round(performance.now() - inicioRedeMs),
   });
 
   const dados = normalizarRespostaGeranet(

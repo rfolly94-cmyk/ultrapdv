@@ -106,6 +106,7 @@ export type ResultadoConectorTef = {
   cnpjCredenciadora?: string | null;
   cnpjRecebedor?: string | null;
   instituicao?: string | null;
+  tipoCartao?: number | null;
 };
 
 export type InterpretacaoTef = {
@@ -236,6 +237,7 @@ export type ProvaTef = {
   usuarioId?: string;
   segredoVinculoHash?: string;
   terminalId?: string;
+  ambienteEfetivo?: string | null;
 };
 
 export function validarPagamentoMisto(
@@ -302,6 +304,12 @@ export function validarPagamentoMisto(
       return {
         ok: false as const,
         erro: "O TEF autorizado não confere com o pagamento.",
+      };
+    }
+    if (operacao.ambienteEfetivo !== "producao") {
+      return {
+        ok: false as const,
+        erro: "Pagamento com cartão sem comprovação de produção do TEF.",
       };
     }
   }

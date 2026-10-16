@@ -14,6 +14,9 @@ export type DiagnosticoPinpad = {
   ppinfoDisponivel?: boolean;
   limitacaoModelo?: string;
   codigoBiblioteca?: number | null;
+  avisoBiblioteca?: string | null;
+  duracaoMs?: number | null;
+  chamadaNativaEmExecucao?: boolean;
 };
 
 export function mensagemDiagnosticoPinpad(input: {
@@ -23,6 +26,13 @@ export function mensagemDiagnosticoPinpad(input: {
 }) {
   const codigo = input.codigo ?? "";
   if (
+    codigo === "TEF_OCUPADO" &&
+    typeof input.erro === "string" &&
+    input.erro.includes("ainda está em execução")
+  ) {
+    return input.erro;
+  }
+  if (
     codigo === "TEF_OCUPADO" ||
     codigo === "TEF_TRANSACAO_PENDENTE" ||
     codigo === "TEF_RECONCILIACAO_NECESSARIA" ||
@@ -30,16 +40,32 @@ export function mensagemDiagnosticoPinpad(input: {
   ) {
     return "Terminal ocupado com operação financeira.";
   }
-  if (
-    codigo === "PINPAD_PAYGO_NAO_INICIALIZADO" ||
-    codigo === "TEF_NAO_INICIALIZADO" ||
-    codigo === "TEF_TIMEOUT"
-  ) {
-    return codigo === "TEF_TIMEOUT"
-      ? "Comunicação indisponível."
-      : "Comunicação indisponível. O PayGoWeb não será reiniciado por este diagnóstico.";
+  if (codigo === "TEF_TIMEOUT") {
+    return "O teste de comunicação não retornou no tempo limite. A biblioteca não enviou código. Nenhuma cobrança foi iniciada.";
+  }
+  if (codigo === "PINPAD_PAYGO_NAO_INICIALIZADO" || codigo === "TEF_NAO_INICIALIZADO") {
+    return "A PGWebLib ainda não foi inicializada. Este diagnóstico não a inicializa. O PayGoWeb não será reiniciado por este diagnóstico.";
   }
   const comunicacao = input.resultado?.comunicacao ?? "";
+  if (comunicacao === "timeout") {
+    return "O teste de comunicação não retornou no tempo limite. A biblioteca não enviou código. Nenhuma cobrança foi iniciada.";
+  }
+  if (comunicacao === "timeout_biblioteca") {
+    return "A biblioteca informou tempo esgotado aguardando o pinpad.";
+  }
+  if (comunicacao === "nao_concluido") {
+    return typeof input.resultado?.codigoBiblioteca === "number"
+      ? `A biblioteca pediu para continuar o teste e não concluiu. Código ${input.resultado.codigoBiblioteca}.`
+      : "A biblioteca pediu para continuar o teste e não concluiu.";
+  }
+  if (comunicacao === "sem_porta") {
+    return "A biblioteca não tem porta de pinpad utilizável pela API. A porta do Windows não foi forçada.";
+  }
+  if (comunicacao === "codigo_biblioteca") {
+    return typeof input.resultado?.codigoBiblioteca === "number"
+      ? `A biblioteca devolveu o código ${input.resultado.codigoBiblioteca}.`
+      : "A biblioteca devolveu um código não classificado.";
+  }
   if (comunicacao === "confirmada") {
     return "Pinpad conectado e comunicação confirmada.";
   }

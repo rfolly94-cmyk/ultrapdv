@@ -7,6 +7,7 @@ import {
   iniciarOperacao,
   liberarConfirmacao,
   listarPendencias,
+  marcarPendenciaAdministrativa,
   marcarConfirmada,
   marcarDesfeita,
   memoriaTefVazia,
@@ -21,9 +22,21 @@ import {
   type TerminalTef,
 } from "@/lib/pdv/tef/orquestracao";
 import {
+  decidirPorEvidencia,
+  hashComprovante,
+  juntarComprovante,
+} from "@/lib/pdv/tef/ambiente-transacao";
+import {
+  formaDaModalidadeEfetiva,
+  mensagemFormaAusente,
+  tipoCartaoOficial,
+} from "@/lib/pdv/tef/modalidade-efetiva";
+import {
   dadosFiscaisProvaTef,
   hashSegredoVinculo,
+  verificarAmbienteTef,
   verificarIdentidadeTef,
+  verificarModalidadeTef,
   verificarProvaTef,
   type CamposProvaTef,
 } from "@/lib/pdv/tef/prova";
@@ -70,6 +83,18 @@ function colunaOperacaoManualAusente(error: { code?: string; message?: string } 
   return /42703|PGRST204|permitir_operacao_manual/i.test(texto);
 }
 
+function colunaAmbienteAusente(error: { code?: string; message?: string } | null) {
+  const texto = `${error?.code ?? ""} ${error?.message ?? ""}`;
+  return /42703|PGRST204|ambiente_efetivo|ponto_efetivo|host_efetivo|comprovante_sha256|motivo_ambiente/i.test(
+    texto
+  );
+}
+
+function colunaModalidadeAusente(error: { code?: string; message?: string } | null) {
+  const texto = `${error?.code ?? ""} ${error?.message ?? ""}`;
+  return /modalidade_solicitada|modalidade_efetiva|tipo_cartao_paygo/i.test(texto);
+}
+
 function colunaFiscalCartaoAusente(error: { code?: string; message?: string } | null) {
   const texto = `${error?.code ?? ""} ${error?.message ?? ""}`;
   return /42703|PGRST204|bandeira_nome|cnpj_credenciadora|cnpj_recebedor|instituicao/i.test(texto);
@@ -97,6 +122,21 @@ function linhaOperacao(linha: Linha): OperacaoTef {
     identificador: String(linha.identificador),
     idempotencyKey: String(linha.idempotency_key),
     modalidade: linha.modalidade === "credito" ? "credito" : "debito",
+    modalidadeSolicitada:
+      linha.modalidade_solicitada === "credito" || linha.modalidade_solicitada === "debito"
+        ? linha.modalidade_solicitada
+        : linha.modalidade === "credito"
+          ? "credito"
+          : "debito",
+    modalidadeEfetiva:
+      linha.modalidade_efetiva === "credito" || linha.modalidade_efetiva === "debito"
+        ? linha.modalidade_efetiva
+        : null,
+    tipoCartaoPayGo:
+      typeof linha.tipo_cartao_paygo === "number" &&
+      Number.isInteger(linha.tipo_cartao_paygo)
+        ? linha.tipo_cartao_paygo
+        : null,
     valorCentavos: Number(linha.valor_centavos),
     status: linha.status as OperacaoTef["status"],
     nsu: linha.nsu ? String(linha.nsu) : null,
@@ -113,6 +153,16 @@ function linhaOperacao(linha: Linha): OperacaoTef {
     vendaIdempotencyKey: linha.venda_idempotency_key
       ? String(linha.venda_idempotency_key)
       : "",
+    ambienteEfetivo:
+      linha.ambiente_efetivo === "producao" ||
+      linha.ambiente_efetivo === "homologacao" ||
+      linha.ambiente_efetivo === "desconhecido"
+        ? linha.ambiente_efetivo
+        : "",
+    pontoEfetivo: linha.ponto_efetivo ? String(linha.ponto_efetivo) : "",
+    hostEfetivo: linha.host_efetivo ? String(linha.host_efetivo) : "",
+    comprovanteSha256: linha.comprovante_sha256 ? String(linha.comprovante_sha256) : "",
+    motivoAmbiente: linha.motivo_ambiente ? String(linha.motivo_ambiente) : "",
   };
 }
 
@@ -124,6 +174,9 @@ function payloadOperacao(operacao: OperacaoTef) {
     identificador: operacao.identificador,
     idempotency_key: operacao.idempotencyKey,
     modalidade: operacao.modalidade,
+    modalidade_solicitada: operacao.modalidadeSolicitada ?? operacao.modalidade,
+    modalidade_efetiva: operacao.modalidadeEfetiva ?? null,
+    tipo_cartao_paygo: operacao.tipoCartaoPayGo ?? null,
     valor_centavos: operacao.valorCentavos,
     status: operacao.status,
     nsu: operacao.nsu,
@@ -136,6 +189,11 @@ function payloadOperacao(operacao: OperacaoTef) {
     usuario_id: operacao.usuarioId,
     segredo_vinculo_hash: operacao.segredoVinculoHash,
     venda_idempotency_key: operacao.vendaIdempotencyKey || null,
+    ambiente_efetivo: operacao.ambienteEfetivo || "",
+    ponto_efetivo: (operacao.pontoEfetivo || "").slice(0, 32),
+    host_efetivo: (operacao.hostEfetivo || "").slice(0, 120),
+    comprovante_sha256: (operacao.comprovanteSha256 || "").slice(0, 64),
+    motivo_ambiente: (operacao.motivoAmbiente || "").slice(0, 400),
     updated_at: new Date().toISOString(),
   };
 }
@@ -219,12 +277,36 @@ export async function listarDadosFiscaisTefPorIds(empresaId: string, ids: string
   );
 }
 
+const COLUNAS_OPERACAO_TEF_BASE =
+  "id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key, ambiente_efetivo, ponto_efetivo, host_efetivo, comprovante_sha256, motivo_ambiente";
+
+const COLUNAS_OPERACAO_TEF = `${COLUNAS_OPERACAO_TEF_BASE}, modalidade_solicitada, modalidade_efetiva, tipo_cartao_paygo`;
+
+async function lerLinhasOperacao(
+  consulta: (
+    colunas: string
+  ) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>
+) {
+  const completa = await consulta(COLUNAS_OPERACAO_TEF);
+  if (!completa.error) {
+    return completa.data;
+  }
+  if (!colunaModalidadeAusente(completa.error)) {
+    return exigirTabela(Promise.resolve(completa));
+  }
+  const base = await consulta(COLUNAS_OPERACAO_TEF_BASE);
+  return exigirTabela(Promise.resolve(base));
+}
+
 async function exigirTabela<T>(consulta: PromiseLike<{ data: T; error: { code?: string; message?: string } | null }>) {
   const { data, error } = await consulta;
   if (error) {
     if (migracaoAusente(error)) {
+      const detalhe = colunaAmbienteAusente(error)
+        ? " Aplique supabase/migrations/20261013020000_tef_ambiente_efetivo.sql. A aplicação não altera NFC-e, vendas nem operações já gravadas."
+        : "";
       throw new ErroTef(
-        "A estrutura de TEF ainda não foi aplicada neste ambiente.",
+        `A estrutura de TEF ainda não foi aplicada neste ambiente.${detalhe}`,
         503
       );
     }
@@ -352,12 +434,10 @@ async function carregarMemoria(
     (item) => item.empresaId === empresaId && item.ativo
   );
   if (nosso) {
-    const abertas = await exigirTabela(
+    const abertas = await lerLinhasOperacao((colunas) =>
       cliente
         .from("tef_operacoes")
-        .select(
-          "id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key"
-        )
+        .select(colunas)
         .eq("empresa_id", empresaId)
         .eq("terminal_id", nosso.id)
         .in("status", [...STATUS_TEF_ABERTOS])
@@ -365,16 +445,14 @@ async function carregarMemoria(
     memoria.operacoes = ((abertas ?? []) as Linha[]).map(linhaOperacao);
   }
   if (idempotencyKey) {
-    const existente = await exigirTabela(
+    const existente = (await lerLinhasOperacao((colunas) =>
       cliente
         .from("tef_operacoes")
-        .select(
-          "id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key"
-        )
+        .select(colunas)
         .eq("empresa_id", empresaId)
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle()
-    );
+    )) as Linha | null;
     if (existente && !memoria.operacoes.some((item) => item.id === String(existente.id))) {
       memoria.operacoes.push(linhaOperacao(existente));
     }
@@ -429,13 +507,56 @@ async function gravarMemoria(
   for (const operacao of operacoesParaGravar(antes, memoria.operacoes, empresaId)) {
     const payload = payloadOperacao(operacao);
     const nova = !antes.some((item) => item.id === operacao.id);
-    const { error } = nova
+    const gravacao = nova
       ? await cliente.from("tef_operacoes").insert(payload)
       : await cliente
           .from("tef_operacoes")
           .update(payload)
           .eq("id", operacao.id)
           .eq("empresa_id", empresaId);
+    let error = gravacao.error;
+    if (error && colunaModalidadeAusente(error)) {
+      const resto: Record<string, unknown> = { ...payload };
+      delete resto.modalidade_solicitada;
+      delete resto.modalidade_efetiva;
+      delete resto.tipo_cartao_paygo;
+      const reservaModalidade = nova
+        ? await cliente.from("tef_operacoes").insert(resto)
+        : await cliente
+            .from("tef_operacoes")
+            .update(resto)
+            .eq("id", operacao.id)
+            .eq("empresa_id", empresaId);
+      error = reservaModalidade.error;
+    }
+    if (error && colunaAmbienteAusente(error)) {
+      const resto: Record<string, unknown> = { ...payload };
+      delete resto.modalidade_solicitada;
+      delete resto.modalidade_efetiva;
+      delete resto.tipo_cartao_paygo;
+      delete resto.ambiente_efetivo;
+      delete resto.ponto_efetivo;
+      delete resto.host_efetivo;
+      delete resto.comprovante_sha256;
+      delete resto.motivo_ambiente;
+      const reserva = nova
+        ? await cliente.from("tef_operacoes").insert(resto)
+        : await cliente
+            .from("tef_operacoes")
+            .update({
+              status: payload.status,
+              nsu: payload.nsu,
+              autorizacao: payload.autorizacao,
+              rede: payload.rede,
+              finalizacao: payload.finalizacao,
+              venda_id: payload.venda_id,
+              teste: payload.teste,
+              updated_at: payload.updated_at,
+            })
+            .eq("id", operacao.id)
+            .eq("empresa_id", empresaId);
+      error = reserva.error;
+    }
     if (error) {
       if (error.code === "23505") {
         throw new ErroTef("Este terminal TEF já está em uma operação.", 409);
@@ -481,6 +602,15 @@ export async function iniciarTefPersistido(input: {
     throw new ErroTef("A chave deste Connector não confere com o terminal autorizado.", 403);
   }
   const configEmpresa = memoria.configuracoes[input.empresaId];
+  if (configEmpresa?.ambiente === "producao") {
+    const referencia = await referenciasProducaoTef(cliente, input.empresaId, proprio.id);
+    if (!referencia.pontoOficial || !referencia.hostOficial) {
+      throw new ErroTef(
+        "Defina o ponto e o servidor de produção do TEF antes de cobrar. A operação não foi iniciada. Abra Configurações, Financeiro, TEF.",
+        409
+      );
+    }
+  }
   const vinculoSegredo = randomBytes(32).toString("hex");
   const resultado = iniciarOperacao(memoria, {
     empresaId: input.empresaId,
@@ -521,6 +651,12 @@ export async function iniciarTefPersistido(input: {
     jaAutorizada: resultado.jaAutorizada,
     emAndamento: resultado.emAndamento,
     repetida: resultado.repetida,
+    recuperada: resultado.recuperada === true,
+    cobrarDeNovo: resultado.cobrarDeNovo === true,
+    diagnostico: resultado.diagnostico,
+    modalidadeSolicitada: resultado.modalidadeSolicitada,
+    modalidadeEfetiva: resultado.modalidadeEfetiva,
+    avisoModalidade: resultado.avisoModalidade,
     desafio: resultado.repetida ? "" : resultado.desafio,
     vinculoSegredo: resultado.repetida ? "" : vinculoSegredo,
   };
@@ -529,16 +665,14 @@ export async function iniciarTefPersistido(input: {
 async function memoriaDaOperacao(empresaId: string, operacaoId: string) {
   const cliente = admin();
   const memoria = memoriaTefVazia();
-  const linha = await exigirTabela(
+  const linha = (await lerLinhasOperacao((colunas) =>
     cliente
       .from("tef_operacoes")
-      .select(
-        "id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key"
-      )
+      .select(colunas)
       .eq("empresa_id", empresaId)
       .eq("id", operacaoId)
       .maybeSingle()
-  );
+  )) as Linha | null;
   if (!linha) {
     throw new ErroTef("Operação TEF não encontrada.", 404);
   }
@@ -574,11 +708,21 @@ function camposProvados(
   };
 }
 
+function textoLimitado(valor: unknown, maximo: number) {
+  const texto = typeof valor === "string" ? valor : "";
+  return texto.length > maximo ? "" : texto;
+}
+
 export async function registrarResultadoTefPersistido(input: {
   empresaId: string;
   operacaoId: string;
   resultado: ResultadoConectorTef;
   prova: string;
+  provaAmbiente?: string;
+  comprovante?: string;
+  host?: string;
+  pontoCaptura?: string;
+  provaModalidade?: string;
 }) {
   const { cliente, memoria, antes } = await memoriaDaOperacao(
     input.empresaId,
@@ -590,14 +734,17 @@ export async function registrarResultadoTefPersistido(input: {
   }
   const chave = await chavePublicaDaOperacao(cliente, operacao);
   const fiscal = dadosFiscaisProvaTef(input.resultado);
+  const camposFinanceiros = {
+    nsu: input.resultado.nsu ?? "",
+    autorizacao: input.resultado.autorizacao || input.resultado.codigoAutorizacao || "",
+    rede: input.resultado.rede ?? "",
+    finalizacao: input.resultado.finalizacao || input.resultado.codigoFinalizacao || "",
+  };
   const provaValida = verificarProvaTef(
     chave,
     camposProvados(operacao, {
       acao: "pagamento",
-      nsu: input.resultado.nsu ?? "",
-      autorizacao: input.resultado.autorizacao || input.resultado.codigoAutorizacao || "",
-      rede: input.resultado.rede ?? "",
-      finalizacao: input.resultado.finalizacao || input.resultado.codigoFinalizacao || "",
+      ...camposFinanceiros,
       sucesso: input.resultado.sucessoTransacao === true,
       codigo: input.resultado.codigo ?? "",
       bandeira: fiscal.bandeira,
@@ -607,7 +754,58 @@ export async function registrarResultadoTefPersistido(input: {
     }),
     input.prova
   );
-  const registrado = registrarResultado(memoria, { ...input, provaValida });
+  const comprovante = textoLimitado(input.comprovante, 48000);
+  const host = textoLimitado(input.host, 120).trim();
+  const pontoCaptura = textoLimitado(input.pontoCaptura, 32).trim();
+  const comprovanteSha256 = hashComprovante(comprovante);
+  const assinaturaAmbiente = verificarAmbienteTef(
+    chave,
+    {
+      desafio: operacao.desafio,
+      identificador: operacao.identificador,
+      valorCentavos: operacao.valorCentavos,
+      ...camposFinanceiros,
+      pontoCaptura,
+      host,
+      comprovanteSha256,
+    },
+    textoLimitado(input.provaAmbiente, 4096)
+  );
+  const referencia = await referenciasProducaoTef(cliente, input.empresaId, operacao.terminalId);
+  const origem = decidirPorEvidencia({
+    comprovante,
+    host,
+    pontoCaptura,
+    pontoOficial: referencia.pontoOficial,
+    hostOficial: referencia.hostOficial,
+    assinaturaValida: assinaturaAmbiente,
+    fluxoHomologacao: referencia.fluxoHomologacao,
+  });
+  const provaModalidade = textoLimitado(input.provaModalidade, 4096);
+  const avaliarModalidade = provaModalidade.length > 0;
+  const tipoCartao = tipoCartaoOficial(input.resultado.tipoCartao);
+  const provaModalidadeValida =
+    avaliarModalidade &&
+    verificarModalidadeTef(
+      chave,
+      {
+        desafio: operacao.desafio,
+        identificador: operacao.identificador,
+        valorCentavos: operacao.valorCentavos,
+        nsu: camposFinanceiros.nsu,
+        autorizacao: camposFinanceiros.autorizacao,
+        tipoCartao,
+      },
+      provaModalidade
+    );
+  const registrado = registrarResultado(memoria, {
+    ...input,
+    provaValida,
+    origem,
+    modalidadeOficial: avaliarModalidade
+      ? { provaValida: provaModalidadeValida, tipoCartao }
+      : undefined,
+  });
   if (!registrado.ok) {
     throw new ErroTef(registrado.erro, 404);
   }
@@ -615,7 +813,43 @@ export async function registrarResultadoTefPersistido(input: {
   if (!registrado.repetida) {
     await gravarDadosFiscaisOperacao(cliente, memoria.operacoes[0]);
   }
-  return { ok: true as const, status: registrado.status };
+  return {
+    ok: true as const,
+    status: registrado.status,
+    teste: registrado.teste,
+    diagnostico: registrado.diagnostico,
+    proibirDesfazimento: registrado.proibirDesfazimento,
+    modalidade: registrado.modalidade,
+    modalidadeSolicitada: registrado.modalidadeSolicitada,
+    modalidadeEfetiva: registrado.modalidadeEfetiva,
+    avisoModalidade: registrado.avisoModalidade,
+    erro: registrado.status === "autorizada" && !registrado.teste ? undefined : registrado.diagnostico,
+  };
+}
+
+async function referenciasProducaoTef(
+  cliente: ReturnType<typeof admin>,
+  empresaId: string,
+  terminalId: string
+) {
+  const config = await cliente
+    .from("tef_configuracoes")
+    .select("ambiente, ponto_captura, servidor_producao")
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  const terminal = await cliente
+    .from("tef_terminais")
+    .select("ponto_captura")
+    .eq("empresa_id", empresaId)
+    .eq("id", terminalId)
+    .maybeSingle();
+  const pontoTerminal = terminal.error ? "" : String(terminal.data?.ponto_captura ?? "").trim();
+  const pontoConfig = config.error ? "" : String(config.data?.ponto_captura ?? "").trim();
+  return {
+    fluxoHomologacao: !config.error && config.data?.ambiente === "homologacao",
+    pontoOficial: pontoTerminal || pontoConfig,
+    hostOficial: config.error ? "" : String(config.data?.servidor_producao ?? "").trim(),
+  };
 }
 
 export async function liberarConfirmacaoTefPersistida(input: {
@@ -803,10 +1037,10 @@ export async function registrarDesfazimentoTefPersistido(input: {
 
 export async function listarPendenciasTefPersistidas(empresaId: string) {
   const cliente = admin();
-  const linhas = await exigirTabela(
+  const linhas = await lerLinhasOperacao((colunas) =>
     cliente
       .from("tef_operacoes")
-      .select("id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key")
+      .select(colunas)
       .eq("empresa_id", empresaId)
       .in("status", [...STATUS_TEF_ABERTOS])
   );
@@ -825,6 +1059,59 @@ export async function listarPendenciasTefPersistidas(empresaId: string) {
     ...item,
     terminalCodigo: codigos.get(item.terminalId) ?? "",
   }));
+}
+
+export async function marcarPendenciaFormaTefPersistida(input: {
+  empresaId: string;
+  operacaoId: string;
+}) {
+  const { cliente, memoria, antes } = await memoriaDaOperacao(
+    input.empresaId,
+    input.operacaoId
+  );
+  const operacao = memoria.operacoes[0];
+  if (!operacao) {
+    throw new ErroTef("Operação TEF não encontrada.", 404);
+  }
+  const modalidade = operacao.modalidadeEfetiva ?? operacao.modalidade;
+  const formas = await exigirTabela(
+    cliente
+      .from("formas_pagamento")
+      .select("id, codigo, nome, tipo, codigo_fiscal, permite_fiado")
+      .eq("empresa_id", input.empresaId)
+  );
+  const lista = ((formas ?? []) as Linha[]).map((linha) => ({
+    id: String(linha.id),
+    codigo: linha.codigo ? String(linha.codigo) : null,
+    nome: linha.nome ? String(linha.nome) : null,
+    tipo: linha.tipo ? String(linha.tipo) : null,
+    codigo_fiscal: linha.codigo_fiscal ? String(linha.codigo_fiscal) : null,
+    permite_fiado: linha.permite_fiado === true,
+  }));
+  if (formaDaModalidadeEfetiva(lista, modalidade)) {
+    return {
+      ok: true as const,
+      pendente: false,
+      status: operacao.status,
+      diagnostico: operacao.motivoAmbiente || "",
+    };
+  }
+  const marcada = marcarPendenciaAdministrativa(memoria, {
+    empresaId: input.empresaId,
+    operacaoId: input.operacaoId,
+    motivo: mensagemFormaAusente(modalidade),
+  });
+  if (!marcada.ok) {
+    throw new ErroTef(marcada.erro, 409);
+  }
+  await gravarMemoria(cliente, antes, memoria, input.empresaId, []);
+  return {
+    ok: true as const,
+    pendente: true,
+    status: marcada.status,
+    diagnostico: marcada.diagnostico,
+    modalidadeEfetiva: marcada.modalidadeEfetiva,
+  };
 }
 
 export async function vincularOperacoesTefNaVenda(input: {
@@ -889,7 +1176,7 @@ export async function reservarOperacoesTefParaVenda(input: {
     cliente
       .from("tef_operacoes")
       .select(
-        "id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key"
+        "id, empresa_id, terminal_id, identificador, idempotency_key, modalidade, valor_centavos, status, nsu, autorizacao, rede, finalizacao, venda_id, teste, desafio, usuario_id, segredo_vinculo_hash, venda_idempotency_key, ambiente_efetivo, ponto_efetivo, host_efetivo, comprovante_sha256, motivo_ambiente"
       )
       .eq("empresa_id", input.empresaId)
       .in("id", input.operacaoIds)
@@ -1256,7 +1543,31 @@ export async function gravarServidoresPayGoEmpresa(
     throw new ErroTef("Não foi possível consultar a configuração TEF.", 500);
   }
   if (atual.data?.habilitado === true) {
-    return { preservado: true as const };
+    const servidoresHabilitados: {
+      servidor_homologacao?: string;
+      servidor_producao?: string;
+      updated_at: string;
+    } = { updated_at: new Date().toISOString() };
+    if (input.servidorHomologacao) {
+      servidoresHabilitados.servidor_homologacao = input.servidorHomologacao;
+    }
+    if (input.servidorProducao) {
+      servidoresHabilitados.servidor_producao = input.servidorProducao;
+    }
+    const preenchimento = await cliente
+      .from("tef_configuracoes")
+      .update(servidoresHabilitados)
+      .eq("empresa_id", empresaId);
+    if (preenchimento.error) {
+      if (colunaServidorAusente(preenchimento.error)) {
+        throw new ErroTef(
+          "O servidor PayGoWeb ainda não foi aplicado no banco. A migration 20261011190000_tef_servidor_paygo.sql precisa ser aplicada antes de confirmar o servidor.",
+          503
+        );
+      }
+      throw new ErroTef("Não foi possível gravar o servidor PayGoWeb.", 500);
+    }
+    return { preservado: false as const };
   }
   const servidores = {
     servidor_homologacao: input.servidorHomologacao,

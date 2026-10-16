@@ -34,6 +34,7 @@ import {
   escolherFormaDinheiroPdv,
   formaAposNavegacaoPdv,
   pagamentosAberturaPdv,
+  preencherRestanteAoSelecionarPdv,
   sincronizarDinheiroResidualPdv,
 } from "@/lib/pdv/distribuicao-pagamento-pdv";
 import { CaixaAvisoReabertoFaixa } from "@/components/caixa/caixa-aviso-reaberto";
@@ -41,11 +42,9 @@ import type { CaixaAvisoReaberto } from "@/lib/caixa/tipos";
 import {
   buscarConfiguracoesImpressaoAction,
 } from "@/app/configuracoes/impressao/actions";
-import { BotaoImprimirConector } from "@/components/impressao/botao-imprimir-conector";
 import { obterDispositivoId } from "@/lib/impressao/dispositivo";
 import { executarDestinoImpressao } from "@/lib/impressao/executar-cliente";
 import {
-  configDoTipo,
   decidirDestinoImpressaoAutomatica,
   decidirDocumentoImpressao,
 } from "@/lib/impressao/regras";
@@ -161,6 +160,23 @@ import {
   type PoliticaCartaoTef,
 } from "@/lib/pdv/tef/cartao-checkout";
 import { classificarFormaTef } from "@/lib/pdv/tef/regras";
+import {
+  formaDaModalidadeEfetiva,
+  mensagemFormaAusente,
+} from "@/lib/pdv/tef/modalidade-efetiva";
+import { criarCronometroFinalizacao } from "@/lib/pdv/desempenho/cronometro-finalizacao";
+import {
+  MENSAGEM_IMPRESSAO_INTERROMPIDA,
+  conduzirImpressaoPdv,
+  enfileirarImpressaoAutomatica,
+  gravarFilaImpressaoPdv,
+  iniciarImpressaoSemBloquear,
+  lerFilaImpressaoPdv,
+  planejarPosVenda,
+  recuperarFilaImpressaoPdv,
+  solicitarReimpressao,
+  type TrabalhoImpressaoPdv,
+} from "@/lib/pdv/impressao-fila";
 import { executarAberturaGaveta } from "@/lib/caixa/abrir-gaveta-cliente";
 import { deveAbrirGavetaAposVenda } from "@/lib/caixa/gaveta";
 import {
@@ -437,6 +453,58 @@ function documentoCurto(
   return digitos;
 }
 
+function mensagemPendenciasTef(
+  pendencias: Array<{
+    status?: string;
+    modalidade?: string;
+    modalidadeEfetiva?: string | null;
+    diagnostico?: string;
+  }>
+) {
+  const linhas = pendencias.map((pendencia) => {
+    const modalidade =
+      pendencia.modalidadeEfetiva === "credito"
+        ? "crédito"
+        : pendencia.modalidadeEfetiva === "debito"
+          ? "débito"
+          : pendencia.modalidade === "credito"
+            ? "crédito"
+            : pendencia.modalidade === "debito"
+              ? "débito"
+              : "cartão";
+    const situacao =
+      pendencia.status === "reconciliacao"
+        ? "em conciliação"
+        : pendencia.status === "autorizada"
+          ? "autorizada"
+          : pendencia.status === "vinculada"
+            ? "vinculada à venda"
+            : pendencia.status || "pendente";
+    const diagnostico = pendencia.diagnostico ? ` ${pendencia.diagnostico}` : "";
+    return `TEF ${modalidade} ${situacao}.${diagnostico}`;
+  });
+  return `Existe autorização TEF pendente nesta venda. Nenhuma nova cobrança foi iniciada.\n${linhas.join("\n")}`;
+}
+
+const impressoesEmCursoPdv = new Set<string>();
+
+function armazenamentoImpressaoPdv() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.localStorage;
+}
+
+function destinoDeTrabalho(trabalho: TrabalhoImpressaoPdv): DestinoImpressaoAutomatica | null {
+  if (trabalho.documento === "danfe_nfce" && trabalho.emissaoId) {
+    return { tipo: "danfe_nfce", emissaoId: trabalho.emissaoId };
+  }
+  if (trabalho.documento === "recibo") {
+    return { tipo: "recibo", vendaId: trabalho.vendaId };
+  }
+  return null;
+}
+
 export function PdvShell({
   empresaNome,
   empresaId = "",
@@ -673,6 +741,10 @@ export function PdvShell({
       valorCentavos?: number;
       empresaId?: string;
       terminalCodigo?: string;
+      modalidade?: string;
+      modalidadeEfetiva?: string | null;
+      diagnostico?: string;
+      proibirDesfazimento?: boolean;
     }>
   >([]);
   const [tefEmpresaId, setTefEmpresaId] = useState<string | null>(null);
@@ -699,7 +771,10 @@ export function PdvShell({
     totalCentavos: number;
     fiscal: FiscalUltimaVenda | null;
     avisoGaveta?: string | null;
+    avisoModalidade?: string | null;
   } | null>(null);
+
+  const [avisoPagamento, setAvisoPagamento] = useState<string | null>(null);
 
   const [
     configsImpressao,
@@ -710,16 +785,21 @@ export function PdvShell({
     impressaoPos,
     setImpressaoPos,
   ] = useState<{
+    vendaId: string | null;
     status: "idle" | "imprimindo" | "ok" | "falha";
     erro: string | null;
     mensagem: string | null;
     destino: DestinoImpressaoAutomatica;
   }>({
+    vendaId: null,
     status: "idle",
     erro: null,
     mensagem: null,
     destino: { tipo: "nenhum" },
   });
+  const [avisoImpressaoInterrompida, setAvisoImpressaoInterrompida] = useState<string | null>(
+    null
+  );
 
   const [
     isPending,
@@ -738,10 +818,48 @@ export function PdvShell({
     useRef<string | null>(
       null
     );
+  const chavesTefRef = useRef<Record<string, string>>({});
+  const correlacaoFinalizacaoRef = useRef<string | null>(null);
+  const marcoOperadorRef = useRef<number | null>(null);
+  const medicaoAtualRef = useRef<ReturnType<typeof criarCronometroFinalizacao> | null>(
+    null
+  );
+  const bloqueioFinanceiroRef = useRef<string | null>(null);
+  const filaRecuperadaRef = useRef(false);
+  const geracaoImpressaoRef = useRef(0);
+  const pixInicioRef = useRef<number | null>(null);
 
   useEffect(() => {
     buscaRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    const status = pixGeranet?.status;
+    if (status === "pendente") {
+      if (!correlacaoFinalizacaoRef.current) {
+        correlacaoFinalizacaoRef.current = crypto.randomUUID();
+      }
+      if (pixInicioRef.current == null) {
+        pixInicioRef.current = performance.now();
+      }
+      return;
+    }
+    if (status === "paga" && pixInicioRef.current != null) {
+      const duracaoMs = performance.now() - pixInicioRef.current;
+      pixInicioRef.current = null;
+      const correlacao = correlacaoFinalizacaoRef.current;
+      if (correlacao) {
+        criarCronometroFinalizacao(correlacao).marcar(
+          "pix_autorizacao",
+          "pix",
+          duracaoMs,
+          true
+        );
+      }
+      return;
+    }
+    pixInicioRef.current = null;
+  }, [pixGeranet?.status]);
 
   useEffect(() => {
     const id = obterDispositivoId();
@@ -755,14 +873,102 @@ export function PdvShell({
     });
   }, []);
 
+  async function conduzirTrabalhoImpressao(
+    trabalho: TrabalhoImpressaoPdv,
+    destino: DestinoImpressaoAutomatica,
+    fiscal: FiscalUltimaVenda | null,
+    relogio: ReturnType<typeof criarCronometroFinalizacao> | null
+  ) {
+    const geracao = geracaoImpressaoRef.current;
+    function publicar(proximo: {
+      vendaId: string | null;
+      status: "idle" | "imprimindo" | "ok" | "falha";
+      erro: string | null;
+      mensagem: string | null;
+      destino: DestinoImpressaoAutomatica;
+    }) {
+      setImpressaoPos((atual) => (geracaoImpressaoRef.current === geracao ? proximo : atual));
+    }
+    publicar({
+      vendaId: trabalho.vendaId,
+      status: "imprimindo",
+      erro: null,
+      mensagem: null,
+      destino,
+    });
+    let pulou = false;
+    let mensagemOk = "Enviado para impressão";
+    const registrado = await conduzirImpressaoPdv({
+      ler: () => lerFilaImpressaoPdv(armazenamentoImpressaoPdv()),
+      gravar: (fila) => gravarFilaImpressaoPdv(fila, armazenamentoImpressaoPdv()),
+      trabalho,
+      emCurso: impressoesEmCursoPdv,
+      agora: () => new Date().toISOString(),
+      imprimir: async () => {
+        const resultado = await executarDestinoImpressao({
+          destino,
+          configs: configsImpressao,
+          forcar: true,
+          conectorPermitido: conectorLiberado,
+          medicao: relogio,
+        });
+        if ("pulou" in resultado && resultado.pulou) {
+          pulou = true;
+          return { ok: true };
+        }
+        if (resultado.ok) {
+          mensagemOk =
+            "mensagem" in resultado && resultado.mensagem
+              ? resultado.mensagem
+              : "Enviado para impressão";
+          return { ok: true };
+        }
+        const erroBase =
+          "erro" in resultado
+            ? resultado.erro
+            : "Venda concluída, mas não foi possível imprimir.";
+        return {
+          ok: false,
+          erro:
+            fiscal?.kind === "autorizada"
+              ? `NFC-e autorizada, mas não foi possível imprimir.\n${erroBase}`
+              : erroBase,
+        };
+      },
+    });
+    if (!registrado.aplicado) {
+      return false;
+    }
+    if (pulou || registrado.trabalho.estado === "concluido") {
+      publicar({
+        vendaId: trabalho.vendaId,
+        status: pulou ? "idle" : "ok",
+        erro: null,
+        mensagem: pulou ? null : mensagemOk,
+        destino,
+      });
+      return !pulou;
+    }
+    publicar({
+      vendaId: trabalho.vendaId,
+      status: "falha",
+      erro: registrado.trabalho.erro,
+      mensagem: null,
+      destino,
+    });
+    return false;
+  }
+
   async function tentarImpressaoPosVenda(
     vendaId: string,
     fiscal: FiscalUltimaVenda | null,
-    forcar = false
+    forcar = false,
+    relogio: ReturnType<typeof criarCronometroFinalizacao> | null = null
   ) {
     if (!conectorLiberado) {
       if (forcar) {
         setImpressaoPos({
+          vendaId,
           status: "falha",
           erro: MENSAGEM_CONECTOR_NAO_CONTRATADO,
           mensagem: null,
@@ -780,72 +986,56 @@ export function PdvShell({
           fiscal,
           conectorPermitido: true,
         });
-    if (destino.tipo === "nenhum") {
+    if (destino.tipo !== "danfe_nfce" && destino.tipo !== "recibo") {
       return false;
     }
 
-    setImpressaoPos({
-      status: "imprimindo",
-      erro: null,
-      mensagem: null,
-      destino,
-    });
-
-    try {
-      const resultado = await executarDestinoImpressao({
-        destino,
-        configs: configsImpressao,
-        forcar: true,
-        conectorPermitido: conectorLiberado,
-      });
-      if ("pulou" in resultado && resultado.pulou) {
-        setImpressaoPos({
-          status: "idle",
-          erro: null,
-          mensagem: null,
-          destino,
-        });
-        return false;
-      }
-      if (resultado.ok) {
-        setImpressaoPos({
-          status: "ok",
-          erro: null,
-          mensagem:
-            "mensagem" in resultado
-              ? resultado.mensagem
-              : "Enviado para impressão",
-          destino,
-        });
-        return true;
-      }
-      const erroBase =
-        "erro" in resultado
-          ? resultado.erro
-          : "Venda concluída, mas não foi possível imprimir.";
-      setImpressaoPos({
-        status: "falha",
-        erro:
-          fiscal?.kind === "autorizada"
-            ? `NFC-e autorizada, mas não foi possível imprimir.\n${erroBase}`
-            : erroBase,
-        mensagem: null,
-        destino,
-      });
-      return false;
-    } catch {
-      setImpressaoPos({
-        status: "falha",
-        erro:
-          fiscal?.kind === "autorizada"
-            ? "NFC-e autorizada, mas não foi possível imprimir."
-            : "Venda concluída, mas não foi possível imprimir.",
-        mensagem: null,
-        destino,
-      });
+    const pedido = {
+      vendaId,
+      emissaoId: destino.tipo === "danfe_nfce" ? destino.emissaoId : null,
+      documento: destino.tipo,
+      agora: new Date().toISOString(),
+    };
+    const armazenamento = armazenamentoImpressaoPdv();
+    const fila = lerFilaImpressaoPdv(armazenamento);
+    const enfileirado = forcar
+      ? solicitarReimpressao(fila, pedido)
+      : enfileirarImpressaoAutomatica(fila, pedido);
+    if (!enfileirado.iniciar || !enfileirado.trabalho) {
       return false;
     }
+    gravarFilaImpressaoPdv(enfileirado.fila, armazenamento);
+    return conduzirTrabalhoImpressao(enfileirado.trabalho, destino, fiscal, relogio);
   }
+
+  useEffect(() => {
+    if (filaRecuperadaRef.current) {
+      return;
+    }
+    const recuperado = recuperarFilaImpressaoPdv(
+      lerFilaImpressaoPdv(armazenamentoImpressaoPdv()),
+      new Date().toISOString(),
+      impressoesEmCursoPdv
+    );
+    gravarFilaImpressaoPdv(recuperado.fila, armazenamentoImpressaoPdv());
+    if (recuperado.interrompidos.length > 0) {
+      setAvisoImpressaoInterrompida(MENSAGEM_IMPRESSAO_INTERROMPIDA);
+    }
+    if (
+      recuperado.retomar.length > 0 &&
+      (configsImpressao.length === 0 || !conectorLiberado)
+    ) {
+      return;
+    }
+    filaRecuperadaRef.current = true;
+    for (const trabalho of recuperado.retomar) {
+      const destino = destinoDeTrabalho(trabalho);
+      if (!destino) {
+        continue;
+      }
+      void conduzirTrabalhoImpressao(trabalho, destino, null, null);
+    }
+  }, [configsImpressao, conectorLiberado]);
 
   useEffect(() => {
     if (!toastPdv) {
@@ -1104,7 +1294,17 @@ export function PdvShell({
           permitirOperacaoManual?: boolean;
           empresaId?: string;
           estabelecimento?: string;
-          pendencias?: Array<{ id: string; terminalCodigo?: string }>;
+          pendencias?: Array<{
+            id: string;
+            status?: string;
+            identificador?: string;
+            valorCentavos?: number;
+            terminalCodigo?: string;
+            modalidade?: string;
+            modalidadeEfetiva?: "debito" | "credito" | null;
+            diagnostico?: string;
+            proibirDesfazimento?: boolean;
+          }>;
         };
         if (!ativo) {
           return;
@@ -1662,6 +1862,7 @@ export function PdvShell({
     setErroPagamento(
       null
     );
+    setAvisoPagamento(null);
 
     if (pagamentos.length === 0 && formasPagas.length > 0) {
       const abertura = pagamentosAberturaPdv({
@@ -1689,6 +1890,10 @@ export function PdvShell({
     }
 
     substituirDigitoRef.current = true;
+    if (!correlacaoFinalizacaoRef.current) {
+      correlacaoFinalizacaoRef.current = crypto.randomUUID();
+    }
+    marcoOperadorRef.current = performance.now();
     setModalPagamento(
       true
     );
@@ -1707,8 +1912,21 @@ export function PdvShell({
   }
 
   function selecionarFormaPagamento(formaId: string) {
+    const forma = formasPagamento.find((item) => item.id === formaId);
+    if (ehFormaPix(forma ?? null) && !pixHabilitado) {
+      return;
+    }
     setFormaSelecionadaId(formaId);
     substituirDigitoRef.current = true;
+    const preenchido = preencherRestanteAoSelecionarPdv({
+      formas: formasPagas,
+      pagamentos,
+      totalCentavos,
+      dinheiroAutomatico,
+      formaPagamentoId: formaId,
+    });
+    setDinheiroAutomatico(preenchido.dinheiroAutomatico);
+    setPagamentos(preenchido.pagamentos);
     requestAnimationFrame(() => focarValorPagamento(formaId));
   }
 
@@ -1922,6 +2140,7 @@ export function PdvShell({
   }
 
   function finalizar() {
+    const inicioValidacao = performance.now();
     if (!caixaAberto) {
       return;
     }
@@ -2090,9 +2309,7 @@ export function PdvShell({
       return;
     }
     if (tefHabilitado && tefPendencias.length > 0 && parcelasCartao.length > 0) {
-      setErroPagamento(
-        "Existe transação TEF pendente nesta empresa. Resolva antes de uma nova cobrança."
-      );
+      setErroPagamento(mensagemPendenciasTef(tefPendencias));
       return;
     }
     const cobrarNoPinpad = decisaoCartao.cobrarNoPinpad;
@@ -2108,12 +2325,39 @@ export function PdvShell({
       idempotencyRef.current;
 
     if (tefLockRef.current) {
+      if (bloqueioFinanceiroRef.current) {
+        setErroPagamento(bloqueioFinanceiroRef.current);
+      }
       return;
     }
     tefLockRef.current = true;
 
     startTransition(
       async () => {
+        const correlacao =
+          correlacaoFinalizacaoRef.current ?? crypto.randomUUID();
+        correlacaoFinalizacaoRef.current = correlacao;
+        const relogio = criarCronometroFinalizacao(correlacao, {
+          incluirPdvLiberado: true,
+        });
+        medicaoAtualRef.current = relogio;
+        if (marcoOperadorRef.current != null) {
+          relogio.marcar(
+            "interacao_operador",
+            "operador",
+            performance.now() - marcoOperadorRef.current,
+            true
+          );
+          marcoOperadorRef.current = performance.now();
+        }
+        relogio.marcar(
+          "validacao_frontend",
+          "interface",
+          performance.now() - inicioValidacao,
+          true
+        );
+        let pdvLiberado = false;
+        let manterBloqueioFinanceiro = false;
         try {
         const parcelasTef = cobrarNoPinpad
           ? pagamentosCalculados.flatMap((pagamento) => {
@@ -2135,7 +2379,11 @@ export function PdvShell({
         >["operacoes"] = [];
         let origemTef = conectorOrigem;
         if (parcelasTef.length > 0) {
-          const descoberta = await descobrirUltraPdvConector();
+          const descoberta = await relogio.medir(
+            "conector_descoberta",
+            "tef",
+            () => descobrirUltraPdvConector()
+          );
           if (!descoberta.ok || !descoberta.saude.dispositivoId) {
             setErroPagamento(
               `O Connector local não está disponível para o TEF. ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`
@@ -2144,7 +2392,26 @@ export function PdvShell({
           }
           origemTef = descoberta.origem;
           setConectorOrigem(descoberta.origem);
-          const chavesTef = parcelasTef.map(() => crypto.randomUUID());
+          const consultaPendencias = await fetch("/api/pdv/tef/config")
+            .then(async (resposta) => (resposta.ok ? resposta.json() : null))
+            .catch(() => null);
+          const pendenciasAtuais = Array.isArray(consultaPendencias?.pendencias)
+            ? consultaPendencias.pendencias
+            : tefPendencias;
+          if (Array.isArray(consultaPendencias?.pendencias)) {
+            setTefPendencias(consultaPendencias.pendencias);
+          }
+          if (pendenciasAtuais.length > 0) {
+            setErroPagamento(mensagemPendenciasTef(pendenciasAtuais));
+            return;
+          }
+          const chavesTef = parcelasTef.map((parcela, indice) => {
+            const chave = `${idempotencyKey}:${indice}:${parcela.modalidade}:${parcela.valorCentavos}`;
+            if (!chavesTefRef.current[chave]) {
+              chavesTefRef.current[chave] = crypto.randomUUID();
+            }
+            return chavesTefRef.current[chave];
+          });
           const cobranca = await executarCobrancasTef({
             parcelas: parcelasTef,
             origem: descoberta.origem,
@@ -2152,6 +2419,7 @@ export function PdvShell({
             idempotencyKey: (indice) => chavesTef[indice] ?? crypto.randomUUID(),
             grupoVenda: idempotencyKey,
             estabelecimento: tefEstabelecimento,
+            medicao: relogio,
           });
           if (!cobranca.ok) {
             setErroPagamento(`${cobranca.erro} ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`);
@@ -2160,9 +2428,67 @@ export function PdvShell({
           cobrancasTef = cobranca.operacoes;
         }
 
+        const avisoAutorizacao =
+          cobrancasTef.map((item) => item.avisoModalidade).find((item) => item) ?? null;
+        if (avisoAutorizacao) {
+          setAvisoPagamento(avisoAutorizacao);
+        }
+        let indiceEfeito = 0;
+        let formaAutorizadaAusente: "debito" | "credito" | null = null;
+        let operacaoFormaAusente: string | null = null;
+        const parcelasVenda = pagamentosCalculados.map((pagamento) => {
+          const solicitada = classificarFormaTef(pagamento.forma);
+          if (!solicitada) {
+            return pagamento;
+          }
+          const efeito = cobrancasTef[indiceEfeito++];
+          if (
+            !efeito?.modalidadeEfetiva ||
+            efeito.modalidadeEfetiva === solicitada
+          ) {
+            return pagamento;
+          }
+          const forma = formaDaModalidadeEfetiva(
+            formasPagamento,
+            efeito.modalidadeEfetiva,
+            pagamento.formaPagamentoId
+          );
+          if (!forma) {
+            formaAutorizadaAusente = efeito.modalidadeEfetiva;
+            operacaoFormaAusente = efeito.operacaoId;
+            return pagamento;
+          }
+          return { ...pagamento, formaPagamentoId: forma.id, forma };
+        });
+        if (formaAutorizadaAusente) {
+          if (operacaoFormaAusente) {
+            await fetch("/api/pdv/tef/pendencia-forma", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ operacaoId: operacaoFormaAusente }),
+            }).catch(() => undefined);
+          }
+          setErroPagamento(mensagemFormaAusente(formaAutorizadaAusente));
+          return;
+        }
+        if (
+          parcelasVenda.some(
+            (pagamento, indice) =>
+              pagamento.formaPagamentoId !== pagamentosCalculados[indice]?.formaPagamentoId
+          )
+        ) {
+          setPagamentos(
+            parcelasVenda.map((pagamento) => ({
+              formaPagamentoId: pagamento.formaPagamentoId,
+              valorTexto: pagamento.valorTexto,
+            }))
+          );
+        }
+
         let indiceCartaoTef = 0;
         const resultado =
-          await finalizarVendaPdv(
+          await relogio.medir("persistencia_venda", "supabase", () =>
+            finalizarVendaPdv(
             {
               idempotencyKey,
               clienteId:
@@ -2187,7 +2513,7 @@ export function PdvShell({
                         }
                 ),
               pagamentos:
-                pagamentosCalculados.map(
+                parcelasVenda.map(
                   (pagamento) => {
                     const modalidadeTef = classificarFormaTef(pagamento.forma);
                     const cobrancaTef = modalidadeTef
@@ -2225,7 +2551,9 @@ export function PdvShell({
                   ? cpfNaNota
                   : null,
               usarDocumentoClienteNaNota: usarDocumentoCliente,
+              correlacao,
             }
+            )
           );
 
         if (!resultado.ok) {
@@ -2234,6 +2562,7 @@ export function PdvShell({
               operacoes: cobrancasTef,
               origem: origemTef,
               idempotencyKeyVenda: idempotencyKey,
+              medicao: relogio,
             });
           }
           setErroPagamento(
@@ -2249,6 +2578,7 @@ export function PdvShell({
               vendaId: resultado.vendaId,
               operacoes: cobrancasTef,
               origem: origemTef,
+              medicao: relogio,
             });
             if (!confirmacao.ok) {
               avisoTef = confirmacao.erro;
@@ -2259,7 +2589,7 @@ export function PdvShell({
           }
         }
 
-        const pagamentosDaVenda = pagamentosCalculados;
+        const pagamentosDaVenda = parcelasVenda;
         let avisoGaveta: string | null = null;
         if (
           deveAbrirGavetaAposVenda({
@@ -2268,11 +2598,13 @@ export function PdvShell({
           })
         ) {
           try {
-            const gaveta = await executarAberturaGaveta({
-              origem: "venda",
-              vendaId: resultado.vendaId,
-              exigirCaixaAberto: false,
-            });
+            const gaveta = await relogio.medir("gaveta", "impressao", () =>
+              executarAberturaGaveta({
+                origem: "venda",
+                vendaId: resultado.vendaId,
+                exigirCaixaAberto: false,
+              })
+            );
             if (!gaveta.ok) {
               avisoGaveta = MENSAGEM_GAVETA_VENDA_SEM_ABRIR;
             }
@@ -2285,6 +2617,7 @@ export function PdvShell({
           avisoGaveta = [avisoGaveta, avisoTef].filter(Boolean).join("\n");
         }
 
+        const inicioVisual = performance.now();
         setUltimaVenda({
           vendaId:
             resultado.vendaId,
@@ -2303,8 +2636,11 @@ export function PdvShell({
               }
             : null,
           avisoGaveta,
+          avisoModalidade: avisoAutorizacao,
         });
+        geracaoImpressaoRef.current += 1;
         setImpressaoPos({
+          vendaId: null,
           status: "idle",
           erro: null,
           mensagem: null,
@@ -2336,26 +2672,34 @@ export function PdvShell({
         setErroPagamento(
           null
         );
+        relogio.definirVenda(resultado.vendaId);
+        relogio.marcar(
+          "atualizacao_visual",
+          "interface",
+          performance.now() - inicioVisual,
+          true
+        );
 
-        if (!emitirNfceAutomaticoPdv) {
-          await tentarImpressaoPosVenda(
-            resultado.vendaId,
-            null,
-            imprimirApos
-          );
-        }
         idempotencyRef.current =
           null;
+        chavesTefRef.current = {};
 
+        let fiscalParaImpressao: FiscalUltimaVenda | null = null;
+        if (!emitirNfceAutomaticoPdv) {
+          fiscalParaImpressao = null;
+        }
         if (emitirNfceAutomaticoPdv) {
-          const fiscal = await chamarEmissaoNfceVenda({
-            vendaId: resultado.vendaId,
-            ambiente: ambienteFiscal === 1 ? 1 : 2,
-          });
+          const fiscal = await relogio.medir("nfce_emissao", "nfce", () =>
+            chamarEmissaoNfceVenda({
+              vendaId: resultado.vendaId,
+              ambiente: ambienteFiscal === 1 ? 1 : 2,
+              correlacao,
+            })
+          );
           const danfeDisponivel =
             fiscal.kind === "autorizada" && Boolean(fiscal.emissaoId);
-          const fiscalAtualizado = {
-            emitindo: false as const,
+          fiscalParaImpressao = {
+            emitindo: false,
             kind: fiscal.kind,
             status: fiscal.status,
             mensagem: fiscal.mensagem,
@@ -2366,23 +2710,62 @@ export function PdvShell({
             atual && atual.vendaId === resultado.vendaId
               ? {
                   ...atual,
-                  fiscal: fiscalAtualizado,
+                  fiscal: fiscalParaImpressao,
                 }
               : atual
           );
-          await tentarImpressaoPosVenda(
-            resultado.vendaId,
-            fiscalAtualizado,
-            imprimirApos
-          );
         }
+
+        const plano = planejarPosVenda({
+          houveTef: cobrancasTef.length > 0,
+          confirmacaoLiberada: resultado.tefConfirmacaoLiberada === true,
+          confirmacaoOk: !avisoTef,
+          emitirNfce: Boolean(emitirNfceAutomaticoPdv),
+          nfceAutorizada:
+            fiscalParaImpressao?.kind === "autorizada" &&
+            fiscalParaImpressao.status === "autorizada",
+          documentoDisponivel: Boolean(
+            fiscalParaImpressao?.danfeDisponivel && fiscalParaImpressao.emissaoId
+          ),
+        });
+        if (!plano.liberarCaixa) {
+          manterBloqueioFinanceiro = true;
+          bloqueioFinanceiroRef.current =
+            avisoTef ||
+            "A confirmação financeira ainda está pendente. Não inicie outra cobrança.";
+        }
+        const corrida = iniciarImpressaoSemBloquear({
+          liberarCaixa: plano.liberarCaixa,
+          aoLiberar: () => {
+            pdvLiberado = true;
+          },
+          imprimir: plano.imprimirEmSegundoPlano
+            ? () =>
+                tentarImpressaoPosVenda(
+                  resultado.vendaId,
+                  fiscalParaImpressao,
+                  imprimirApos,
+                  relogio
+                )
+            : null,
+        });
+        void corrida.impressao;
 
         requestAnimationFrame(
           () =>
             buscaRef.current?.focus()
         );
         } finally {
-          tefLockRef.current = false;
+          relogio.publicarResumo(pdvLiberado);
+          if (pdvLiberado) {
+            correlacaoFinalizacaoRef.current = null;
+            marcoOperadorRef.current = null;
+            bloqueioFinanceiroRef.current = null;
+          }
+          medicaoAtualRef.current = null;
+          if (!manterBloqueioFinanceiro) {
+            tefLockRef.current = false;
+          }
         }
       }
     );
@@ -2473,6 +2856,15 @@ export function PdvShell({
 
         if (!campoLivre && event.key === "Enter") {
           event.preventDefault();
+          if (
+            !isPending &&
+            restanteCentavos === 0 &&
+            !avaliacaoPagamentos.bloqueado &&
+            totalCentavos > 0
+          ) {
+            finalizar();
+            return;
+          }
           if (formaSelecionadaId) {
             selecionarFormaPagamento(formaSelecionadaId);
           }
@@ -2635,6 +3027,16 @@ export function PdvShell({
         fiscal: ultimaVenda.fiscal,
       })
     : null;
+  const impressaoDestaVenda =
+    ultimaVenda && impressaoPos.vendaId === ultimaVenda.vendaId
+      ? impressaoPos
+      : {
+          vendaId: ultimaVenda?.vendaId ?? null,
+          status: "idle" as const,
+          erro: null,
+          mensagem: null,
+          destino: { tipo: "nenhum" as const },
+        };
 
   return (
     <div
@@ -2650,6 +3052,18 @@ export function PdvShell({
       ) : null}
       {caixaAberto && caixaReabertoAviso ? (
         <CaixaAvisoReabertoFaixa aviso={caixaReabertoAviso} />
+      ) : null}
+      {avisoImpressaoInterrompida ? (
+        <div className="flex items-start justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p>{avisoImpressaoInterrompida}</p>
+          <button
+            type="button"
+            className="shrink-0 font-semibold underline"
+            onClick={() => setAvisoImpressaoInterrompida(null)}
+          >
+            Fechar
+          </button>
+        </div>
       ) : null}
       {ultimaVenda && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
@@ -2676,24 +3090,29 @@ export function PdvShell({
               )}
             </p>
 
+            {ultimaVenda.avisoModalidade ? (
+              <p className="mt-3 text-sm text-zinc-500">
+                {ultimaVenda.avisoModalidade}
+              </p>
+            ) : null}
             {ultimaVenda.avisoGaveta ? (
               <p className="mt-3 whitespace-pre-line text-sm text-amber-800">
                 {ultimaVenda.avisoGaveta}
               </p>
             ) : null}
 
-            {impressaoPos.status === "imprimindo" ? (
+            {impressaoDestaVenda.status === "imprimindo" ? (
               <p className="mt-3 text-sm text-zinc-500">Enviando para impressão...</p>
             ) : null}
-            {impressaoPos.status === "ok" ? (
+            {impressaoDestaVenda.status === "ok" ? (
               <p className="mt-3 text-sm text-emerald-700">
-                {impressaoPos.mensagem || "Enviado para impressão"}
+                {impressaoDestaVenda.mensagem || "Enviado para impressão"}
               </p>
             ) : null}
-            {impressaoPos.status === "falha" ? (
+            {impressaoDestaVenda.status === "falha" ? (
               <div className="mt-3 space-y-2">
                 <p className="whitespace-pre-line text-sm text-amber-800">
-                  {impressaoPos.erro ||
+                  {impressaoDestaVenda.erro ||
                     "Venda concluída, mas não foi possível imprimir."}
                 </p>
                 <button
@@ -2734,13 +3153,20 @@ export function PdvShell({
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               {acoesPosVenda?.mostrarImprimirNfce && ultimaVenda.fiscal?.emissaoId ? (
-                <BotaoImprimirConector
-                  pdfUrl={`/api/impressao/danfe/${ultimaVenda.fiscal.emissaoId}`}
-                  tipoDocumento="danfe_nfce"
-                  papel={configDoTipo(configsImpressao, "danfe_nfce").papel}
-                  label="Imprimir NFC-e"
+                <button
+                  type="button"
+                  disabled={impressaoDestaVenda.status === "imprimindo"}
+                  onClick={() => {
+                    void tentarImpressaoPosVenda(
+                      ultimaVenda.vendaId,
+                      ultimaVenda.fiscal,
+                      true
+                    );
+                  }}
                   className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-                />
+                >
+                  Imprimir NFC-e
+                </button>
               ) : null}
 
               {acoesPosVenda?.mostrarImprimirNfce && acoesPosVenda.hrefDanfe ? (
@@ -2766,20 +3192,29 @@ export function PdvShell({
               ) : null}
 
               {acoesPosVenda?.mostrarImprimirReciboNormal ? (
-                <BotaoImprimirConector
-                  pdfUrl={`/api/impressao/recibo/${ultimaVenda.vendaId}?papel=${configDoTipo(configsImpressao, "recibo").papel}`}
-                  tipoDocumento="recibo"
-                  papel={configDoTipo(configsImpressao, "recibo").papel}
-                  label={acoesPosVenda.rotuloBotaoRecibo}
+                <button
+                  type="button"
+                  disabled={impressaoDestaVenda.status === "imprimindo"}
+                  onClick={() => {
+                    void tentarImpressaoPosVenda(
+                      ultimaVenda.vendaId,
+                      ultimaVenda.fiscal,
+                      true
+                    );
+                  }}
                   className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-                />
+                >
+                  {acoesPosVenda.rotuloBotaoRecibo}
+                </button>
               ) : null}
 
               <button
                 type="button"
                 onClick={() => {
                   setUltimaVenda(null);
+                  geracaoImpressaoRef.current += 1;
                   setImpressaoPos({
+                    vendaId: null,
                     status: "idle",
                     erro: null,
                     mensagem: null,
@@ -3701,10 +4136,23 @@ export function PdvShell({
               )}
             </div>
 
+            {avisoPagamento && (
+              <p className="mt-3 text-sm text-zinc-500">{avisoPagamento}</p>
+            )}
+
             {erroPagamento && (
               <div className="mt-3 whitespace-pre-line rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
                 {erroPagamento}
-                {tefPendencias.length > 0 && (
+                {tefPendencias.length > 0 &&
+                  (tefPendencias.every(
+                    (pendencia) =>
+                      pendencia.proibirDesfazimento === true || pendencia.status === "reconciliacao"
+                  ) ? (
+                    <p className="mt-2">
+                      A resolução é administrativa, em Configurações, Financeiro, TEF. Nenhuma
+                      confirmação, cancelamento ou estorno será feito por este caixa.
+                    </p>
+                  ) : (
                   <button
                     type="button"
                     className="mt-2 block font-semibold underline"
@@ -3717,10 +4165,15 @@ export function PdvShell({
                           );
                           return;
                         }
+                        const retomaveis = tefPendencias.filter(
+                          (pendencia) =>
+                            pendencia.proibirDesfazimento !== true &&
+                            pendencia.status !== "reconciliacao"
+                        );
                         await desfazerCobrancasTef({
                           origem: descoberta.origem,
                           idempotencyKeyVenda: null,
-                          operacoes: tefPendencias.map((pendencia) => ({
+                          operacoes: retomaveis.map((pendencia) => ({
                             formaPagamentoId: "",
                             operacaoId: pendencia.id,
                             valorCentavos: pendencia.valorCentavos ?? 0,
@@ -3741,7 +4194,7 @@ export function PdvShell({
                   >
                     Recuperar pendência TEF
                   </button>
-                )}
+                  ))}
               </div>
             )}
 

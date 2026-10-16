@@ -106,7 +106,7 @@ export function TefPinpadDiagnostico(props: {
       props.onResultado?.(resultado);
     } catch (error) {
       setExibicao({
-        mensagem: error instanceof Error ? error.message : "Comunicação indisponível.",
+        mensagem: error instanceof Error ? error.message : "Não foi possível concluir o diagnóstico.",
         observacao: "",
         resultado: null,
         erro: true,
@@ -167,6 +167,18 @@ export function TefPinpadDiagnostico(props: {
               {campo("Firmware", exibicao.resultado.firmware, props.somenteQuandoDisponivel)}
               {campo("Número de série", exibicao.resultado.serieMascarada, props.somenteQuandoDisponivel)}
               {campo("Porta", portaPinpad(exibicao.resultado), props.somenteQuandoDisponivel)}
+              {typeof exibicao.resultado.codigoBiblioteca === "number" ? (
+                <Item
+                  rotulo="Código da biblioteca"
+                  valor={String(exibicao.resultado.codigoBiblioteca)}
+                />
+              ) : null}
+              {exibicao.resultado.avisoBiblioteca ? (
+                <Item rotulo="Aviso da biblioteca" valor={exibicao.resultado.avisoBiblioteca} />
+              ) : null}
+              {typeof exibicao.resultado.duracaoMs === "number" ? (
+                <Item rotulo="Duração" valor={`${exibicao.resultado.duracaoMs} ms`} />
+              ) : null}
             </dl>
           ) : null}
         </div>

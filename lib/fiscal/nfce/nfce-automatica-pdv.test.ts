@@ -38,8 +38,8 @@ test("PDV reutiliza a rota existente de NFC-e 65 após o sucesso comercial", () 
   assert.doesNotMatch(helper, /montarItemGeranet/);
 
   const shell = fonte("components/pdv/pdv-shell.tsx");
-  const posFinalizar = shell.indexOf("await finalizarVendaPdv");
-  const posEmitir = shell.indexOf("await chamarEmissaoNfceVenda");
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
+  const posEmitir = shell.indexOf("chamarEmissaoNfceVenda(");
   assert.ok(posFinalizar >= 0, "PDV deve finalizar a venda comercial");
   assert.ok(posEmitir > posFinalizar, "NFC-e só depois do sucesso comercial");
   assert.match(shell, /if \(emitirNfceAutomaticoPdv\)/);

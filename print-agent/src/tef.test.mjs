@@ -8,15 +8,18 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { diretorioProducaoPgWeb } from "./tef-diretorio.mjs";
 import { preservarDiagnosticoInstalacao } from "./log.mjs";
 import { criarServidor } from "./server.mjs";
 import {
+  cobrancaBloqueadaPorRecuperacao,
   gravarRecuperacaoTef,
   lerRecuperacaoTef,
   registroRecuperacaoTef,
   removerRecuperacaoTef,
 } from "./tef-recuperacao.mjs";
 import { resolverRaizAgente } from "./raiz.mjs";
+import { carregarVersao } from "./versao.mjs";
 import {
   CODIGOS_TEF,
   ESTADOS_PROCESSO_TEF,
@@ -30,12 +33,32 @@ import {
   MENSAGEM_TEF_PINPAD_NAO_INICIALIZADO,
   MENSAGEM_TEF_PINPAD_OCUPADO,
   MENSAGEM_TEF_PROCESSO_ENCERRADO,
+  MENSAGEM_TEF_PINPAD_EM_EXECUCAO,
+  MENSAGEM_TEF_PINPAD_TIMEOUT,
   MENSAGEM_TEF_TIMEOUT,
+  NOME_TEF_ANTIGO,
   NOME_TEF_NATIVO,
 } from "./tef.mjs";
 
 const fonteTef = readFileSync(fileURLToPath(new URL("./tef.mjs", import.meta.url)), "utf8");
+const VERSAO_PACOTE = carregarVersao(resolverRaizAgente()).version;
 const caminhoNativo = path.join("D:\\connector", "bin", "tef", NOME_TEF_NATIVO);
+
+function agenteDoStatus(caminho = "") {
+  const resolvido = caminho ? path.resolve(caminho) : "";
+  const raiz = resolvido ? path.dirname(resolvido) : "";
+  return {
+    nome: NOME_TEF_NATIVO,
+    caminho: resolvido,
+    versao: caminho ? VERSAO_PACOTE : "",
+    versaoEsperada: VERSAO_PACOTE,
+    compativel: Boolean(caminho),
+    situacao: caminho ? "selecionado" : "ausente",
+    diretorioSelecionado: "",
+    diretorioSandbox: raiz ? path.join(raiz, "TEF", "PGWeb") : "",
+    diretorioProducao: raiz ? diretorioProducaoPgWeb() : "",
+  };
+}
 
 function accessSomenteNaRaiz(raiz) {
   return async (candidato) => {
@@ -167,6 +190,8 @@ function criarGerenciador(extras = {}) {
       }
     },
     limiteEncerramentoMs: 40,
+    arquivoPasta: path.join(path.dirname(arquivoPendencia), "tef-pasta.json"),
+    instalacaoAutomatica: false,
     ...extras.deps,
   });
   if (extras.deps?.spawn) {
@@ -358,16 +383,81 @@ test("localizarTefNativo só aceita UltraPDVTef.exe em bin/tef", async () => {
     await fs.mkdir(pasta, { recursive: true });
     await fs.writeFile(path.join(pasta, "outro.exe"), "");
     const ausente = await localizarTefNativo(env, accessSomenteNaRaiz(raiz), raiz);
-    assert.deepEqual(ausente, { encontrado: false, caminho: null });
+    assert.deepEqual(ausente, { encontrado: false, caminho: null, antigoEncontrado: false });
 
     const exe = path.join(pasta, NOME_TEF_NATIVO);
+    await fs.writeFile(path.join(pasta, NOME_TEF_ANTIGO), "antigo");
+    await fs.writeFile(path.join(pasta, "UltraPDVTef_133.exe"), "incompativel");
+    const ignorado = await localizarTefNativo(env, accessSomenteNaRaiz(raiz), raiz);
+    assert.equal(ignorado.encontrado, false);
+    assert.equal(ignorado.antigoEncontrado, true);
+
     await fs.writeFile(exe, "");
     const achou = await localizarTefNativo(env, accessSomenteNaRaiz(raiz), raiz);
     assert.equal(achou.encontrado, true);
     assert.equal(path.resolve(achou.caminho), path.resolve(exe));
+    assert.equal(path.basename(achou.caminho), NOME_TEF_NATIVO);
+    assert.equal(NOME_TEF_NATIVO, "UltraPDVTef_1313.exe");
   } finally {
     await fs.rm(raiz, { recursive: true, force: true });
   }
+});
+
+test("cobrança não usa o executável antigo nem uma versão diferente", async () => {
+  let spawnou = false;
+  const antigo = new GerenciadorTefNativo({
+    localizar: async () => ({
+      encontrado: true,
+      caminho: "C:\\Program Files\\UltraPDV Connector\\bin\\tef\\UltraPDVTef_NOVO.exe",
+      antigoEncontrado: true,
+    }),
+    spawn: () => {
+      spawnou = true;
+      throw new Error("não deveria iniciar");
+    },
+    registrarLog: async () => {},
+    versaoAgente: VERSAO_PACOTE,
+  });
+  const bloqueado = await antigo.pagar({ identificador: "SIMULADO", valor: 1 });
+  assert.equal(bloqueado.ok, false);
+  assert.equal(bloqueado.statusHttp, 409);
+  assert.equal(bloqueado.codigo, CODIGOS_TEF.OPERACAO_NAO_PERMITIDA);
+  assert.equal(bloqueado.tef.agente.situacao, "antigo_ignorado");
+  assert.equal(bloqueado.tef.agente.compativel, false);
+  assert.match(bloqueado.erro, /não será usado/);
+  assert.equal(spawnou, false);
+
+  const incompativel = new GerenciadorTefNativo({
+    localizar: async () => ({
+      encontrado: true,
+      caminho: "C:\\Program Files\\UltraPDV Connector\\bin\\tef\\UltraPDVTef_133.exe",
+    }),
+    spawn: () => {
+      spawnou = true;
+      throw new Error("não deveria iniciar");
+    },
+    registrarLog: async () => {},
+    versaoAgente: VERSAO_PACOTE,
+  });
+  const outra = await incompativel.pagar({ identificador: "SIMULADO", valor: 1 });
+  assert.equal(outra.tef.agente.compativel, false);
+  assert.equal(outra.tef.agente.situacao, "incompativel");
+  assert.match(outra.tef.agente.caminho, /UltraPDVTef_133\.exe$/);
+  assert.equal(spawnou, false);
+
+  const { gerenciador, processos } = criarGerenciador({ encerrarAoFechar: true });
+  const primeira = gerenciador.executar({ acao: "teste" });
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  responder(processos[0]);
+  await primeira;
+  await gerenciador.reiniciar();
+  assert.equal(processos.length, 2);
+  assert.equal(processos[0].arquivo, caminhoNativo);
+  assert.equal(processos[1].arquivo, caminhoNativo);
+  const status = await gerenciador.consultar();
+  assert.equal(status.agente.versao, VERSAO_PACOTE);
+  assert.equal(status.agente.compativel, true);
+  assert.equal(status.agente.nome, "UltraPDVTef_1313.exe");
 });
 
 test("statusTef sem processo fica parado ou não instalado e sem inicializar", async () => {
@@ -388,6 +478,7 @@ test("statusTef sem processo fica parado ou não instalado e sem inicializar", a
     reconciliacaoNecessaria: false,
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
+    agente: agenteDoStatus(),
   });
 
   const comArquivo = await statusTef({
@@ -403,6 +494,7 @@ test("statusTef sem processo fica parado ou não instalado e sem inicializar", a
     reconciliacaoNecessaria: false,
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
+    agente: agenteDoStatus(caminhoNativo),
   });
 
   const caminhoEstranho = await statusTef({
@@ -491,6 +583,7 @@ test("processo residente inicia uma vez e as chamadas reutilizam o mesmo pid", a
     reconciliacaoNecessaria: false,
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
+    agente: agenteDoStatus(caminhoNativo),
   });
 });
 
@@ -658,8 +751,9 @@ test("GET /tef/status informa o estado do executável sem iniciar o processo", a
           inicializado: false,
           transacaoPendenteConfirmacao: false,
           reconciliacaoNecessaria: false,
-    ambienteEfetivo: null,
-    situacaoAmbiente: "desconhecido",
+          ambienteEfetivo: null,
+          situacaoAmbiente: "desconhecido",
+          agente: agenteDoStatus(),
         },
         vinculo: { vinculado: false },
       });
@@ -688,6 +782,10 @@ test("GET /tef/status informa o estado do executável sem iniciar o processo", a
         "http://localhost:3000"
       );
       assert.equal(presente.body.tef.caminho, undefined);
+      assert.equal(presente.body.tef.agente.compativel, true);
+      assert.equal(presente.body.tef.agente.nome, NOME_TEF_NATIVO);
+      assert.equal(presente.body.tef.agente.versao, VERSAO_PACOTE);
+      assert.equal(presente.body.tef.agente.caminho, path.resolve(caminhoNativo));
     }
   );
   assert.equal(spawnou, false);
@@ -720,8 +818,9 @@ test("POST /tef/teste sem executável não inicia o nativo", async () => {
         inicializado: false,
         transacaoPendenteConfirmacao: false,
         reconciliacaoNecessaria: false,
-    ambienteEfetivo: null,
-    situacaoAmbiente: "desconhecido",
+        ambienteEfetivo: null,
+        situacaoAmbiente: "desconhecido",
+        agente: agenteDoStatus(),
       });
       assert.equal(localizou, 1);
       assert.equal(spawnou, false);
@@ -768,8 +867,9 @@ test("POST /tef/teste com executável falso usa o processo residente", async () 
         inicializado: false,
         transacaoPendenteConfirmacao: false,
         reconciliacaoNecessaria: false,
-    ambienteEfetivo: null,
-    situacaoAmbiente: "desconhecido",
+        ambienteEfetivo: null,
+        situacaoAmbiente: "desconhecido",
+        agente: agenteDoStatus(caminhoNativo),
       });
       assert.equal(segundo.status, 200);
       assert.equal(segundo.body.ok, true);
@@ -878,6 +978,43 @@ test("rotas existentes de status, saúde, impressoras e impressão seguem iguais
   });
 });
 
+test("preflight de GET /tef/pasta autoriza x-ultrapdv-dispositivo sem liberar cabeçalho arbitrário", async () => {
+  await comServidor({}, async (base) => {
+    const preflight = await optionsReq(`${base}/tef/pasta`, {
+      Origin: "http://localhost:3000",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers":
+        "x-ultrapdv-dispositivo, x-ultrapdv-empresa, x-ultrapdv-terminal, x-ultrapdv-estabelecimento, x-ultrapdv-desafio, x-nao-autorizado",
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers["access-control-allow-origin"], "http://localhost:3000");
+    assert.notEqual(preflight.headers["access-control-allow-origin"], "*");
+    const permitidos = String(preflight.headers["access-control-allow-headers"]).toLowerCase();
+    for (const cabecalho of [
+      "content-type",
+      "x-ultrapdv-empresa",
+      "x-ultrapdv-terminal",
+      "x-ultrapdv-desafio",
+      "x-ultrapdv-identificador",
+      "x-ultrapdv-valor-centavos",
+      "x-ultrapdv-autorizacao",
+      "x-ultrapdv-estabelecimento",
+      "x-ultrapdv-dispositivo",
+    ]) {
+      assert.equal(permitidos.includes(cabecalho), true, cabecalho);
+    }
+    assert.equal(permitidos.includes("x-nao-autorizado"), false);
+    assert.equal(permitidos.includes("*"), false);
+
+    const consulta = await getJson(`${base}/tef/pasta`, {
+      Origin: "http://localhost:3000",
+      "x-ultrapdv-dispositivo": "outro-computador",
+    });
+    assert.equal(consulta.status, 403);
+    assert.equal(consulta.headers["access-control-allow-origin"], "http://localhost:3000");
+  });
+});
+
 function responderInicializacao(proc) {
   const pedido = ultimaLinha(proc);
   proc.emitirStdout(
@@ -900,7 +1037,7 @@ test("inicializar envia a ação nativa e marca o processo como inicializado", a
 
   assert.equal(pedido.versao, 1);
   assert.equal(pedido.acao, "inicializar");
-  assert.deepEqual(pedido.dados, {});
+  assert.deepEqual(pedido.dados, { diretorio: "sandbox" });
   assert.equal(resposta.ok, true);
   assert.equal(resposta.resultado.inicializado, true);
   assert.equal(resposta.resultado.modelo, "PayGoWeb");
@@ -915,6 +1052,7 @@ test("inicializar envia a ação nativa e marca o processo como inicializado", a
     reconciliacaoNecessaria: false,
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
+    agente: agenteDoStatus(caminhoNativo),
   });
 });
 
@@ -998,7 +1136,7 @@ test("POST /tef/inicializar reflete inicializado no status", async () => {
           const pedido = JSON.parse(String(chunk).trim());
           assert.equal(pedido.acao, "inicializar");
           assert.equal(pedido.versao, 1);
-          assert.deepEqual(pedido.dados, {});
+          assert.deepEqual(pedido.dados, { diretorio: "sandbox" });
           setImmediate(() => {
             proc.emitirStdout(
               `${JSON.stringify({
@@ -1033,8 +1171,9 @@ test("POST /tef/inicializar reflete inicializado no status", async () => {
         inicializado: true,
         transacaoPendenteConfirmacao: false,
         reconciliacaoNecessaria: false,
-    ambienteEfetivo: null,
-    situacaoAmbiente: "desconhecido",
+        ambienteEfetivo: null,
+        situacaoAmbiente: "desconhecido",
+        agente: agenteDoStatus(caminhoNativo),
       });
 
       const recusado = await postJson(`${base}/tef/inicializar`, {
@@ -2077,10 +2216,26 @@ test("instalação nativa usa PWOPER_INSTALL e configura o ponto antes de inicia
   assert.equal(fonte.includes("42.741.754/0001-42"), false);
   assert.equal(fonte.includes("42741754000142"), false);
   assert.equal(fonte.includes("pos-transac-sb.tpgweb.io"), false);
+  assert.ok(fonte.includes("pontoSolicitado"));
+  assert.ok(fonte.includes("servidorSolicitado"));
+  assert.ok(fonte.includes("bibliotecaInstalada"));
+  assert.ok(fonte.includes("setEnvironmentExecutado"));
   assert.ok(antes.includes("ambNaoDefinido"));
   assert.ok(antes.includes("TEF_PARAMETROS_AUSENTES"));
   assert.ok(antes.includes("TEF_IDENTIDADE_DIVERGENTE"));
-  assert.ok(antes.includes("1.3.3"));
+  assert.equal(VERSAO_PACOTE, "1.3.15");
+  assert.ok(antes.includes("VersaoAplicacao := '1.3.13'"));
+  assert.ok(antes.includes("TextoDados(Dados, 'diretorioPai')"));
+  assert.ok(antes.includes("if not AplicarDiretorioBiblioteca("));
+  assert.ok(antes.includes("DiretorioPwInitObservado := ''"));
+  assert.ok(antes.includes("TEF.DiretorioTrabalho"));
+  assert.ok(antes.includes("SysUtils.GetEnvironmentVariable('PROGRAMDATA')"));
+  assert.ok(antes.includes("UltraPDV\\TEF\\Producao"));
+  assert.ok(antes.includes("DirectoryExists(Biblioteca)"));
+  assert.equal(antes.includes("Base + 'producao'"), false);
+  assert.ok(fonte.includes("retornoPwInit"));
+  assert.ok(fonte.includes("PW_iInit"));
+  assert.ok(fonte.includes("diretorioBiblioteca"));
   assert.match(antes, /TextoDados\(Dados, 'ambiente'\) = 'producao'/);
   assert.match(antes, /Ambiente := ambHomologacao/);
   assert.match(fonte, /TEF\.EfetuarAdministrativa\(IntToStr\(PWOPER_INSTALL\)\)/);
@@ -2202,12 +2357,16 @@ test("pagamento apresenta menu interativo e mantém cancelamento como padrão se
   assert.match(menu, /ItemSelecionado := AguardarRespostaMenu\(/);
   assert.ok(menu.indexOf("ItemSelecionado := AguardarRespostaMenu(") > menu.indexOf("ItemSelecionado := -1"));
   assert.match(pagar, /DiagnosticoPagamento := True;/);
+  assert.match(pagar, /preferencia/);
+  assert.match(pagar, /AnexarTipoCartao/);
+  assert.match(pagar, /tefmpCartao/);
+  assert.match(fonte, /PWINFO_CARDTYPE/);
   assert.ok(
     pagar.indexOf("DiagnosticoPagamento := True;") <
-      pagar.indexOf("TEF.EfetuarPagamento(Identificador, Valor);")
+      pagar.indexOf("TEF.EfetuarPagamento(")
   );
   assert.ok(
-    pagar.indexOf("TEF.EfetuarPagamento(Identificador, Valor);") <
+    pagar.indexOf("TEF.EfetuarPagamento(") <
       pagar.indexOf("DiagnosticoPagamento := False;")
   );
   assert.equal(instalar.includes("DiagnosticoPagamento"), false);
@@ -2248,6 +2407,7 @@ test("instalação exige TEF inicializado, usa timeout de 300s e não cria journ
     cnpj: "11222333000181",
     servidor: "tef.cliente.example:31735",
     estabelecimento: "LOJA NOVA",
+    diretorio: "sandbox",
   });
   assert.equal(TIMEOUTS_TEF_MS.instalacao, 300000);
   proc.emitirStdout(
@@ -2660,6 +2820,82 @@ test("vínculo local não troca de empresa e exige o dispositivo deste Connector
   );
 });
 
+test("vincular do Connector 1.3.5 persiste ambiente, servidor e CNPJ e preserva o terminal", async () => {
+  const empresa = "11111111-1111-4111-8111-111111111111";
+  const terminalId = "19080057-44ee-4e1e-95a1-286317b88b03";
+  const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "ultrapdv-vinculo-"));
+  const arquivo = path.join(pasta, "tef-vinculo.json");
+  const chave = path.join(pasta, "tef-chave.json");
+  const journal = path.join(pasta, "tef-pendencia.json");
+  const { gravarVinculoTef, lerVinculoTef } = await import("./tef-vinculo.mjs");
+  await gravarVinculoTef(arquivo, {
+    empresaId: empresa,
+    terminalCodigo: "117473",
+    dispositivoId: empresa,
+    estabelecimento: "SMARTCELL",
+    pontoCaptura: "6696546",
+    terminalId,
+  });
+  await fs.writeFile(chave, "{\"id\":\"preservada\"}\n", "utf8");
+  await fs.writeFile(journal, "{\"preservado\":true}\n", "utf8");
+  const chaveAntes = await fs.readFile(chave, "utf8");
+  const journalAntes = await fs.readFile(journal, "utf8");
+  await comServidor(
+    {
+      arquivoVinculoTef: arquivo,
+      arquivoChaveTef: chave,
+      arquivoPendenciaTef: journal,
+      lerVinculoTef: () => lerVinculoTef(arquivo),
+      gravarVinculoTef: (dados) => gravarVinculoTef(arquivo, dados),
+    },
+    async (base) => {
+      const codigo = await getJson(`${base}/tef/pareamento`);
+      const gravado = await postJson(`${base}/tef/vincular`, {
+        codigo: codigo.body.codigo,
+        empresaId: empresa,
+        terminalCodigo: "117473",
+        dispositivoId: empresa,
+        estabelecimento: "SMARTCELL",
+        pontoCaptura: "6696546",
+        ambiente: "producao",
+        cnpj: "11222333000181",
+        servidor: "tef.producao.example:31735",
+      });
+      assert.equal(gravado.status, 200);
+      assert.equal(gravado.body.vinculo.ambiente, "producao");
+      assert.equal(gravado.body.vinculo.servidor, "tef.producao.example:31735");
+      assert.equal(gravado.body.vinculo.cnpjInformado, true);
+      assert.equal(gravado.body.vinculo.cnpj, undefined);
+      const status = await getJson(`${base}/tef/status`);
+      assert.equal(status.body.vinculo.ambiente, "producao");
+      assert.equal(status.body.vinculo.servidor, "tef.producao.example:31735");
+      assert.equal(status.body.vinculo.cnpjInformado, true);
+      assert.equal(status.body.vinculo.terminalCodigo, "117473");
+      const disco = await lerVinculoTef(arquivo);
+      assert.equal(disco.terminalId, terminalId);
+      assert.equal(disco.pontoCaptura, "6696546");
+      const outroCodigo = await getJson(`${base}/tef/pareamento`);
+      const legado = await postJson(`${base}/tef/vincular`, {
+        codigo: outroCodigo.body.codigo,
+        empresaId: empresa,
+        terminalCodigo: "117473",
+        dispositivoId: empresa,
+        estabelecimento: "SMARTCELL",
+        pontoCaptura: "6696546",
+      });
+      assert.equal(legado.status, 200);
+      const preservado = await lerVinculoTef(arquivo);
+      assert.equal(preservado.terminalId, terminalId);
+      assert.equal(preservado.ambiente, "producao");
+      assert.equal(preservado.servidor, "tef.producao.example:31735");
+      assert.equal(preservado.cnpj, "11222333000181");
+      assert.equal(preservado.terminalCodigo, "117473");
+    }
+  );
+  assert.equal(await fs.readFile(chave, "utf8"), chaveAntes);
+  assert.equal(await fs.readFile(journal, "utf8"), journalAntes);
+});
+
 test("terminal sem vínculo não aceita pagamento quando a exigência está ativa", async () => {
   await comServidor({ exigirVinculoTef: true }, async (base) => {
     const resposta = await postJson(`${base}/tef/pagamento`, {
@@ -2758,6 +2994,114 @@ test("a prova assinada permanece no disco depois que o processo encerra", async 
   assert.equal(await lerRecuperacaoTef(arquivo), null);
 });
 
+test("recuperação preserva tipo, provas e evidência de ambiente e ignora tipo adulterado", async () => {
+  const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "ultrapdv-tef-mod-"));
+  const arquivo = path.join(pasta, "tef-recuperacao.json");
+  const registro = registroRecuperacaoTef({
+    identificador: "op-modalidade",
+    prova: "prova-financeira",
+    nsu: "998877",
+    autorizacao: "AUT01",
+    rede: "C6 PAY",
+    finalizacao: "FIN01",
+    valor: 25,
+    sucessoTransacao: true,
+    confirmar: true,
+    precisaConfirmacao: true,
+    transacaoPendenteConfirmacao: true,
+    tipoCartao: 1,
+    modalidadeSolicitada: "debito",
+    modalidadeEfetiva: "credito",
+    provaModalidade: "prova-assinada",
+    provaAmbiente: "prova-ambiente",
+    host: "pos-transac.pgweb.io:31735",
+    pontoCaptura: "6696546",
+    comprovanteSha256: "abc",
+    comprovante1Via: "via cliente",
+    comprovante2Via: "via loja",
+  });
+  await gravarRecuperacaoTef(arquivo, registro);
+  const lido = await lerRecuperacaoTef(arquivo);
+  assert.equal(lido?.tipoCartao, 1);
+  assert.equal(lido?.tipoCartaoInformado, true);
+  assert.equal(lido?.modalidadeSolicitada, "debito");
+  assert.equal(lido?.modalidadeEfetiva, "credito");
+  assert.equal(lido?.provaModalidade, "prova-assinada");
+  assert.equal(lido?.provaAmbiente, "prova-ambiente");
+  assert.equal(lido?.host, "pos-transac.pgweb.io:31735");
+  assert.equal(lido?.pontoCaptura, "6696546");
+  assert.equal(lido?.comprovante1Via, "via cliente");
+  const adulterado = registroRecuperacaoTef({ ...lido, tipoCartao: "CREDITO" });
+  assert.equal(adulterado?.tipoCartao, null);
+  assert.equal(adulterado?.tipoCartaoInformado, true);
+  assert.equal(adulterado?.provaModalidade, "prova-assinada");
+  const mesmo = cobrancaBloqueadaPorRecuperacao(lido, "op-modalidade");
+  assert.equal(mesmo?.acao, "reapresentar");
+  const outro = cobrancaBloqueadaPorRecuperacao(lido, "op-nova");
+  assert.equal(outro?.acao, "bloquear");
+});
+
+test("pagamento não chama o PayGo enquanto a recuperação tem autorização pendente", async () => {
+  let chamouPayGo = false;
+  const empresa = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  await comServidor(
+    {
+      exigirVinculoTef: true,
+      lerVinculoTef: async () => ({
+        empresaId: empresa,
+        terminalCodigo: "CX01",
+        dispositivoId: "11111111-1111-4111-8111-111111111111",
+      }),
+      lerRecuperacaoTef: async () =>
+        registroRecuperacaoTef({
+          identificador: "op-pendente",
+          prova: "prova-financeira",
+          sucessoTransacao: true,
+          nsu: "998877",
+          autorizacao: "AUT01",
+          rede: "C6 PAY",
+          finalizacao: "FIN01",
+          valor: 10,
+          confirmar: true,
+          tipoCartao: 2,
+          provaModalidade: "prova-modalidade",
+        }),
+      pagarTef: async () => {
+        chamouPayGo = true;
+        return { ok: true, resultado: { sucessoTransacao: true } };
+      },
+    },
+    async (base) => {
+      const bloqueado = await postJson(
+        `${base}/tef/pagamento`,
+        { acao: "pagamento", identificador: "op-nova", valor: 10 },
+        {
+          "x-ultrapdv-empresa": empresa,
+          "x-ultrapdv-terminal": "CX01",
+          "x-ultrapdv-desafio": "ab".repeat(32),
+        }
+      );
+      assert.equal(bloqueado.status, 409);
+      assert.equal(bloqueado.body.codigo, "TEF_TRANSACAO_PENDENTE");
+      assert.equal(chamouPayGo, false);
+      const mesma = await postJson(
+        `${base}/tef/pagamento`,
+        { acao: "pagamento", identificador: "op-pendente", valor: 10 },
+        {
+          "x-ultrapdv-empresa": empresa,
+          "x-ultrapdv-terminal": "CX01",
+          "x-ultrapdv-desafio": "ab".repeat(32),
+        }
+      );
+      assert.equal(mesma.status, 200);
+      assert.equal(mesma.body.recuperada, true);
+      assert.equal(mesma.body.resultado.tipoCartao, 2);
+      assert.equal(mesma.body.provaModalidade, "prova-modalidade");
+      assert.equal(chamouPayGo, false);
+    }
+  );
+});
+
 test("a recuperação local só é lida pelo terminal vinculado", async () => {
   const empresaA = "11111111-1111-4111-8111-111111111111";
   const recuperacao = {
@@ -2803,6 +3147,76 @@ test("diagnóstico do pinpad não inicia o PayGo quando ele está parado", async
   assert.equal(resposta.codigo, "PINPAD_PAYGO_NAO_INICIALIZADO");
   assert.equal(resposta.erro, MENSAGEM_TEF_PINPAD_NAO_INICIALIZADO);
   assert.equal(processos.length, 0);
+});
+
+test("processo em execução sem inicializar não recebe diagnóstico de pinpad", async () => {
+  const { gerenciador, processos } = criarGerenciador();
+  const teste = gerenciador.testar();
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  const pedido = ultimaLinha(processos[0]);
+  assert.equal(pedido.acao, "teste");
+  processos[0].emitirStdout(
+    `${JSON.stringify({
+      id: pedido.id,
+      ok: true,
+      resultado: { mensagem: "UltraPDVTef ativo" },
+      erro: null,
+    })}\n`
+  );
+  assert.equal((await teste).ok, true);
+  const status = await gerenciador.consultar();
+  assert.equal(status.processo, "executando");
+  assert.equal(status.inicializado, false);
+  assert.equal(status.agente.diretorioSelecionado, "");
+  const pinpad = await gerenciador.diagnosticarPinpad(true);
+  assert.equal(pinpad.codigo, "PINPAD_PAYGO_NAO_INICIALIZADO");
+  assert.match(pinpad.erro, /não foi inicializada/);
+  assert.equal(processos[0].stdin.partes.length, 1);
+  assert.equal(JSON.stringify(processos[0].stdin.partes).includes("pinpad"), false);
+  assert.equal(JSON.stringify(processos[0].stdin.partes).includes("pagamento"), false);
+  assert.equal(JSON.stringify(processos[0].stdin.partes).includes("instalar"), false);
+});
+
+test("falha de gravação mantém o processo sem pasta e não cobra", async () => {
+  const { gerenciador, processos } = criarGerenciador();
+  const pendente = gerenciador.inicializar(IDENTIDADE_PRODUCAO);
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  const pedido = ultimaLinha(processos[0]);
+  assert.equal(pedido.acao, "inicializar");
+  assert.equal(pedido.dados.diretorio, "producao");
+  assert.equal(pedido.dados.ambiente, "producao");
+  assert.equal(pedido.dados.pontoCaptura, "6696546");
+  assert.equal(pedido.dados.servidor, "pos-transac.pgweb.io:31735");
+  processos[0].emitirStdout(
+    `${JSON.stringify({
+      id: pedido.id,
+      ok: false,
+      erro: "TEF_INICIALIZACAO_FALHOU: Falha de gravação no diretório C:\\ProgramData\\UltraPDV\\TEF\\Producao\\PGWeb\\",
+      resultado: {
+        diretorioTrabalho: "C:\\ProgramData\\UltraPDV\\TEF\\Producao\\PGWeb\\",
+        retornoPwInit: -2485,
+        retornoPwInitNome: "PWRET_WRITERR",
+        diretorioBiblioteca: "producao",
+      },
+    })}\n`
+  );
+  const inicio = await pendente;
+  assert.equal(inicio.ok, false);
+  assert.match(inicio.erro, /Código -2485 PWRET_WRITERR/);
+  assert.match(inicio.erro, /ProgramData\\UltraPDV\\TEF\\Producao\\PGWeb/);
+  assert.match(inicio.erro, /não foi marcado como pronto/);
+  const status = await gerenciador.consultar();
+  assert.equal(status.processo, "executando");
+  assert.equal(status.inicializado, false);
+  assert.equal(status.agente.diretorioSelecionado, "");
+  assert.match(status.erroInicializacao, /Código -2485 PWRET_WRITERR/);
+  assert.equal(status.diretorioTrabalho, "C:\\ProgramData\\UltraPDV\\TEF\\Producao\\PGWeb\\");
+  assert.equal(status.retornoPwInit, -2485);
+  assert.equal(status.retornoPwInitNome, "PWRET_WRITERR");
+  const pago = await gerenciador.pagar({ identificador: "VENDA-GRAVACAO", valor: 1 });
+  assert.equal(pago.ok, false);
+  assert.equal(pago.codigo, CODIGOS_TEF.NAO_INICIALIZADO);
+  assert.equal(processos[0].stdin.partes.length, 1);
 });
 
 test("diagnóstico durante pagamento informa terminal ocupado e não escreve no processo", async () => {
@@ -2890,11 +3304,58 @@ test("timeout do pinpad não mata o processo nem marca reconciliação financeir
   await ate(() => timers.length > antes && ultimaLinha(processos[0]).acao === "pinpad-testar-comunicacao");
   const timer = timers.at(-1);
   assert.equal(timer.ms, TIMEOUTS_TEF_MS.pinpad);
+  const pedido = ultimaLinha(processos[0]);
+  const linhasAntes = processos[0].stdin.partes.join("").split(/\r?\n/).filter((linha) => linha.trim()).length;
   timer.fn();
   const resposta = await pendente;
   assert.equal(resposta.codigo, CODIGOS_TEF.TIMEOUT);
+  assert.equal(resposta.erro, MENSAGEM_TEF_PINPAD_TIMEOUT);
+  assert.equal(resposta.resultado.comunicacao, "timeout");
+  assert.equal(typeof resposta.resultado.duracaoMs, "number");
+  assert.equal(Object.hasOwn(resposta.resultado, "codigoBiblioteca"), false);
   assert.equal(processos[0].killed, false);
   assert.equal(gerenciador.transacaoPendente, null);
+  assert.equal(gerenciador.chamadaNativaEmAberto?.id, pedido.id);
+  const pago = await gerenciador.pagar({ identificador: "VENDA-PINPAD", valor: 1 });
+  assert.equal(pago.codigo, CODIGOS_TEF.OCUPADO);
+  assert.equal(pago.erro, MENSAGEM_TEF_PINPAD_EM_EXECUCAO);
+  assert.equal(gerenciador.transacaoPendente, null);
+  gerenciador.transacaoPendente = {
+    status: "aguardando_decisao",
+    rede: "C6",
+    nsu: "100",
+    finalizacao: "F1",
+    identificador: "VENDA-PINPAD",
+  };
+  const confirmado = await gerenciador.confirmar({ rede: "C6", nsu: "100", finalizacao: "F1" });
+  const desfeito = await gerenciador.desfazer({ rede: "C6", nsu: "100", finalizacao: "F1" });
+  const instalado = await gerenciador.instalar();
+  assert.equal(confirmado.codigo, CODIGOS_TEF.OCUPADO);
+  assert.equal(confirmado.erro, MENSAGEM_TEF_PINPAD_EM_EXECUCAO);
+  assert.equal(desfeito.codigo, CODIGOS_TEF.OCUPADO);
+  assert.equal(desfeito.erro, MENSAGEM_TEF_PINPAD_EM_EXECUCAO);
+  assert.equal(instalado.codigo, CODIGOS_TEF.OCUPADO);
+  assert.equal(instalado.erro, MENSAGEM_TEF_PINPAD_EM_EXECUCAO);
+  assert.equal(gerenciador.transacaoPendente.status, "aguardando_decisao");
+  gerenciador.transacaoPendente = null;
+  const linhasDepois = processos[0].stdin.partes.join("").split(/\r?\n/).filter((linha) => linha.trim()).length;
+  assert.equal(linhasDepois, linhasAntes);
+  processos[0].emitirStdout(
+    `${JSON.stringify({
+      id: pedido.id,
+      ok: true,
+      resultado: {
+        comunicacao: "nao_encontrado",
+        codigoBiblioteca: -2489,
+        avisoBiblioteca: "pinpad nao encontrado",
+        portaConfigurada: 0,
+      },
+    })}\n`
+  );
+  assert.equal(gerenciador.chamadaNativaEmAberto, null);
+  assert.equal(gerenciador.ultimoPinpad.codigoBiblioteca, -2489);
+  assert.equal(gerenciador.ultimoPinpad.recebidoAposTimeout, true);
+  assert.equal(processos[0].killed, false);
 });
 
 test("segunda consulta de pinpad espera a primeira terminar", async () => {
@@ -2988,6 +3449,192 @@ test("rotas do pinpad exigem o terminal vinculado e não chamam pagamento", asyn
   );
 });
 
+function emitirInicializacaoBiblioteca(proc, resultado) {
+  const pedido = ultimaLinha(proc);
+  proc.emitirStdout(
+    `${JSON.stringify({
+      id: pedido.id,
+      ok: true,
+      resultado: { inicializado: true, modelo: "PayGoWeb", ...resultado },
+      erro: null,
+    })}\n`
+  );
+}
+
+const IDENTIDADE_PRODUCAO = {
+  ...IDENTIDADE_INSTALACAO,
+  pontoCaptura: "6696546",
+  ambiente: "producao",
+  servidor: "pos-transac.pgweb.io:31735",
+  estabelecimento: "SMARTCELL CELULARES",
+};
+
+const OBSERVACAO_PRODUCAO_APLICADA = {
+  pontoSolicitado: "6696546",
+  servidorSolicitado: "pos-transac.pgweb.io:31735",
+  ambienteSolicitado: "producao",
+  diretorioBiblioteca: "producao",
+  bibliotecaInstalada: false,
+  setEnvironmentExecutado: true,
+  retornoSetEnvironment: 0,
+  codigoAmbiente: 0,
+  instalacaoConcluida: true,
+};
+
+test("pagamento simulado não chega ao processo quando a biblioteca já está instalada", async () => {
+  const { gerenciador, processos } = criarGerenciador();
+  const pendente = gerenciador.inicializar(IDENTIDADE_PRODUCAO);
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  emitirInicializacaoBiblioteca(processos[0], {
+    ...OBSERVACAO_PRODUCAO_APLICADA,
+    bibliotecaInstalada: true,
+    setEnvironmentExecutado: false,
+    instalacaoConcluida: false,
+    retornoSetEnvironment: -999,
+  });
+  const inicio = await pendente;
+  assert.equal(inicio.ok, true);
+  assert.equal(inicio.tef.biblioteca.cobrancaPermitida, false);
+  const pago = await gerenciador.pagar({ identificador: "VENDA-123", valor: 1 });
+  assert.equal(pago.ok, false);
+  assert.equal(pago.statusHttp, 409);
+  assert.equal(pago.codigo, CODIGOS_TEF.OPERACAO_NAO_PERMITIDA);
+  assert.match(pago.erro, /instalação existente/);
+  assert.equal(processos[0].stdin.partes.length, 1);
+});
+
+test("pagamento simulado segue quando esta inicialização aplicou o servidor de produção", async () => {
+  const { gerenciador, processos } = criarGerenciador();
+  const pendente = gerenciador.inicializar(IDENTIDADE_PRODUCAO);
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  emitirInicializacaoBiblioteca(processos[0], OBSERVACAO_PRODUCAO_APLICADA);
+  const inicio = await pendente;
+  assert.equal(inicio.tef.biblioteca.cobrancaPermitida, true);
+  assert.equal(inicio.tef.biblioteca.pontoSolicitado, "6696546");
+  assert.equal(inicio.tef.biblioteca.servidorSolicitado, "pos-transac.pgweb.io:31735");
+  const venda = gerenciador.pagar({ identificador: "SIMULADO-1", valor: 1 });
+  await ate(() => processos[0].stdin.partes.length === 2);
+  const pedido = ultimaLinha(processos[0]);
+  assert.equal(pedido.acao, "pagamento");
+  emitirPagamento(processos[0], {
+    sucessoChamada: true,
+    sucessoTransacao: false,
+    mensagem: "SIMULADO",
+    identificador: "SIMULADO-1",
+    valor: 1,
+  });
+  const pago = await venda;
+  assert.equal(pago.ok, true);
+  assert.equal(pago.resultado.sucessoTransacao, false);
+});
+
+test("reinício com prova assinada libera somente o pagamento simulado", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { assinarBibliotecaTef } = await import("./tef-prova.mjs");
+  const par = generateKeyPairSync("ed25519");
+  const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "ultrapdv-biblioteca-"));
+  const arquivoChave = path.join(pasta, "tef-chave.json");
+  const arquivoBiblioteca = path.join(pasta, "tef-biblioteca.json");
+  const arquivoPendencia = path.join(pasta, "tef-pendencia.json");
+  const privada = par.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const publica = par.publicKey.export({ type: "spki", format: "pem" }).toString();
+  const campos = {
+    pontoCaptura: "6696546",
+    servidor: "pos-transac.pgweb.io:31735",
+    ambiente: "producao",
+    retornoSetEnvironment: 0,
+    codigoAmbiente: 0,
+    diretorio: "producao",
+  };
+  await fs.writeFile(arquivoChave, JSON.stringify({ id: "teste", publica, privada }), "utf8");
+  await fs.writeFile(
+    arquivoBiblioteca,
+    JSON.stringify({ versao: 1, campos, assinatura: assinarBibliotecaTef(privada, campos) }),
+    "utf8"
+  );
+  const antes = await fs.readFile(arquivoChave, "utf8");
+  const { gerenciador, processos } = criarGerenciador({
+    deps: { arquivoPendencia, arquivoChave, arquivoBiblioteca },
+  });
+  const pendente = gerenciador.inicializar(IDENTIDADE_PRODUCAO);
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  emitirInicializacaoBiblioteca(processos[0], {
+    diretorioBiblioteca: "producao",
+    pontoSolicitado: "6696546",
+    servidorSolicitado: "pos-transac.pgweb.io:31735",
+    ambienteSolicitado: "producao",
+    bibliotecaInstalada: true,
+    setEnvironmentExecutado: false,
+    retornoSetEnvironment: -999,
+    codigoAmbiente: -1,
+  });
+  const inicio = await pendente;
+  assert.equal(inicio.tef.biblioteca.cobrancaPermitida, true);
+  assert.equal(inicio.tef.biblioteca.origemComprovacao, "instalacao_assinada");
+  assert.equal(await fs.readFile(arquivoChave, "utf8"), antes);
+  const venda = gerenciador.pagar({ identificador: "SIMULADO-2", valor: 1 });
+  await ate(() => processos[0].stdin.partes.length === 2);
+  assert.equal(ultimaLinha(processos[0]).acao, "pagamento");
+  emitirPagamento(processos[0], {
+    sucessoChamada: true,
+    sucessoTransacao: false,
+    mensagem: "SIMULADO",
+    identificador: "SIMULADO-2",
+    valor: 1,
+  });
+  const pago = await venda;
+  assert.equal(pago.resultado.sucessoTransacao, false);
+  await fs.rm(pasta, { recursive: true, force: true });
+});
+
+test("a pasta de produção fica isolada e a falha não seleciona a homologação", async () => {
+  const consultas = [];
+  const contaminado = criarGerenciador({
+    deps: {
+      listarDiretorioBiblioteca: async (pasta) => {
+        consultas.push(String(pasta));
+        return ["certificado.crt", "file50.pos"];
+      },
+    },
+  });
+  const bloqueio = await contaminado.gerenciador.inicializar(IDENTIDADE_PRODUCAO);
+  assert.equal(bloqueio.ok, false);
+  assert.equal(bloqueio.statusHttp, 409);
+  assert.match(bloqueio.erro, /não será reutilizada/);
+  assert.equal(contaminado.processos.length, 0);
+  assert.match(consultas[0], /Producao[\\/]PGWeb$/);
+  assert.equal(/[\\/]TEF[\\/]PGWeb$/.test(consultas[0]), false);
+
+  const { gerenciador, processos } = criarGerenciador({
+    encerrarAoFechar: true,
+    deps: {
+      listarDiretorioBiblioteca: async (pasta) => {
+        consultas.push(String(pasta));
+        return [];
+      },
+    },
+  });
+  const sandbox = gerenciador.inicializar();
+  await ate(() => processos[0]?.stdin.partes.length === 1);
+  const pedidoSandbox = responderInicializacao(processos[0]);
+  assert.equal(pedidoSandbox.dados.diretorio, "sandbox");
+  assert.equal((await sandbox).ok, true);
+
+  const producao = gerenciador.inicializar(IDENTIDADE_PRODUCAO);
+  await ate(() => processos.length === 2 && processos[1]?.stdin.partes.length === 1);
+  const pedido = ultimaLinha(processos[1]);
+  assert.equal(pedido.dados.diretorio, "producao");
+  assert.equal(pedido.dados.pontoCaptura, "6696546");
+  assert.equal(pedido.dados.servidor, "pos-transac.pgweb.io:31735");
+  assert.match(consultas.at(-1), /Producao[\\/]PGWeb$/);
+  responderInicializacao(processos[1]);
+  const falha = await producao;
+  assert.equal(falha.ok, false);
+  assert.match(falha.erro, /pasta de produção/);
+  assert.equal((await gerenciador.consultar()).agente.diretorioSelecionado, "");
+  assert.equal(processos.some((item) => String(item.arquivo).includes("UltraPDVTef_NOVO")), false);
+});
+
 test("o nativo do pinpad não reinstala nem abre transação", () => {
   const lpr = readFileSync(
     fileURLToPath(new URL("../../tef-agent/UltraPDVTef.lpr", import.meta.url)),
@@ -2999,6 +3646,13 @@ test("o nativo do pinpad não reinstala nem abre transação", () => {
   assert.equal(inicio > 0 && fim > inicio, true);
   assert.equal(bloco.includes("PWINFO_PPINFO"), true);
   assert.equal(bloco.includes("PW_iPPCommTest"), true);
+  assert.equal(bloco.includes("PortaPinPad"), true);
+  assert.equal(bloco.includes("PWRET_NOTHING"), true);
+  assert.equal(bloco.includes("LIMITE_REPETICOES_PPCOMM"), true);
+  assert.equal(bloco.includes("GetModuleHandle"), true);
+  assert.equal(bloco.includes("LoadLibrary"), false);
+  assert.equal(bloco.includes("COM7"), false);
+  assert.equal(bloco.includes("PW_iEnd"), false);
   assert.equal(bloco.includes("PWOPER_INSTALL"), false);
   assert.equal(bloco.includes("PWOPER_MAINTENANCE"), false);
   assert.equal(bloco.includes("PWOPER_TSTKEY"), false);

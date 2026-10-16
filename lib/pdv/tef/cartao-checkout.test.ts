@@ -170,7 +170,7 @@ test("com as duas flags ativas, o pinpad começa antes da venda e a autorizaçã
 
   const shell = readFileSync(join(raiz, "components/pdv/pdv-shell.tsx"), "utf8");
   const inicio = shell.indexOf("function finalizar()");
-  const gravacao = shell.indexOf("await finalizarVendaPdv", inicio);
+  const gravacao = shell.indexOf("finalizarVendaPdv(", inicio);
   const checkout = shell.slice(inicio, gravacao);
   const posPolitica = checkout.indexOf("avaliarCartaoAntesDaCobranca");
   const posCobranca = checkout.indexOf("executarCobrancasTef");

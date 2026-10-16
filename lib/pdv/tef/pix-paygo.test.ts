@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { bloqueioTefHomologacaoNfceProducao } from "@/lib/fiscal/tef/ambiente-tef-nfce";
+import { origemProducaoComprovada } from "@/lib/pdv/tef/ambiente-transacao";
 
 import {
   decidirRecuperacao,
@@ -79,6 +80,7 @@ test("PIX autorizado sem PWINFO_AUTHCODE preserva o NSU e não inventa autoriza�
     empresaId: EMPRESA_A,
     operacaoId: inicio.operacaoId,
     provaValida: true,
+    origem: origemProducaoComprovada(),
     resultado: pixCompleto,
   });
   assert.equal(registrado.ok && registrado.status, "autorizada");
@@ -152,6 +154,7 @@ test("PIX com NSU e finalização válidos só confirma depois da venda", () => 
     empresaId: EMPRESA_A,
     operacaoId: inicio.operacaoId,
     provaValida: true,
+    origem: origemProducaoComprovada(),
     resultado: pixCompleto,
   });
   assert.equal(
@@ -284,6 +287,7 @@ test("recuperação após reinício usa os identificadores originais e não conf
     empresaId: EMPRESA_A,
     operacaoId: inicio.operacaoId,
     provaValida: true,
+    origem: origemProducaoComprovada(),
     resultado: pixCompleto,
   });
   const reidratada = structuredClone(memoria);

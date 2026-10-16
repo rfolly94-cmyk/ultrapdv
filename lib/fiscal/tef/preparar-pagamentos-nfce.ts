@@ -29,6 +29,7 @@ export async function bloqueioTefHomologacaoNaNfce(
     quantidade: number;
     ambienteTef: string | null;
     consultaInconclusiva?: boolean;
+    ambientesEfetivos?: string[] | null;
   }>,
   ambienteFiscal: unknown
 ) {
@@ -38,5 +39,6 @@ export async function bloqueioTefHomologacaoNaNfce(
     ambienteTef: consulta.ambienteTef,
     possuiTransacaoTef: consulta.quantidade > 0,
     consultaInconclusiva: consulta.consultaInconclusiva === true,
+    ambientesEfetivos: consulta.ambientesEfetivos,
   });
 }

@@ -22,7 +22,19 @@
         background: var(--bg);
         color: var(--text);
         margin: 0;
-        padding: 32px 16px;
+        padding: 32px 16px 56px;
+      }
+      footer.rodape {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 8px 16px;
+        border-top: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
       }
       main {
         max-width: 440px;
@@ -138,7 +150,15 @@
         <button type="button" id="btnSair">Sair</button>
       </div>
       <p class="msg" id="msg"></p>
+      <section class="secao" id="secaoDiagnostico">
+        <h2>Diagnóstico</h2>
+        <div class="row">
+          <span class="muted">Agente TEF</span>
+          <span id="agenteTef">—</span>
+        </div>
+      </section>
     </main>
+    <footer class="rodape" id="rodapeConector">UltraPDV Connector</footer>
 
     <dialog id="dlgPorta">
       <form method="dialog">
@@ -209,7 +229,12 @@
             return;
           }
           document.getElementById("porta").textContent = data.port ?? "—";
-          document.getElementById("versao").textContent = data.version || data.versao || "—";
+          const versaoInstalada = data.version || data.versao || "";
+          document.getElementById("versao").textContent = versaoInstalada || "—";
+          document.getElementById("rodapeConector").textContent = versaoInstalada
+            ? (data.nome || "UltraPDV Connector") + " · v" + versaoInstalada
+            : (data.nome || "UltraPDV Connector");
+          atualizarAgente();
           document.getElementById("portaAtual").textContent = data.port ?? "—";
           document.getElementById("inputPorta").value = data.port ?? 18181;
           pintarStatus("Conectado", "ok");
@@ -329,6 +354,33 @@
         pintarStatus("Erro", "err");
         msg.textContent = "Conector encerrado.";
       };
+
+      async function atualizarAgente() {
+        const destino = document.getElementById("agenteTef");
+        try {
+          const { res, data } = await api("/tef/status");
+          const agente = data && data.tef && data.tef.agente;
+          if (!res.ok || !agente || !agente.nome) {
+            destino.textContent = "indisponível";
+            return;
+          }
+          var texto = agente.compativel && agente.versao
+            ? agente.nome + " · v" + agente.versao
+            : agente.nome + " · não selecionado";
+          if (data.tef.diretorioTrabalho) {
+            texto += " · " + data.tef.diretorioTrabalho;
+          }
+          if (data.tef.retornoPwInitNome) {
+            texto += " · PW_iInit " + data.tef.retornoPwInitNome;
+            if (typeof data.tef.retornoPwInit === "number") {
+              texto += " (" + data.tef.retornoPwInit + ")";
+            }
+          }
+          destino.textContent = texto;
+        } catch {
+          destino.textContent = "indisponível";
+        }
+      }
 
       async function atualizarPareamento() {
         try {

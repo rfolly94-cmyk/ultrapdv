@@ -2,6 +2,8 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 
+import { juntarComprovante } from "@/lib/pdv/tef/ambiente-transacao";
+
 import { ErroAcessoSessao } from "@/lib/auth/contexto-autorizado";
 import { resolverContextoAutorizadoEmpresa } from "@/lib/auth/contexto-autorizado";
 import { exigirMaster } from "@/lib/master/exigir-master";
@@ -18,6 +20,7 @@ import {
   lerTefPlataforma,
   liberarConfirmacaoTefPersistida,
   listarPendenciasTefPersistidas,
+  marcarPendenciaFormaTefPersistida,
   listarTerminaisAtivosEmpresa,
   marcarConfirmacaoTefPersistida,
   registrarDesfazimentoTefPersistido,
@@ -31,6 +34,7 @@ import {
   salvarConfigTefEmpresa,
   substituirAutorizacaoTerminalTef,
 } from "@/lib/pdv/tef/persistencia";
+import { tipoCartaoOficial } from "@/lib/pdv/tef/modalidade-efetiva";
 import { hashSegredoVinculo, verificarIdentidadeTef, verificarProvaTef } from "@/lib/pdv/tef/prova";
 import { fingerprintChavePublicaEd25519 } from "@/lib/pdv/tef/fingerprint-chave";
 import { decidirRecuperacaoAutorizacao } from "@/lib/pdv/tef/recuperar-autorizacao";
@@ -99,6 +103,11 @@ export async function lerConfigTefSessao() {
       status: item.status,
       valorCentavos: item.valorCentavos,
       modalidade: item.modalidade,
+      modalidadeSolicitada: item.modalidadeSolicitada,
+      modalidadeEfetiva: item.modalidadeEfetiva,
+      tipoCartaoPayGo: item.tipoCartaoPayGo,
+      diagnostico: item.diagnostico,
+      proibirDesfazimento: item.proibirDesfazimento,
       identificador: item.identificador,
       terminalCodigo: item.terminalCodigo,
     })),
@@ -142,6 +151,14 @@ export async function iniciarTefSessao(body: Record<string, unknown>) {
   });
 }
 
+export async function registrarPendenciaFormaTefSessao(body: Record<string, unknown>) {
+  const ctx = await sessaoPdv();
+  return marcarPendenciaFormaTefPersistida({
+    empresaId: ctx.empresaId,
+    operacaoId: uuid(body.operacaoId),
+  });
+}
+
 export async function registrarResultadoTefSessao(body: Record<string, unknown>) {
   const ctx = await sessaoPdv();
   const limpo = sanitizarParaLog(body) as Record<string, unknown>;
@@ -163,19 +180,27 @@ export async function registrarResultadoTefSessao(body: Record<string, unknown>)
     cancelada: limpo.cancelada === true,
     canceladoOperador: limpo.canceladoOperador === true,
     codigo: texto(limpo.codigo) || null,
-    teste: limpo.teste === true,
     nomeBandeiraPadrao: texto(limpo.nomeBandeiraPadrao) || null,
     nomeCartao: texto(limpo.nomeCartao) || null,
     bandeira: texto(limpo.bandeira) || null,
     cnpjCredenciadora: texto(limpo.cnpjCredenciadora) || null,
     cnpjRecebedor: texto(limpo.cnpjRecebedor) || null,
     instituicao: texto(limpo.instituicao) || null,
+    tipoCartao: tipoCartaoOficial(limpo.tipoCartao),
   };
   return registrarResultadoTefPersistido({
     empresaId: ctx.empresaId,
     operacaoId: uuid(limpo.operacaoId),
     resultado,
     prova: texto(body.prova),
+    provaAmbiente: texto(body.provaAmbiente),
+    provaModalidade: texto(body.provaModalidade),
+    comprovante: juntarComprovante(
+      typeof body.comprovante1Via === "string" ? body.comprovante1Via : "",
+      typeof body.comprovante2Via === "string" ? body.comprovante2Via : ""
+    ),
+    host: texto(body.host || body.servidor),
+    pontoCaptura: texto(body.pontoCaptura),
   });
 }
 
@@ -353,6 +378,55 @@ export async function prepararAcessoPinpad(dispositivoId: string) {
     terminalCodigo: terminal.codigo,
     estabelecimento: terminal.estabelecimento,
     desafio: randomBytes(32).toString("hex"),
+  };
+}
+
+export async function prepararAcessoPastaTef(dispositivoId: string) {
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  try {
+    await exigirPermissao({ modulo: "financeiro", acao: "editar" });
+  } catch (error) {
+    if (error instanceof ErroPermissao) {
+      throw new ErroTef(error.message, error.status);
+    }
+    throw error;
+  }
+  const id = uuid(dispositivoId);
+  const terminais = await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
+  const terminal = terminais.find((item) => item.dispositivoId === id);
+  if (!terminal) {
+    throw new ErroTef(
+      "Este computador não está autorizado para o TEF desta empresa.",
+      403
+    );
+  }
+  return {
+    ok: true as const,
+    empresaId: ctx.empresaId,
+    terminalCodigo: terminal.codigo,
+    estabelecimento: terminal.estabelecimento,
+    desafio: randomBytes(32).toString("hex"),
+    pendenciaFinanceira: terminal.temPendencia,
+    mensagemPendencia: terminal.temPendencia
+      ? "Há operação TEF pendente, autorização sem confirmação ou conciliação. A pasta não pode ser alterada."
+      : "",
+  };
+}
+
+export async function prepararInicializacaoBiblioteca(dispositivoId: string) {
+  const acesso = await prepararAcessoPinpad(dispositivoId);
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  const habilitacao = await lerHabilitacaoTef(ctx.supabase, ctx.empresaId);
+  if (habilitacao.ambiente !== "producao") {
+    throw new ErroTef(
+      "A inicialização explícita exige o ambiente oficial de produção desta empresa.",
+      409
+    );
+  }
+  return {
+    ok: true as const,
+    empresaId: acesso.empresaId,
+    acao: "inicializar" as const,
   };
 }
 

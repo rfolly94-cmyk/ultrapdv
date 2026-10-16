@@ -12,6 +12,7 @@ import {
   digitosCnpj,
   etapaPersistida,
   montarGravacaoAtivacao,
+  sanitizarObservacaoBiblioteca,
   validarCredenciamento,
   type AmbienteTefAssistente,
   type CredenciamentoInformado,
@@ -27,10 +28,11 @@ import {
   type CamposEvidenciaInstalacao,
   type ClassificacaoAmbienteInstalacao,
 } from "@/lib/pdv/tef/evidencia-instalacao";
-import { decidirInstalacaoControlada } from "@/lib/pdv/tef/instalacao-controlada";
+import { decidirInstalacaoControlada, decidirInstalacaoProducaoIsolada } from "@/lib/pdv/tef/instalacao-controlada";
+import { diretoriosRelativosBiblioteca } from "@/lib/pdv/tef/diretorio-biblioteca";
 import { ErroTef, gravarServidoresPayGoEmpresa, lerHabilitacaoTef, salvarConfigTefEmpresa } from "@/lib/pdv/tef/persistencia";
 import { STATUS_TEF_ABERTOS } from "@/lib/pdv/tef/regras";
-import { decidirGravacaoServidor } from "@/lib/pdv/tef/servidor-paygo";
+import { confirmarServidorPersistido, decidirGravacaoServidor } from "@/lib/pdv/tef/servidor-paygo";
 
 export type RascunhoAssistente = {
   etapa: EtapaAssistente;
@@ -53,6 +55,7 @@ export type ObservacaoAssistente = {
   pinpadExigido?: boolean;
   empresaId?: string;
   credenciamento?: Partial<CredenciamentoInformado>;
+  biblioteca?: unknown;
 };
 
 function colunaServidorAusente(error: { code?: string; message?: string } | null) {
@@ -183,12 +186,13 @@ export async function lerRascunhoAssistente(empresaId: string) {
 
 export async function lerPaginaAssistenteTef() {
   const ctx = await contextoEdicao();
-  const [{ data: empresa }, { data: fiscal }, config, instalacao, plano] = await Promise.all([
+  const [{ data: empresa }, { data: fiscal }, config, instalacao, plano, servidores] = await Promise.all([
     ctx.supabase.from("empresas").select("cnpj").eq("id", ctx.empresaId).maybeSingle(),
     ctx.supabase.from("empresas_fiscal").select("ambiente").eq("empresa_id", ctx.empresaId).maybeSingle(),
     lerHabilitacaoTef(ctx.supabase, ctx.empresaId),
     lerRascunhoAssistente(ctx.empresaId),
     planoPermiteRecursoEmpresa(ctx.empresaId, "pdv"),
+    lerServidoresOficiais(ctx.empresaId),
   ]);
   return {
     empresaId: ctx.empresaId,
@@ -203,6 +207,8 @@ export async function lerPaginaAssistenteTef() {
     ambienteAtual: config.ambiente === "producao" ? "producao" : "homologacao",
     pontoAtual: config.pontoCaptura,
     estabelecimentoAtual: config.estabelecimento,
+    servidorHomologacao: servidores.servidorHomologacao,
+    servidorProducao: servidores.servidorProducao,
     migracaoInstalacaoPendente: instalacao.migracaoPendente,
     rascunho: instalacao.rascunho,
   };
@@ -353,6 +359,7 @@ export async function avaliarAssistenteTefSessao(observacao: ObservacaoAssistent
     dispositivoId,
     ambienteDeclarado: efetivo.ambienteAutorizado,
   });
+  const provaTecnica = await consultarProvaTecnicaDaEmpresa(pagina.empresaId, dispositivoId);
   return avaliarInstalacao({
     credenciamento: efetivo.credenciamento,
     connector: leituraConnector(observacao.connector),
@@ -372,7 +379,38 @@ export async function avaliarAssistenteTefSessao(observacao: ObservacaoAssistent
     plataformaHabilitada: pagina.plataformaHabilitada,
     ambienteFiscal: pagina.ambienteFiscal,
     evidencia,
+    biblioteca: sanitizarObservacaoBiblioteca(observacao.biblioteca),
+    provaTecnica,
   });
+}
+
+async function consultarProvaTecnicaDaEmpresa(empresaId: string, dispositivoId: string) {
+  const id = dispositivoId.trim().toLowerCase();
+  if (!ID_EVIDENCIA.test(id)) {
+    return null;
+  }
+  const cliente = createAdminClient();
+  const registro = await cliente
+    .from("tef_validacoes_biblioteca")
+    .select("ambiente, diretorio")
+    .eq("empresa_id", empresaId)
+    .eq("dispositivo_id", id)
+    .is("revogada_em", null)
+    .limit(1);
+  if (registro.error) {
+    if (migracaoAusente(registro.error)) {
+      return null;
+    }
+    throw new ErroTef("Não foi possível consultar a prova técnica da biblioteca.", 500);
+  }
+  const linha = registro.data?.[0];
+  if (!linha) {
+    return null;
+  }
+  return {
+    instalacaoComprovada: true,
+    ambienteConfigurado: linha.ambiente === "producao" && linha.diretorio === "producao",
+  };
 }
 
 export async function salvarRascunhoAssistenteSessao(input: {
@@ -392,9 +430,6 @@ export async function salvarRascunhoAssistenteSessao(input: {
   const pagina = await lerPaginaAssistenteTef();
   if (!pagina.permissaoEditar) {
     throw new ErroTef("A ativação exige permissão de edição do financeiro.", 403);
-  }
-  if (pagina.empresaJaHabilitada) {
-    return { ok: true as const, preservado: true as const, etapa: "validacao" as const };
   }
   const credenciamento = validarCredenciamento({
     cnpjEmpresa: pagina.cnpj,
@@ -430,29 +465,36 @@ export async function salvarRascunhoAssistenteSessao(input: {
   }
   const servidorNovo =
     ambienteNovo === "producao" ? credenciamento.servidorProducao : credenciamento.servidorHomologacao;
+  const oficiais = await lerServidoresOficiais(pagina.empresaId);
+  const servidorOficialGravado =
+    ambienteNovo === "producao" ? oficiais.servidorProducao : oficiais.servidorHomologacao;
   const pareados = await servidoresPareados(pagina.empresaId);
+  const servidorTerminal = pareados.map((item) => item.servidor.trim()).find(Boolean) ?? "";
+  if (servidorTerminal && servidorTerminal !== servidorNovo) {
+    return {
+      ok: false as const,
+      pendencias: ["O servidor deste terminal já foi pareado e não pode ser trocado."],
+      etapa: "credenciamento" as const,
+    };
+  }
   const pendenciasFinanceiras = await pendenciasDaEmpresa(pagina.empresaId);
-  const bases =
-    pareados.length > 0 ? pareados : [{ servidor: "", ambiente: "" as const }];
-  for (const pareado of bases) {
-    const decisao = decidirGravacaoServidor({
-      perfil: pagina.perfil ?? "",
-      confirmacaoExplicita: input.servidorConfirmado === true,
-      empresaJaHabilitada: false,
-      pendenciaFinanceira: pendenciasFinanceiras > 0,
-      terminalPareado: pareados.length > 0,
-      servidorAtual: pareado.servidor,
-      servidorNovo,
-      ambienteAtual: pareado.ambiente,
-      ambienteNovo,
-    });
-    if (decisao.efeito === "recusar") {
-      return {
-        ok: false as const,
-        pendencias: [decisao.motivo],
-        etapa: "credenciamento" as const,
-      };
-    }
+  const decisao = decidirGravacaoServidor({
+    perfil: pagina.perfil ?? "",
+    confirmacaoExplicita: input.servidorConfirmado === true,
+    empresaJaHabilitada: pagina.empresaJaHabilitada,
+    pendenciaFinanceira: pendenciasFinanceiras > 0,
+    terminalPareado: pareados.length > 0,
+    servidorAtual: servidorOficialGravado.trim(),
+    servidorNovo,
+    ambienteAtual: pagina.ambienteAtual === "producao" ? "producao" : pagina.ambienteAtual === "homologacao" ? "homologacao" : "",
+    ambienteNovo,
+  });
+  if (decisao.efeito === "recusar") {
+    return {
+      ok: false as const,
+      pendencias: [decisao.motivo],
+      etapa: "credenciamento" as const,
+    };
   }
   const etapa = etapaPersistida(input.etapa, true);
   const cliente = createAdminClient();
@@ -486,14 +528,37 @@ export async function salvarRascunhoAssistenteSessao(input: {
     }
     throw new ErroTef("Não foi possível salvar o andamento do TEF.", 500);
   }
-  await gravarServidoresPayGoEmpresa(pagina.empresaId, {
+  if (decisao.efeito === "gravar") {
+    await gravarServidoresPayGoEmpresa(pagina.empresaId, {
+      ambiente: ambienteNovo,
+      estabelecimento: pagina.empresaJaHabilitada ? pagina.estabelecimentoAtual : credenciamento.estabelecimento,
+      pontoCaptura: pagina.empresaJaHabilitada ? pagina.pontoAtual : credenciamento.pontoCaptura,
+      servidorHomologacao: credenciamento.servidorHomologacao,
+      servidorProducao: credenciamento.servidorProducao,
+    });
+  }
+  const relido = await lerServidoresOficiais(pagina.empresaId);
+  const confirmado = confirmarServidorPersistido({
     ambiente: ambienteNovo,
-    estabelecimento: credenciamento.estabelecimento,
-    pontoCaptura: credenciamento.pontoCaptura,
-    servidorHomologacao: credenciamento.servidorHomologacao,
-    servidorProducao: credenciamento.servidorProducao,
+    informado: servidorNovo,
+    gravadoHomologacao: relido.servidorHomologacao,
+    gravadoProducao: relido.servidorProducao,
   });
-  return { ok: true as const, preservado: false as const, etapa, pendencias: credenciamento.pendencias };
+  if (!confirmado.ok) {
+    return {
+      ok: false as const,
+      pendencias: [confirmado.motivo],
+      etapa: "credenciamento" as const,
+    };
+  }
+  return {
+    ok: true as const,
+    preservado: decisao.efeito === "preservar",
+    etapa,
+    pendencias: [] as string[],
+    servidorHomologacao: relido.servidorHomologacao,
+    servidorProducao: relido.servidorProducao,
+  };
 }
 
 async function servidoresPareados(empresaId: string) {
@@ -888,5 +953,66 @@ export async function prepararInstalacaoAssistenteSessao(input: {
       estabelecimento: pagina.estabelecimentoAtual,
       instalado: pagina.empresaJaHabilitada && pagina.pontoAtual.trim() !== "",
     },
+  };
+}
+
+export async function prepararBibliotecaProducaoSessao(input: {
+  confirmacaoExplicita: boolean;
+  dispositivoId: string;
+  credencialInformada: boolean;
+}) {
+  const pagina = await lerPaginaAssistenteTef();
+  const pastas = diretoriosRelativosBiblioteca();
+  const dispositivoId = String(input.dispositivoId ?? "").trim().toLowerCase();
+  const terminais = ID_EVIDENCIA.test(dispositivoId)
+    ? await terminaisDaObservacao(pagina.empresaId, dispositivoId)
+    : [];
+  const destaEmpresa = terminais.filter((item) => item.empresaId === pagina.empresaId);
+  const pendencias = await pendenciasDaEmpresa(pagina.empresaId);
+  const pontoOficial = pagina.empresaJaHabilitada
+    ? pagina.pontoAtual
+    : pagina.rascunho?.pontoCaptura ?? "";
+  const ambienteOficial = pagina.empresaJaHabilitada
+    ? pagina.ambienteAtual
+    : pagina.rascunho?.ambienteAutorizado ?? "";
+  const servidorOficial = pagina.servidorProducao;
+  const estabelecimentoOficial = pagina.empresaJaHabilitada
+    ? pagina.estabelecimentoAtual
+    : pagina.rascunho?.estabelecimento ?? "";
+  const decisao = decidirInstalacaoProducaoIsolada({
+    empresaSessaoId: pagina.empresaId,
+    empresaInformada: "",
+    permissaoEditar: pagina.permissaoEditar,
+    administrador: pagina.administrador,
+    plataformaHabilitada: pagina.plataformaHabilitada,
+    pendenciaFinanceira: pendencias > 0,
+    confirmacaoExplicita: input.confirmacaoExplicita === true,
+    credencialInformada: input.credencialInformada === true,
+    pontoOficial,
+    ambienteOficial,
+    servidorOficial,
+    cnpjEmpresa: pagina.cnpj,
+    estabelecimentoOficial,
+    pontoVinculado: destaEmpresa[0]?.pontoCaptura ?? "",
+    ambienteVinculado: "",
+    servidorVinculado: "",
+    dispositivoPareado: destaEmpresa.length > 0,
+    dispositivoOutraEmpresa:
+      terminais.some((item) => item.empresaId !== pagina.empresaId) && destaEmpresa.length === 0,
+    diretorioSandbox: pastas.sandbox,
+    diretorioProducao: pastas.producao,
+  });
+  return {
+    ok: true as const,
+    efeito: decisao.efeito,
+    motivo: decisao.motivo,
+    diretorio: decisao.efeito === "instalar" ? ("producao" as const) : ("" as const),
+    pastaSandbox: pastas.sandbox,
+    pastaProducao: pastas.producao,
+    pontoCaptura: pontoOficial,
+    servidor: servidorOficial,
+    estabelecimento: estabelecimentoOficial,
+    gravaBanco: false as const,
+    apagaSandbox: false as const,
   };
 }

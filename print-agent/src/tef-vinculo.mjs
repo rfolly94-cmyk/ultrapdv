@@ -117,6 +117,9 @@ export function apresentarVinculoTef(vinculo) {
     terminalCodigo: vinculo.terminalCodigo,
     estabelecimento: vinculo.estabelecimento || "",
     pontoCaptura: vinculo.pontoCaptura || "",
+    ambiente: vinculo.ambiente || "",
+    servidor: vinculo.servidor || "",
+    cnpjInformado: Boolean(vinculo.cnpj),
   };
 }
 

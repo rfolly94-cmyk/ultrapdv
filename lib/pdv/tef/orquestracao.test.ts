@@ -11,10 +11,13 @@ import {
   sanitizarParaLog,
   validarPagamentoMisto,
 } from "./regras";
+import { origemProducaoComprovada } from "./ambiente-transacao";
+import { mensagemFormaAusente } from "./modalidade-efetiva";
 import {
   iniciarOperacao,
   liberarConfirmacao,
   listarPendencias,
+  marcarPendenciaAdministrativa,
   marcarConfirmada,
   marcarDesfeita,
   memoriaTefVazia,
@@ -49,6 +52,8 @@ function aprovar(memoria: MemoriaTef, operacaoId: string) {
     empresaId: EMPRESA_A,
     operacaoId,
     provaValida: true,
+    origem: origemProducaoComprovada({ ponto: "001" }),
+    modalidadeOficial: { provaValida: true, tipoCartao: 2 },
     resultado: {
       sucessoTransacao: true,
       nsu: "998877",
@@ -188,6 +193,7 @@ test("pagamento misto exige TEF autorizado só na parcela de cartão", () => {
       teste: false,
       nsu: "1",
       autorizacao: "A",
+      ambienteEfetivo: "producao",
     },
   ];
   assert.equal(
@@ -733,6 +739,7 @@ test("dois cartões do mesmo valor permanecem operações distintas", () => {
       teste: false,
       nsu: "1",
       autorizacao: "A",
+      ambienteEfetivo: "producao",
     },
     {
       id: "op-2",
@@ -744,6 +751,7 @@ test("dois cartões do mesmo valor permanecem operações distintas", () => {
       teste: false,
       nsu: "2",
       autorizacao: "B",
+      ambienteEfetivo: "producao",
     },
   ];
   const avaliacao = validarPagamentoMisto(
@@ -771,7 +779,7 @@ test("dois cartões do mesmo valor permanecem operações distintas", () => {
   assert.deepEqual(avaliacao.operacaoIds, ["op-1", "op-2"]);
 });
 
-test("dois cartões do mesmo grupo não disputam o terminal; outro grupo não reaproveita a autorização", () => {
+test("autorização no mesmo grupo não abre outra cobrança e outro grupo também não", () => {
   const memoria = preparar();
   const primeira = iniciarPadrao(memoria, { grupoVenda: "venda-1" });
   assert.equal(primeira.ok, true);
@@ -779,16 +787,26 @@ test("dois cartões do mesmo grupo não disputam o terminal; outro grupo não re
     return;
   }
   aprovar(memoria, primeira.operacaoId);
+  const repetida = iniciarPadrao(memoria, { grupoVenda: "venda-1" });
+  assert.equal(repetida.ok, true);
+  if (!repetida.ok) {
+    return;
+  }
+  assert.equal(repetida.operacaoId, primeira.operacaoId);
+  assert.equal(repetida.cobrarDeNovo, false);
   const segunda = iniciarPadrao(memoria, {
     grupoVenda: "venda-1",
     idempotencyKey: "idem-2",
     identificador: "op-venda-2",
+    modalidade: "credito",
   });
   assert.equal(segunda.ok, true);
   if (!segunda.ok) {
     return;
   }
-  aprovar(memoria, segunda.operacaoId);
+  assert.equal(segunda.cobrarDeNovo, false);
+  assert.equal(segunda.operacaoId, primeira.operacaoId);
+  assert.equal(memoria.operacoes.length, 1);
   const outraVenda = iniciarPadrao(memoria, {
     grupoVenda: "venda-2",
     idempotencyKey: "idem-3",
@@ -799,7 +817,26 @@ test("dois cartões do mesmo grupo não disputam o terminal; outro grupo não re
     return;
   }
   assert.equal(outraVenda.codigo, "TERMINAL_OCUPADO");
-  assert.equal(memoria.operacoes.length, 2);
+  assert.equal(memoria.operacoes.length, 1);
+});
+
+test("duas solicitações no mesmo terminal não criam duas cobranças", () => {
+  const memoria = preparar();
+  const primeira = iniciarPadrao(memoria, {
+    idempotencyKey: "idem-simultanea-1",
+    identificador: "op-simultanea-1",
+  });
+  const segunda = iniciarPadrao(memoria, {
+    idempotencyKey: "idem-simultanea-2",
+    identificador: "op-simultanea-2",
+  });
+  assert.equal(primeira.ok, true);
+  assert.equal(segunda.ok, false);
+  if (segunda.ok) {
+    return;
+  }
+  assert.equal(segunda.codigo, "TERMINAL_OCUPADO");
+  assert.equal(memoria.operacoes.length, 1);
 });
 
 test("terminal sem pareamento não é criado na cobrança", () => {
@@ -811,6 +848,139 @@ test("terminal sem pareamento não é criado na cobrança", () => {
   }
   assert.equal(inicio.codigo, "TERMINAL_NAO_PAREADO");
   assert.equal(memoria.terminais.length, 0);
+});
+
+test("cartão sem tipoCartao fica em conciliação e não abre outra cobrança", () => {
+  const memoria = preparar();
+  const inicio = iniciarPadrao(memoria, { grupoVenda: "venda-sem-tipo" });
+  assert.equal(inicio.ok, true);
+  if (!inicio.ok) {
+    return;
+  }
+  const resultado = registrarResultado(memoria, {
+    empresaId: EMPRESA_A,
+    operacaoId: inicio.operacaoId,
+    provaValida: true,
+    origem: origemProducaoComprovada({ ponto: "001" }),
+    resultado: {
+      sucessoTransacao: true,
+      nsu: "998877",
+      codigoAutorizacao: "AUT01",
+      rede: "C6 PAY",
+      codigoFinalizacao: "FIN01",
+      valor: 25,
+      confirmar: true,
+    },
+  });
+  assert.equal(resultado.ok, true);
+  if (!resultado.ok) {
+    return;
+  }
+  assert.equal(resultado.status, "reconciliacao");
+  assert.equal(resultado.modalidadeEfetiva, null);
+  assert.equal(resultado.proibirDesfazimento, true);
+  assert.notEqual(memoria.operacoes[0]?.modalidade, "credito");
+  const outra = iniciarPadrao(memoria, {
+    grupoVenda: "venda-sem-tipo",
+    idempotencyKey: "idem-sem-tipo-2",
+    identificador: "op-sem-tipo-2",
+  });
+  assert.equal(outra.ok, true);
+  if (!outra.ok) {
+    return;
+  }
+  assert.equal(outra.cobrarDeNovo, false);
+  assert.equal(memoria.operacoes.length, 1);
+  const retomada = decidirRecuperacao({
+    empresaId: EMPRESA_A,
+    existeVenda: false,
+    operacao: memoria.operacoes[0]
+      ? {
+          empresaId: EMPRESA_A,
+          status: memoria.operacoes[0].status,
+          vendaId: memoria.operacoes[0].vendaId,
+          teste: memoria.operacoes[0].teste,
+          nsu: memoria.operacoes[0].nsu,
+          rede: memoria.operacoes[0].rede,
+          finalizacao: memoria.operacoes[0].finalizacao,
+        }
+      : null,
+  });
+  assert.equal(retomada.acao, "reconciliar");
+  assert.equal(retomada.confirmar, false);
+  assert.equal(retomada.cobrarDeNovo, false);
+});
+
+test("falta de forma fiscal vira pendência administrativa sem movimentação", () => {
+  const memoria = preparar();
+  const inicio = iniciarPadrao(memoria, { grupoVenda: "venda-forma" });
+  assert.equal(inicio.ok, true);
+  if (!inicio.ok) {
+    return;
+  }
+  aprovar(memoria, inicio.operacaoId);
+  const marcada = marcarPendenciaAdministrativa(memoria, {
+    empresaId: EMPRESA_A,
+    operacaoId: inicio.operacaoId,
+    motivo: mensagemFormaAusente("debito"),
+  });
+  assert.equal(marcada.ok, true);
+  if (!marcada.ok) {
+    return;
+  }
+  assert.equal(marcada.status, "reconciliacao");
+  assert.equal(marcada.proibirDesfazimento, true);
+  assert.equal(memoria.operacoes[0]?.nsu, "998877");
+  const repetida = marcarPendenciaAdministrativa(memoria, {
+    empresaId: EMPRESA_A,
+    operacaoId: inicio.operacaoId,
+    motivo: mensagemFormaAusente("debito"),
+  });
+  assert.equal(repetida.ok, true);
+  const nova = iniciarPadrao(memoria, {
+    grupoVenda: "venda-forma",
+    idempotencyKey: "idem-forma-2",
+    identificador: "op-forma-2",
+  });
+  assert.equal(nova.ok, true);
+  if (!nova.ok) {
+    return;
+  }
+  assert.equal(nova.cobrarDeNovo, false);
+  assert.equal(memoria.operacoes.length, 1);
+});
+
+test("releitura apresenta a modalidade efetiva já persistida", () => {
+  const memoria = preparar();
+  const inicio = iniciarPadrao(memoria, { grupoVenda: "venda-releitura", modalidade: "debito" });
+  assert.equal(inicio.ok, true);
+  if (!inicio.ok) {
+    return;
+  }
+  const aprovado = registrarResultado(memoria, {
+    empresaId: EMPRESA_A,
+    operacaoId: inicio.operacaoId,
+    provaValida: true,
+    origem: origemProducaoComprovada({ ponto: "001" }),
+    modalidadeOficial: { provaValida: true, tipoCartao: 1 },
+    resultado: {
+      sucessoTransacao: true,
+      nsu: "111",
+      codigoAutorizacao: "CRD",
+      rede: "C6 PAY",
+      codigoFinalizacao: "1",
+      valor: 25,
+      confirmar: true,
+    },
+  });
+  assert.equal(aprovado.ok, true);
+  const reidratada = structuredClone(memoria);
+  const pendencias = listarPendencias(reidratada, EMPRESA_A);
+  assert.equal(pendencias[0]?.modalidade, "credito");
+  assert.equal(pendencias[0]?.modalidadeSolicitada, "debito");
+  assert.equal(pendencias[0]?.modalidadeEfetiva, "credito");
+  assert.equal(pendencias[0]?.tipoCartaoPayGo, 1);
+  assert.equal(pendencias[0]?.status, "autorizada");
 });
 
 test("a finalização consulta o TEF da empresa antes da RPC", () => {

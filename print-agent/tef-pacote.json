@@ -1,0 +1,29 @@
+{
+  "nome": "UltraPDV Connector",
+  "executavel": "bin/tef/UltraPDVTef_1313.exe",
+  "dll": "C:\\Program Files (x86)\\PayGo\\PGWebLib\\x64\\PGWebLib.dll",
+  "diretorioTrabalho": "bin/tef/TEF/PGWeb",
+  "diretorioProducao": "C:/ProgramData/UltraPDV/TEF/Producao/PGWeb",
+  "pontoProducao": "6696546",
+  "servidorProducao": "pos-transac.pgweb.io:31735",
+  "terminalLogico": "117473",
+  "preservar": [
+    "bin/tef/TEF",
+    "data/device.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-chave.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-vinculo.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-pendencia.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-pareamento.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-recuperacao.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-biblioteca.json",
+    "%PROGRAMDATA%\\UltraPDV\\tef-pasta.json",
+    "%PROGRAMDATA%\\UltraPDV\\TEF\\Producao",
+    "%PROGRAMDATA%\\UltraPDV\\backup-connector"
+  ],
+  "compartilhadoForaDaPasta": [
+    "C:\\Program Files (x86)\\PayGo\\PGWebLib\\x64\\PGWebLib.dll",
+    "HKCU\\Environment\\PathPGWebLib_x64",
+    "C:\\ProgramData\\PayGo"
+  ],
+  "cobranca": "bloqueada-sem-prova-da-biblioteca"
+}

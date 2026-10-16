@@ -86,6 +86,12 @@ var
   IdentidadeCnpj: String;
   IdentidadeServidor: String;
   IdentidadeEstabelecimento: String;
+  DiretorioObservado: String;
+  DiretorioTrabalhoObservado: String;
+  DiretorioPwInitObservado: String;
+  ObservacaoAguardaInit: Boolean;
+  ObservacaoRetornoInit: Integer;
+  ObservacaoRetornoInitNome: String;
   CredencialTecnica: String;
   IdPagamentoAtivo: String;
   ContadorMenus: Integer;
@@ -650,8 +656,67 @@ begin
   ObservacaoCodigoAmbiente := -1;
   ObservacaoAguardaTransacaoNula := False;
   ObservacaoAguardaAmbiente := False;
+  ObservacaoAguardaInit := False;
+  ObservacaoRetornoInit := -999;
+  ObservacaoRetornoInitNome := '';
   ObservacaoPonto := '';
   ObservacaoConsumida := False;
+end;
+
+function ExtrairArgumentoLog(const Linha, Marca: String): String;
+var
+  Inicio, Fim: Integer;
+begin
+  Result := '';
+  Inicio := Pos(Marca, Linha);
+  if Inicio = 0 then
+    Exit;
+  Inicio := Inicio + Length(Marca);
+  while (Inicio <= Length(Linha)) and (Linha[Inicio] in [' ', '(']) do
+    Inc(Inicio);
+  Fim := Length(Linha);
+  while (Fim >= Inicio) and (Linha[Fim] in [' ', ')']) do
+    Dec(Fim);
+  if Fim >= Inicio then
+    Result := Copy(Linha, Inicio, Fim - Inicio + 1);
+end;
+
+function NomeRetornoPw(const Linha: String): String;
+var
+  Inicio, Fim: Integer;
+begin
+  Result := '';
+  Inicio := Pos('PWRET_', Linha);
+  if Inicio = 0 then
+    Exit;
+  Fim := Inicio;
+  while (Fim <= Length(Linha)) and (Linha[Fim] in ['A'..'Z', '0'..'9', '_']) do
+    Inc(Fim);
+  Result := Copy(Linha, Inicio, Fim - Inicio);
+end;
+
+function CodigoRetornoPw(const Nome: String): Integer;
+begin
+  if Nome = 'PWRET_OK' then
+    Result := 0
+  else if Nome = 'PWRET_WRITERR' then
+    Result := -2485
+  else if Nome = 'PWRET_INVCALL' then
+    Result := -2494
+  else
+    Result := -999;
+end;
+
+function DiretorioPaiProducao: String;
+var
+  Base: String;
+begin
+  Base := Trim(SysUtils.GetEnvironmentVariable('PROGRAMDATA'));
+  if Base = '' then
+    Base := Trim(SysUtils.GetEnvironmentVariable('ALLUSERSPROFILE'));
+  if Base = '' then
+    Exit('');
+  Result := IncludeTrailingPathDelimiter(Base) + 'UltraPDV\TEF\Producao';
 end;
 
 function ExtrairCodigoAmbiente(const Linha: String): Integer;
@@ -702,6 +767,23 @@ begin
       ObservacaoRetornoAmbiente := 0
     else
       ObservacaoRetornoAmbiente := -1;
+    Exit;
+  end;
+  if Pos('PW_iInit(', Linha) > 0 then
+  begin
+    ObservacaoAguardaInit := True;
+    if ExtrairArgumentoLog(Linha, 'PW_iInit') <> '' then
+    begin
+      DiretorioPwInitObservado := ExtrairArgumentoLog(Linha, 'PW_iInit');
+      DiretorioTrabalhoObservado := DiretorioPwInitObservado;
+    end;
+    Exit;
+  end;
+  if ObservacaoAguardaInit and (Pos('PWRET_', Linha) > 0) then
+  begin
+    ObservacaoAguardaInit := False;
+    ObservacaoRetornoInitNome := NomeRetornoPw(Linha);
+    ObservacaoRetornoInit := CodigoRetornoPw(ObservacaoRetornoInitNome);
   end;
 end;
 
@@ -834,6 +916,119 @@ begin
   Result := (Valor = 'homologacao') or (Valor = 'producao');
 end;
 
+function TokenDiretorioSolicitado(Dados: TJSONObject): String;
+var
+  Token: String;
+begin
+  Token := TextoDados(Dados, 'diretorio');
+  if Token = '' then
+  begin
+    if TextoDados(Dados, 'ambiente') = 'producao' then
+      Result := 'producao'
+    else
+      Result := 'sandbox';
+    Exit;
+  end;
+  Result := Token;
+end;
+
+function DiretorioSolicitadoValido(const Token, Ambiente: String): Boolean;
+begin
+  if (Token <> 'producao') and (Token <> 'sandbox') then
+    Exit(False);
+  if (Ambiente = 'producao') and (Token <> 'producao') then
+    Exit(False);
+  if (Ambiente <> 'producao') and (Token = 'producao') then
+    Exit(False);
+  Result := True;
+end;
+
+function CaminhoPaiLocal(const Valor: String): Boolean;
+var
+  Normal: String;
+begin
+  Normal := UpperCase(Valor);
+  Result :=
+    (Length(Valor) >= 4) and
+    (Length(Valor) <= 200) and
+    (Valor[1] in ['A'..'Z', 'a'..'z']) and
+    (Valor[2] = ':') and
+    (Valor[3] = '\') and
+    (Pos('\\', Valor) = 0) and
+    (Pos('..', Valor) = 0) and
+    (Pos('/', Valor) = 0) and
+    (Pos(#0, Valor) = 0) and
+    (Pos(#13, Valor) = 0) and
+    (Pos(#10, Valor) = 0) and
+    (Pos('\WINDOWS\', Normal) = 0) and
+    (Pos('\PROGRAM FILES\', Normal) = 0) and
+    (Pos('\PROGRAM FILES (X86)\', Normal) = 0) and
+    (Pos('\SYSTEM32\', Normal) = 0) and
+    (Pos('\SYSWOW64\', Normal) = 0) and
+    (Copy(Normal, Length(Normal) - 7, 8) <> '\WINDOWS') and
+    (Copy(Normal, Length(Normal) - 8, 9) <> '\SYSTEM32') and
+    (Copy(Normal, Length(Normal) - 8, 9) <> '\SYSWOW64') and
+    (Copy(Normal, Length(Normal) - 13, 14) <> '\PROGRAM FILES') and
+    (Copy(Normal, Length(Normal) - 19, 20) <> '\PROGRAM FILES (X86)');
+end;
+
+function AplicarDiretorioBiblioteca(const Token, PaiExplicito: String): Boolean;
+var
+  Base, Pai, Biblioteca, Sandbox: String;
+begin
+  { O ACBr acrescenta PGWeb ao DiretorioTrabalho antes de PW_iInit.
+    Producao usa a pasta gravavel em ProgramData. Sandbox permanece
+    ao lado do executavel. Um pai explicito, se vier, precisa ser local.
+    Esta rotina nao cria, copia nem apaga arquivos. }
+  Result := False;
+  Base := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0)));
+  Sandbox := Base + 'TEF';
+  if Token = 'producao' then
+  begin
+    if PaiExplicito <> '' then
+    begin
+      if not CaminhoPaiLocal(PaiExplicito) then
+        Exit;
+      if not DirectoryExists(PaiExplicito) then
+        Exit;
+      Pai := ExcludeTrailingPathDelimiter(PaiExplicito);
+      if Pos(UpperCase(IncludeTrailingPathDelimiter(Sandbox)), UpperCase(IncludeTrailingPathDelimiter(Pai))) = 1 then
+        Exit;
+    end
+    else
+      Pai := DiretorioPaiProducao;
+    if Pai = '' then
+      Exit;
+    Biblioteca := IncludeTrailingPathDelimiter(Pai) + 'PGWeb';
+    if not DirectoryExists(Biblioteca) then
+      Exit;
+    TEF.DiretorioTrabalho := Pai;
+    DiretorioTrabalhoObservado := IncludeTrailingPathDelimiter(Biblioteca);
+  end
+  else
+  begin
+    if PaiExplicito <> '' then
+    begin
+      if not CaminhoPaiLocal(PaiExplicito) then
+        Exit;
+      if not DirectoryExists(PaiExplicito) then
+        Exit;
+      Pai := ExcludeTrailingPathDelimiter(PaiExplicito);
+      if Pos(UpperCase(IncludeTrailingPathDelimiter(DiretorioPaiProducao)), UpperCase(IncludeTrailingPathDelimiter(Pai))) = 1 then
+        Exit;
+      TEF.DiretorioTrabalho := Pai;
+      DiretorioTrabalhoObservado := IncludeTrailingPathDelimiter(Pai) + 'PGWeb\';
+    end
+    else
+    begin
+      TEF.DiretorioTrabalho := Sandbox;
+      DiretorioTrabalhoObservado := Sandbox + '\PGWeb\';
+    end;
+  end;
+  DiretorioObservado := Token;
+  Result := True;
+end;
+
 function PedidoInformaIdentidade(Dados: TJSONObject): Boolean;
 begin
   Result :=
@@ -874,6 +1069,20 @@ begin
     Resultado.Add('modo', 'existente');
   Resultado.Add('pontoCaptura', IdentidadePonto);
   Resultado.Add('ambiente', IdentidadeAmbiente);
+  Resultado.Add('pontoSolicitado', IdentidadePonto);
+  Resultado.Add('servidorSolicitado', IdentidadeServidor);
+  Resultado.Add('ambienteSolicitado', IdentidadeAmbiente);
+  { PW_iSetEnvironment so ocorre quando PWOPER_NULL devolve PWRET_NOTINST.
+    Instalacao existente ignora o ponto e o servidor informados nesta chamada. }
+  Resultado.Add('bibliotecaInstalada', not ObservacaoPontoAusente);
+  Resultado.Add('setEnvironmentExecutado', ObservacaoViuAmbiente);
+  Resultado.Add('retornoSetEnvironment', ObservacaoRetornoAmbiente);
+  Resultado.Add('codigoAmbiente', ObservacaoCodigoAmbiente);
+  Resultado.Add('diretorioBiblioteca', DiretorioObservado);
+  Resultado.Add('diretorioTrabalho', DiretorioTrabalhoObservado);
+  Resultado.Add('diretorioPwInit', DiretorioPwInitObservado);
+  Resultado.Add('retornoPwInit', ObservacaoRetornoInit);
+  Resultado.Add('retornoPwInitNome', ObservacaoRetornoInitNome);
 end;
 
 procedure LimparParametrosPayGo;
@@ -938,6 +1147,21 @@ begin
 
       if TEF.Inicializado then
       begin
+        if not DiretorioSolicitadoValido(
+          TokenDiretorioSolicitado(Dados),
+          TextoDados(Dados, 'ambiente')
+        ) or (TokenDiretorioSolicitado(Dados) <> DiretorioObservado) then
+        begin
+          Responder(AId, False, nil, 'TEF_DIRETORIO_DIVERGENTE');
+          Exit;
+        end;
+        if (TextoDados(Dados, 'diretorioPai') <> '') and
+           (UpperCase(ExcludeTrailingPathDelimiter(TextoDados(Dados, 'diretorioPai'))) <>
+            UpperCase(ExcludeTrailingPathDelimiter(TEF.DiretorioTrabalho))) then
+        begin
+          Responder(AId, False, nil, 'TEF_DIRETORIO_DIVERGENTE');
+          Exit;
+        end;
         if not PedidoConfereIdentidade(Dados) then
         begin
           Responder(AId, False, nil, 'TEF_IDENTIDADE_DIVERGENTE');
@@ -978,7 +1202,7 @@ begin
         permanece em ambNaoDefinido e nao grava ponto, CNPJ, servidor nem ambiente. }
       TEF.DadosAutomacao.NomeSoftwareHouse := 'UltraPDV';
       TEF.DadosAutomacao.NomeAplicacao := 'UltraPDV';
-      TEF.DadosAutomacao.VersaoAplicacao := '1.3.3';
+      TEF.DadosAutomacao.VersaoAplicacao := '1.3.13';
       LimparParametrosPayGo;
       if PedidoInformaIdentidade(Dados) then
       begin
@@ -1004,6 +1228,24 @@ begin
       end;
 
       LogErro('[ACBrTEF] Inicializando PayGoWeb');
+
+      if not DiretorioSolicitadoValido(
+        TokenDiretorioSolicitado(Dados),
+        TextoDados(Dados, 'ambiente')
+      ) then
+      begin
+        Responder(AId, False, nil, 'TEF_DIRETORIO_RECUSADO');
+        Exit;
+      end;
+      if not AplicarDiretorioBiblioteca(
+        TokenDiretorioSolicitado(Dados),
+        TextoDados(Dados, 'diretorioPai')
+      ) then
+      begin
+        Responder(AId, False, nil, 'TEF_DIRETORIO_AUSENTE');
+        Exit;
+      end;
+      DiretorioPwInitObservado := '';
 
       LimparObservacaoInstalacao;
       ObservandoInicializacao := True;
@@ -1041,6 +1283,9 @@ begin
         (ObservacaoRetornoAmbiente = 0) and
         (ObservacaoPonto = IdentidadePonto) and
         (NomeAmbienteObservado = IdentidadeAmbiente);
+
+      if not TEF.Inicializado then
+        DiretorioObservado := '';
 
       Resultado := TJSONObject.Create;
       Resultado.Add(
@@ -1082,10 +1327,19 @@ begin
           SanitizarTextoDiagnostico(E.Message)
         );
 
+        if Resultado <> nil then
+          Resultado.Free;
+        Resultado := TJSONObject.Create;
+        Resultado.Add('inicializado', False);
+        Resultado.Add('diretorioBiblioteca', DiretorioObservado);
+        Resultado.Add('diretorioTrabalho', DiretorioTrabalhoObservado);
+        Resultado.Add('diretorioPwInit', DiretorioPwInitObservado);
+        Resultado.Add('retornoPwInit', ObservacaoRetornoInit);
+        Resultado.Add('retornoPwInitNome', ObservacaoRetornoInitNome);
         Responder(
           AId,
           False,
-          nil,
+          Resultado,
           'TEF_INICIALIZACAO_FALHOU: ' +
           SanitizarTextoDiagnostico(E.Message)
         );
@@ -1130,6 +1384,25 @@ begin
     Recebedor := SomenteDigitos(
       Resp.Conteudo.LeInformacao(PWINFO_MERCHCNPJCPF, 0).AsString);
   Resultado.Add('cnpjRecebedor', Recebedor);
+end;
+
+{ PWINFO_CARDTYPE: 1 crédito, 2 débito. Ausência fica nula. Não lê o comprovante. }
+procedure AnexarTipoCartao(Resultado: TJSONObject; Resp: TACBrTEFResp);
+var
+  TipoCartao: Integer;
+  TextoTipo: String;
+begin
+  TipoCartao := -1;
+  if Assigned(Resp) and Assigned(Resp.Conteudo) then
+  begin
+    TextoTipo := Trim(Resp.Conteudo.LeInformacao(PWINFO_CARDTYPE, 0).AsString);
+    if TextoTipo <> '' then
+      TipoCartao := Resp.Conteudo.LeInformacao(PWINFO_CARDTYPE, 0).AsInteger;
+  end;
+  if TipoCartao >= 0 then
+    Resultado.Add('tipoCartao', TipoCartao)
+  else
+    Resultado.Add('tipoCartao', TJSONNull.Create);
 end;
 
 procedure InstalarTEF(const AId: String; Dados: TJSONObject);
@@ -1293,6 +1566,8 @@ var
   CampoValor: TJSONData;
   Identificador: String;
   Valor: Currency;
+  Preferencia: String;
+  Cartoes: TACBrTEFTiposCartao;
   SucessoChamada: Boolean;
   Resp: TACBrTEFResp;
   Mensagem: String;
@@ -1346,11 +1621,18 @@ begin
   try
     try
       LogErro('[ACBrTEF] Pagamento identificador=' + Identificador);
-      { Parametros omitidos ficam no default do ACBr:
-        modalidade, cartoes, financiamento, parcelas, data e dados adicionais. }
+      { A escolha do PDV é preferência. O tipo autorizado sai em PWINFO_CARDTYPE. }
+      Preferencia := LowerCase(TextoDados(Dados, 'preferencia'));
+      if Preferencia = 'debito' then
+        Cartoes := [teftcDebito]
+      else if Preferencia = 'credito' then
+        Cartoes := [teftcCredito]
+      else
+        Cartoes := [teftcDebito, teftcCredito];
       DiagnosticoPagamento := True;
       try
-        SucessoChamada := TEF.EfetuarPagamento(Identificador, Valor);
+        SucessoChamada := TEF.EfetuarPagamento(
+          Identificador, Valor, tefmpCartao, Cartoes);
       finally
         DiagnosticoPagamento := False;
       end;
@@ -1407,8 +1689,11 @@ begin
         end;
         Resultado.Add('mensagem', Mensagem);
         AdicionarDadosFiscais(Resultado, Resp);
+        AnexarTipoCartao(Resultado, Resp);
         Resultado.Add('comprovante1Via', TextoComprovante(Resp.ImagemComprovante1aVia));
         Resultado.Add('comprovante2Via', TextoComprovante(Resp.ImagemComprovante2aVia));
+        Resultado.Add('pontoCaptura', IdentidadePonto);
+        Resultado.Add('host', IdentidadeServidor);
       end
       else
       begin
@@ -1423,8 +1708,11 @@ begin
         Resultado.Add('precisaConfirmacao', False);
         Resultado.Add('transacaoPendenteConfirmacao', False);
         Resultado.Add('mensagem', 'Transacao sem resposta');
+        AnexarTipoCartao(Resultado, nil);
         Resultado.Add('comprovante1Via', '');
         Resultado.Add('comprovante2Via', '');
+        Resultado.Add('pontoCaptura', IdentidadePonto);
+        Resultado.Add('host', IdentidadeServidor);
       end;
 
       { Nao confirma nem desfaz aqui. A terceira perna sai so por acao explicita. }
@@ -1736,20 +2024,39 @@ begin
     PreencherPpinfo(Resultado, Info);
 end;
 
-{ Uma unica PW_iPPCommTest. O laco do ACBr em PWRET_NOTHING nao e usado. }
-function ChamarTesteComunicacao(var PortaUtilizada: Integer;
-  var Codigo: SmallInt; var Aviso: String): Boolean;
+{ Contrato documentado no ACBr (VerificarPresencaPinPad):
+  PW_iPPCommTest e repetida somente enquanto devolve PWRET_NOTHING
+  (-2493, continuar o processamento). A porta 0 e a busca automatica
+  de PWINFO_PPCOMMPORT. Valor de 1 a 255 e a porta ja configurada
+  em PortaPinPad; a COM vista pelo Windows nao e forcada.
+  O limite encerra a repeticao. Uma chamada que nao retorna nao e
+  abortada e o processo nao e encerrado. }
+function ChamarTesteComunicacao(PortaSolicitada: Integer;
+  var PortaUtilizada: Integer; var Codigo: SmallInt; var Aviso: String;
+  var DuracaoMs: Int64; var Chamou: Boolean): Boolean;
+const
+  LIMITE_REPETICOES_PPCOMM = 8;
+  LIMITE_MS_PPCOMM = 15000;
 var
   Modulo: HMODULE;
   Funcao: function(pszMsg: PAnsiChar; uiMsgSize: Word;
     var pbCommPort: Byte): SmallInt; stdcall;
   Buffer: array[0..511] of AnsiChar;
   Porta: Byte;
+  Inicio: QWord;
+  Tentativas: Integer;
 begin
   Result := False;
   PortaUtilizada := -1;
-  Codigo := PWRET_DLLNOTINIT;
+  Codigo := 0;
   Aviso := '';
+  DuracaoMs := 0;
+  Chamou := False;
+  if (PortaSolicitada < 0) or (PortaSolicitada > 255) then
+  begin
+    Aviso := 'porta da biblioteca fora do intervalo da API';
+    Exit;
+  end;
   Modulo := GetModuleHandle('PGWebLib.dll');
   if Modulo = 0 then
     Modulo := GetModuleHandle(
@@ -1765,10 +2072,19 @@ begin
     Aviso := 'PW_iPPCommTest indisponivel';
     Exit;
   end;
-  FillChar(Buffer, SizeOf(Buffer), 0);
-  Porta := 0;
-  Codigo := Funcao(@Buffer[0], SizeOf(Buffer), Porta);
-  Aviso := TextoSeguroBiblioteca(String(Buffer));
+  Porta := Byte(PortaSolicitada);
+  Inicio := GetTickCount64;
+  Tentativas := 0;
+  repeat
+    FillChar(Buffer, SizeOf(Buffer), 0);
+    Codigo := Funcao(@Buffer[0], SizeOf(Buffer), Porta);
+    Aviso := TextoSeguroBiblioteca(String(Buffer));
+    Chamou := True;
+    Inc(Tentativas);
+  until (Codigo <> PWRET_NOTHING) or
+        (Tentativas >= LIMITE_REPETICOES_PPCOMM) or
+        (GetTickCount64 - Inicio >= LIMITE_MS_PPCOMM);
+  DuracaoMs := Int64(GetTickCount64 - Inicio);
   if Codigo = PWRET_OK then
   begin
     PortaUtilizada := Porta;
@@ -1810,7 +2126,8 @@ var
   PortaConfigurada, PortaUtilizada: Integer;
   CodigoTeste: SmallInt;
   Aviso, Comunicacao, Mensagem: String;
-  Comunicou: Boolean;
+  Comunicou, Chamou: Boolean;
+  DuracaoMs: Int64;
 begin
   if PinpadOcupado then
   begin
@@ -1872,8 +2189,25 @@ begin
       Exit;
     end;
 
-    Comunicou := ChamarTesteComunicacao(PortaUtilizada, CodigoTeste, Aviso);
-    Resultado.Add('codigoBiblioteca', CodigoTeste);
+    if (PortaConfigurada < 0) or (PortaConfigurada > 255) then
+    begin
+      Resultado.Add('codigoBiblioteca', TJSONNull.Create);
+      Resultado.Add('portaUtilizada', TJSONNull.Create);
+      Resultado.Add('comunicacao', 'sem_porta');
+      Resultado.Add('mensagem',
+        'A biblioteca nao tem porta de pinpad utilizavel pela API. A porta do Windows nao foi forcada.');
+      Resultado.Add('codigo', 'PINPAD_TESTE');
+      Responder(AId, True, Resultado, '');
+      Exit;
+    end;
+
+    Comunicou := ChamarTesteComunicacao(
+      PortaConfigurada, PortaUtilizada, CodigoTeste, Aviso, DuracaoMs, Chamou);
+    Resultado.Add('duracaoMs', DuracaoMs);
+    if Chamou then
+      Resultado.Add('codigoBiblioteca', CodigoTeste)
+    else
+      Resultado.Add('codigoBiblioteca', TJSONNull.Create);
     if Aviso <> '' then
       Resultado.Add('avisoBiblioteca', Aviso);
     if Comunicou then
@@ -1908,15 +2242,31 @@ begin
     end
     else if (CodigoTeste = PWRET_PPS_COMMERR) or
             (CodigoTeste = PWRET_PPS_PORTERR) or
-            (CodigoTeste = PWRET_PPS_NOTOPEN) then
+            (CodigoTeste = PWRET_PPS_NOTOPEN) or
+            (CodigoTeste = PWRET_PPNOTFOUND) then
     begin
       Comunicacao := 'nao_encontrado';
       Mensagem := 'Pinpad nao encontrado.';
     end
-    else if CodigoTeste = PWRET_NOTHING then
+    else if CodigoTeste = PWRET_PPCOMERR then
     begin
       Comunicacao := 'indisponivel';
-      Mensagem := 'Comunicacao indisponivel. O teste nao foi repetido.';
+      Mensagem := 'Comunicacao indisponivel.';
+    end
+    else if CodigoTeste = PWRET_PPS_COMMTOUT then
+    begin
+      Comunicacao := 'timeout_biblioteca';
+      Mensagem := 'A biblioteca informou tempo esgotado aguardando o pinpad.';
+    end
+    else if CodigoTeste = PWRET_NOTHING then
+    begin
+      Comunicacao := 'nao_concluido';
+      Mensagem := 'A biblioteca devolveu PWRET_NOTHING e pediu para continuar. O teste nao foi concluido.';
+    end
+    else if Chamou then
+    begin
+      Comunicacao := 'codigo_biblioteca';
+      Mensagem := 'A biblioteca devolveu um codigo nao classificado.';
     end;
 
     Resultado.Add('comunicacao', Comunicacao);

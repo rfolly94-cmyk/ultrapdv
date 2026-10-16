@@ -2,6 +2,10 @@ import { imprimirPdfNoUltraPdvConector } from "./imprimir-pdf";
 import type { ConfiguracaoImpressao, DestinoImpressaoAutomatica } from "./tipos";
 import { baixarPdfComoBase64 } from "./agente";
 import { configDoTipo, podeImprimirAutomaticamente } from "./regras";
+import type {
+  EtapaFinalizacao,
+  MedidorFinalizacao,
+} from "@/lib/pdv/desempenho/cronometro-finalizacao";
 
 export { imprimirPdfNoUltraPdvConector } from "./imprimir-pdf";
 export { imprimirUrlPdfNoUltraPdvConector } from "./imprimir-pdf";
@@ -24,10 +28,18 @@ export async function executarDestinoImpressao(input: {
   configs: ConfiguracaoImpressao[];
   forcar?: boolean;
   conectorPermitido?: boolean;
+  medicao?: MedidorFinalizacao | null;
 }) {
-  const { destino, configs, forcar = false, conectorPermitido } = input;
+  const { destino, configs, forcar = false, conectorPermitido, medicao } = input;
   if (conectorPermitido === false || destino.tipo === "nenhum") {
     return { ok: true as const, pulou: true as const };
+  }
+
+  async function medir<T>(etapa: EtapaFinalizacao, trabalho: () => Promise<T>) {
+    if (!medicao) {
+      return trabalho();
+    }
+    return medicao.medir(etapa, "impressao", trabalho);
   }
 
   try {
@@ -36,10 +48,14 @@ export async function executarDestinoImpressao(input: {
       if (!forcar && !podeImprimirAutomaticamente(config)) {
         return { ok: true as const, pulou: true as const };
       }
-      const pdfBase64 = await baixarPdfComoBase64(
-        `/api/impressao/recibo/${destino.vendaId}?papel=${config.papel}`
+      const pdfBase64 = await medir("impressao_baixar_pdf", () =>
+        baixarPdfComoBase64(
+          `/api/impressao/recibo/${destino.vendaId}?papel=${config.papel}`
+        )
       );
-      return imprimirPdfNaConfiguracao(config, pdfBase64);
+      return medir("impressao_conector", () =>
+        imprimirPdfNaConfiguracao(config, pdfBase64)
+      );
     }
 
     const tipo = destino.tipo;
@@ -47,10 +63,12 @@ export async function executarDestinoImpressao(input: {
     if (!forcar && !podeImprimirAutomaticamente(config)) {
       return { ok: true as const, pulou: true as const };
     }
-    const pdfBase64 = await baixarPdfComoBase64(
-      `/api/impressao/danfe/${destino.emissaoId}`
+    const pdfBase64 = await medir("impressao_baixar_pdf", () =>
+      baixarPdfComoBase64(`/api/impressao/danfe/${destino.emissaoId}`)
     );
-    return imprimirPdfNaConfiguracao(config, pdfBase64);
+    return medir("impressao_conector", () =>
+      imprimirPdfNaConfiguracao(config, pdfBase64)
+    );
   } catch (error) {
     return {
       ok: false as const,
