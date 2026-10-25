@@ -10,8 +10,11 @@ import {
   MENSAGEM_CARTAO_MANUAL_BLOQUEADO,
   MENSAGEM_CARTAO_MANUAL_EXIGE_ESCOLHA,
   MENSAGEM_CARTAO_SEM_AUTORIZACAO_TEF,
+  MENSAGEM_HABILITAR_TEF,
+  MENSAGEM_TEF_FALHA_SEM_FALLBACK,
   MENSAGEM_TEF_PLATAFORMA_DESLIGADA,
   avaliarCartaoAntesDaCobranca,
+  mensagemCobrancaNaoConcluida,
   avaliarParcelasCartao,
   camposFiscaisDaTransacaoTef,
   mensagemPainelCartao,
@@ -81,6 +84,36 @@ test("empresa sem TEF continua vendendo cartão, dinheiro e PIX", () => {
     ]).ok,
     true
   );
+});
+
+test("ambiente definido e TEF desligado não converte débito nem crédito em pagamento comum", () => {
+  for (const ambiente of ["homologacao", "producao"] as const) {
+    for (const modalidade of ["debito", "credito"] as const) {
+      const venda = avaliarParcelasCartao(
+        {
+          plataformaHabilitada: true,
+          empresaHabilitada: false,
+          permitirOperacaoManual: true,
+          ambiente,
+        },
+        [{ modalidade, operacaoManual: true }]
+      );
+      assert.equal(venda.ok, false);
+      if (!venda.ok) {
+        assert.equal(venda.erro, MENSAGEM_HABILITAR_TEF);
+      }
+    }
+    const demais = avaliarParcelasCartao(
+      {
+        plataformaHabilitada: false,
+        empresaHabilitada: false,
+        permitirOperacaoManual: false,
+        ambiente,
+      },
+      [{ modalidade: null }]
+    );
+    assert.equal(demais.ok, true);
+  }
 });
 
 test("com as duas flags ativas, falta de prova não vira cartão manual", () => {
@@ -169,11 +202,11 @@ test("com as duas flags ativas, o pinpad começa antes da venda e a autorizaçã
   assert.equal(autorizada.ok, true);
 
   const shell = readFileSync(join(raiz, "components/pdv/pdv-shell.tsx"), "utf8");
-  const inicio = shell.indexOf("function finalizar()");
+  const inicio = shell.indexOf("function concluirVenda(");
   const gravacao = shell.indexOf("finalizarVendaPdv(", inicio);
   const checkout = shell.slice(inicio, gravacao);
   const posPolitica = checkout.indexOf("avaliarCartaoAntesDaCobranca");
-  const posCobranca = checkout.indexOf("executarCobrancasTef");
+  const posCobranca = checkout.indexOf("executarVendaPinpad");
   assert.ok(posPolitica > 0);
   assert.ok(posCobranca > posPolitica);
   assert.equal(checkout.includes("avaliarParcelasCartao("), false);
@@ -185,10 +218,21 @@ test("com as duas flags ativas, o pinpad começa antes da venda e a autorizaçã
 
 test("falha do Connector não marca a venda como cartão manual", () => {
   const fonte = readFileSync(join(raiz, "components/pdv/pdv-shell.tsx"), "utf8");
-  const inicio = fonte.indexOf("if (!cobranca.ok)");
+  const inicio = fonte.indexOf("if (!cobranca.ok || cobranca.pagamentoRecebido !== true)");
   assert.notEqual(inicio, -1);
-  const trecho = fonte.slice(inicio, inicio + 500);
-  assert.match(trecho, /MENSAGEM_TEF_FALHA_SEM_FALLBACK/);
+  const trecho = fonte.slice(inicio, inicio + 900);
+  assert.match(trecho, /mensagemCobrancaNaoConcluida/);
   assert.doesNotMatch(trecho, /setCartaoManualConfirmado\(true\)/);
   assert.match(trecho, /return/);
+});
+
+test("a mensagem do host A258 permanece visível e não vira cartão manual", () => {
+  const texto = mensagemCobrancaNaoConcluida("erro: [NA A258] ERRO INTERNO");
+  assert.equal(texto.includes("[NA A258] ERRO INTERNO"), true);
+  assert.equal(texto.includes(MENSAGEM_TEF_FALHA_SEM_FALLBACK), true);
+  assert.equal(texto.includes("NFC-e"), false);
+  const shell = readFileSync(join(raiz, "components/pdv/pdv-shell.tsx"), "utf8");
+  const resposta = shell.indexOf("async function responderCaptura");
+  const fim = shell.indexOf("useEffect(", resposta);
+  assert.match(shell.slice(resposta, fim), /mensagemCobrancaNaoConcluida/);
 });

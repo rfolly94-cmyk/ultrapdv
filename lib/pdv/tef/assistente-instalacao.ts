@@ -52,6 +52,8 @@ export type LeituraConnector = {
   disponivel: boolean;
   executavelEncontrado: boolean;
   processo: string | null;
+  pgwebLibPronta: boolean;
+  pgwebVersao: string | null;
   paygoInicializado: boolean;
   ambienteEfetivo: AmbienteTefAssistente | null;
   situacaoAmbiente: SituacaoAmbientePayGo;
@@ -213,6 +215,15 @@ export function ambienteComprovadoDaEvidencia(evidencia: ClassificacaoAmbienteIn
     : null;
 }
 
+function registro(valor: unknown) {
+  return valor && typeof valor === "object" ? (valor as Record<string, unknown>) : null;
+}
+
+function textoStatus(valor: unknown) {
+  const texto = typeof valor === "string" ? valor.trim() : "";
+  return texto ? texto.slice(0, 40) : null;
+}
+
 export function interpretarStatusConnector(input: {
   descobertaOk: boolean;
   versao?: string | null;
@@ -227,10 +238,12 @@ export function interpretarStatusConnector(input: {
   return {
     respondeu: input.descobertaOk === true,
     versao: input.descobertaOk && input.versao ? String(input.versao).slice(0, 40) : null,
-    disponivel: input.descobertaOk === true && tef?.disponivel === true,
-    executavelEncontrado: input.descobertaOk === true && tef?.executavelEncontrado === true,
-    processo: tef?.processo ? String(tef.processo).slice(0, 40) : null,
-    paygoInicializado: input.descobertaOk === true && tef?.inicializado === true,
+    disponivel: input.descobertaOk === true && registro(tef?.pgwebLib)?.pronta === true,
+    executavelEncontrado: false,
+    processo: null,
+    pgwebLibPronta: input.descobertaOk === true && registro(tef?.pgwebLib)?.pronta === true,
+    pgwebVersao: textoStatus(registro(tef?.pgwebLib)?.versao),
+    paygoInicializado: input.descobertaOk === true && registro(tef?.pgwebLib)?.pronta === true,
     ambienteEfetivo: ambiente.ambienteEfetivo,
     situacaoAmbiente: ambiente.situacaoAmbiente,
     pendenciaLocal:
@@ -423,40 +436,40 @@ function requisitoProcesso(leitura: LeituraConnector): RequisitoInstalacao {
   if (!leitura.respondeu) {
     return requisito(
       "processo",
-      "Processo TEF",
+      "PGWebLib",
       "nao_verificavel",
-      "O processo nativo não pôde ser consultado porque o Connector não respondeu."
+      "A PGWebLib não pôde ser consultada porque o Connector não respondeu."
     );
   }
-  if (leitura.processo === "executando") {
-    return requisito("processo", "Processo TEF", "aprovado", "O processo nativo TEF está em execução.");
+  if (leitura.pgwebLibPronta) {
+    return requisito(
+      "processo",
+      "PGWebLib",
+      "aprovado",
+      leitura.pgwebVersao ? `PGWebLib ${leitura.pgwebVersao} pronta.` : "PGWebLib pronta."
+    );
   }
   return requisito(
     "processo",
-    "Processo TEF",
+    "PGWebLib",
     "pendente",
-    "O processo nativo TEF está parado. O serviço do Connector permanece conectado. Nenhuma cobrança foi iniciada."
+    "A PGWebLib consultada não está pronta. Nenhuma cobrança foi iniciada."
   );
 }
 
 function requisitoExecutavel(leitura: LeituraConnector): RequisitoInstalacao {
   if (!leitura.respondeu) {
-    return requisito("executavel", "Executável TEF", "nao_verificavel", "O executável TEF não pôde ser verificado.");
+    return requisito("executavel", "PGWebLib", "nao_verificavel", "A PGWebLib não pôde ser consultada.");
   }
-  if (!leitura.executavelEncontrado) {
+  if (!leitura.pgwebLibPronta) {
     return requisito(
       "executavel",
-      "Executável TEF",
+      "PGWebLib",
       "pendente",
-      "O executável TEF não foi encontrado pelo Connector."
+      "A PGWebLib.dll não está pronta nesta consulta."
     );
   }
-  return requisito(
-    "executavel",
-    "Executável TEF",
-    "aprovado",
-    leitura.processo ? `Executável TEF encontrado. Estado: ${leitura.processo}.` : "Executável TEF encontrado."
-  );
+  return requisito("executavel", "PGWebLib", "aprovado", "A PGWebLib.dll consultada está pronta.");
 }
 
 function requisitoPaygo(
@@ -863,7 +876,7 @@ export function painelSituacaoTef(input: {
   const connector = input.connector;
   const conectado = connector?.respondeu === true;
   const incompativel = conectado && input.agenteCompativel === false;
-  const processoParado = conectado && (connector?.processo === "parado" || connector?.processo === "nao_instalado");
+  const bibliotecaPronta = conectado && connector?.pgwebLibPronta === true;
   const pinpad = input.pinpad;
   const pinpadDisponivel = pinpad?.comunicacao === "confirmada";
   const ambiente =
@@ -915,20 +928,20 @@ export function painelSituacaoTef(input: {
         ? input.falhaConsulta || "O Connector não respondeu neste computador."
         : incompativel
           ? "Atualize o Connector pelo instalador desta máquina. A versão carregada não é compatível com o TEF."
-        : processoParado
-          ? "O Connector está conectado. O processo TEF está parado."
-          : `O Connector está conectado${connector?.processo ? ` e o processo está ${connector.processo}` : ""}.`,
+        : bibliotecaPronta
+          ? "O Connector está conectado e a PGWebLib está pronta."
+          : "O Connector está conectado. A PGWebLib ainda não está pronta.",
     },
     {
       id: "processo",
-      rotulo: "Processo TEF",
-      situacao: !conectado ? "não verificável" : processoParado ? "parado" : "em execução",
-      pendente: !conectado || processoParado,
+      rotulo: "PGWebLib",
+      situacao: !conectado ? "não verificável" : bibliotecaPronta ? "pronta" : "pendente",
+      pendente: !conectado || !bibliotecaPronta,
       explicacao: !conectado
-        ? "O processo nativo não pôde ser consultado porque o Connector não respondeu."
-        : processoParado
-          ? "Condição operacional: o processo nativo está parado. O serviço do Connector continua conectado."
-          : "O processo nativo está em execução.",
+        ? "A PGWebLib não pôde ser consultada porque o Connector não respondeu."
+        : bibliotecaPronta
+          ? "A PGWebLib.dll consultada está pronta."
+          : "A PGWebLib consultada não está pronta. Nenhuma cobrança foi iniciada.",
     },
     {
       id: "pinpad",
@@ -1060,8 +1073,7 @@ export function mensagemAmbienteNaoComprovado(
 export function situacaoAgenteTef(status: unknown): SituacaoAgenteTef {
   const raiz = status && typeof status === "object" ? (status as { tef?: unknown }).tef : null;
   const tef = raiz && typeof raiz === "object" ? (raiz as Record<string, unknown>) : null;
-  const agente =
-    tef?.agente && typeof tef.agente === "object" ? (tef.agente as Record<string, unknown>) : null;
+  const pgweb = tef?.pgwebLib && typeof tef.pgwebLib === "object" ? (tef.pgwebLib as Record<string, unknown>) : null;
   const biblioteca =
     tef?.biblioteca && typeof tef.biblioteca === "object"
       ? (tef.biblioteca as Record<string, unknown>)
@@ -1075,16 +1087,13 @@ export function situacaoAgenteTef(status: unknown): SituacaoAgenteTef {
       ? tef.ambienteEfetivo
       : null;
   const cobrancaPermitida = biblioteca?.cobrancaPermitida === true;
-  const setEnvironment =
-    biblioteca?.setEnvironmentExecutado === true && Number(biblioteca?.retornoSetEnvironment) === 0;
-  const concluida = biblioteca?.instalacaoConcluida === true;
   const assinada = biblioteca?.origemComprovacao === "instalacao_assinada";
   return {
-    compativel: typeof agente?.compativel === "boolean" ? agente.compativel : null,
-    nome: agente?.nome ? String(agente.nome).slice(0, 80) : null,
-    versao: agente?.versao ? String(agente.versao).slice(0, 40) : null,
+    compativel: pgweb ? pgweb.pronta === true : null,
+    nome: pgweb ? "PGWebLib.dll" : null,
+    versao: pgweb?.versao ? String(pgweb.versao).slice(0, 40) : null,
     cobrancaPermitida,
-    evidenciaInstalacao: cobrancaPermitida && ((setEnvironment && concluida) || assinada),
+    evidenciaInstalacao: cobrancaPermitida && assinada,
     ambienteBiblioteca,
     ambienteEfetivo,
   };

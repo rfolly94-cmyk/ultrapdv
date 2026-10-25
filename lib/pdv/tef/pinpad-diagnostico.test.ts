@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +8,7 @@ import {
   observacaoModeloPinpad,
   portaPinpad,
 } from "./pinpad-diagnostico";
+import { operacaoImpedeDiagnosticoPinpad } from "./regras";
 
 test("pinpad conectado e comunicação confirmada não vira homologação", () => {
   const resultado = {
@@ -27,7 +28,10 @@ test("pinpad conectado e comunicação confirmada não vira homologação", () =
     "Pinpad conectado e comunicação confirmada."
   );
   assert.match(observacaoModeloPinpad(resultado), /não comprova homologação/);
-  assert.equal(portaPinpad(resultado), "busca automatica · utilizada porta 8");
+  assert.equal(portaPinpad(resultado), "Automática · utilizada COM8");
+  assert.equal(portaPinpad({ portaUtilizada: 7, portaConfigurada: 7 }), "COM7");
+  assert.equal(portaPinpad({ portaUtilizada: 255 }), "");
+  assert.equal(portaPinpad({ portaConfigurada: 0 }), "Automática");
 });
 
 test("pinpad desconectado, comunicação indisponível e modelo não reconhecido", () => {
@@ -121,11 +125,86 @@ test("autorização do diagnóstico resolve a empresa na sessão e não aceita e
     "utf8"
   );
   const inicio = servico.indexOf("export async function prepararAcessoPinpad");
-  const fim = servico.indexOf("export async function verificarComputadorTefSessao");
+  const fim = servico.indexOf("export async function prepararAcessoPastaTef");
   const bloco = servico.slice(inicio, fim);
   assert.equal(bloco.includes("resolverContextoAutorizadoEmpresa"), true);
   assert.equal(bloco.includes("empresa_id"), false);
   assert.equal(bloco.includes("empresaId"), true);
   assert.match(bloco, /financeiro/);
-  assert.match(bloco, /temPendencia/);
+  assert.match(bloco, /diagnosticoPinpadBloqueado/);
+  assert.equal(bloco.includes("temPendencia"), false);
+  const cobranca = readFileSync(
+    fileURLToPath(new URL("./orquestracao.ts", import.meta.url)),
+    "utf8"
+  );
+  assert.match(cobranca, /TERMINAL_OCUPADO/);
+  assert.match(cobranca, /status === "desconhecida"/);
+});
+
+test("diagnóstico do pinpad distingue operação financeira de resultado sem confirmação", () => {
+  assert.equal(
+    operacaoImpedeDiagnosticoPinpad({
+      status: "desconhecida",
+      nsu: "",
+      rede: "",
+      finalizacao: "",
+    }),
+    false
+  );
+  assert.equal(
+    operacaoImpedeDiagnosticoPinpad({
+      status: "reconciliacao",
+      nsu: null,
+      rede: null,
+      finalizacao: null,
+    }),
+    false
+  );
+  for (const status of ["iniciada", "autorizada", "vinculada", "desfazimento_pendente"]) {
+    assert.equal(
+      operacaoImpedeDiagnosticoPinpad({ status, nsu: "", rede: "", finalizacao: "" }),
+      true
+    );
+  }
+  assert.equal(
+    operacaoImpedeDiagnosticoPinpad({
+      status: "desconhecida",
+      nsu: "1",
+      rede: "rede",
+      finalizacao: "fim",
+    }),
+    true
+  );
+  assert.equal(
+    operacaoImpedeDiagnosticoPinpad({
+      status: "confirmada",
+      nsu: "1",
+      rede: "rede",
+      finalizacao: "fim",
+    }),
+    false
+  );
+});
+
+test("o Connector 1.3.19 não recebe porta manual e não fixa COM7", () => {
+  const servidor = readFileSync(
+    fileURLToPath(new URL("../../../print-agent/src/server.mjs", import.meta.url)),
+    "utf8"
+  );
+  const rota = servidor.slice(
+    servidor.indexOf('url.pathname === "/tef/pinpad/testar-comunicacao"'),
+    servidor.indexOf('url.pathname === "/tef/inicializar"')
+  );
+  assert.match(rota, /chave !== "acao"/);
+  assert.equal(rota.includes("COM7"), false);
+  assert.equal(
+    existsSync(fileURLToPath(new URL("../../../tef-agent/UltraPDVTef.lpr", import.meta.url))),
+    false
+  );
+  const tela = readFileSync(
+    fileURLToPath(new URL("../../../components/pdv/tef-pinpad-diagnostico.tsx", import.meta.url)),
+    "utf8"
+  );
+  assert.equal(tela.includes("/tef/pinpad/testar-comunicacao"), false);
+  assert.equal(tela.includes("COM7"), false);
 });

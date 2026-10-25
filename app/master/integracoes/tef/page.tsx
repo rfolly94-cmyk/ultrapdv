@@ -1,8 +1,6 @@
 import { PageAlert } from "@/components/ui/page-alert";
 import { ErroTef, lerDisponibilidadeTefPlataforma } from "@/lib/pdv/tef/servico";
 
-import { masterDefinirTef } from "./actions";
-
 export const dynamic = "force-dynamic";
 
 export const metadata = {
@@ -34,27 +32,24 @@ export default async function MasterTefPage({ searchParams }: PageProps) {
         </p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight text-zinc-950">TEF</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Liga ou desliga a integração para a plataforma. Esta tela não mostra
-          transações, NSU nem credenciais das empresas.
+          A cobrança, a instalação e o PinPad foram retirados da aplicação. O
+          registro da plataforma permanece somente para consulta.
         </p>
       </div>
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <p className="text-sm font-medium text-zinc-500">Situação gravada</p>
+        <p className="mt-2 text-lg font-semibold text-zinc-950">
+          {habilitada ? "Habilitada no registro" : "Desligada no registro"}
+        </p>
+        <p className="mt-2 max-w-prose text-sm leading-6 text-zinc-600">
+          Esta tela não religa a cobrança e não apaga operações, vendas nem NFC-e.
+        </p>
+      </section>
       {params.erro ? <PageAlert type="erro">{params.erro}</PageAlert> : null}
       {params.sucesso ? (
         <PageAlert type="sucesso">Disponibilidade atualizada.</PageAlert>
       ) : null}
       {erroLeitura ? <PageAlert type="erro">{erroLeitura}</PageAlert> : null}
-      <form action={masterDefinirTef} className="rounded-2xl border border-zinc-200 bg-white p-5">
-        <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
-          <input type="checkbox" name="habilitada" defaultChecked={habilitada} />
-          TEF disponível na plataforma
-        </label>
-        <button
-          type="submit"
-          className="mt-4 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
-        >
-          Salvar
-        </button>
-      </form>
     </div>
   );
 }

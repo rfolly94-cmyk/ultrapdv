@@ -81,7 +81,7 @@ export function resolverAcoesPosVendaPdv(
   const hrefSituacaoFiscal = `/vendas/${vendaId}`;
   const fiscal = input.fiscal;
 
-  if (!input.emitirNfceAutomatico) {
+  if (!input.emitirNfceAutomatico || !fiscal) {
     return {
       rotuloFiscal: null,
       detalheFiscal: null,

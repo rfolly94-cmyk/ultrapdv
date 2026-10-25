@@ -23,6 +23,30 @@ export const STATUS_TEF_ABERTOS: readonly StatusTef[] = [
   "reconciliacao",
 ];
 
+/**
+ * O diagnóstico do pinpad não é cobrança. Ele só fica bloqueado quando a
+ * operação ainda pode estar no terminal: em andamento, aguardando confirmação
+ * ou com rede, NSU e finalização para desfazimento.
+ * Uma desconhecida ou reconciliação sem esses três dados continua impedindo
+ * nova cobrança, mas não ocupa o pinpad.
+ */
+export function operacaoImpedeDiagnosticoPinpad(operacao: {
+  status: string;
+  nsu?: string | null;
+  rede?: string | null;
+  finalizacao?: string | null;
+}) {
+  if (!STATUS_TEF_ABERTOS.includes(operacao.status as StatusTef)) {
+    return false;
+  }
+  if (operacao.status === "desconhecida" || operacao.status === "reconciliacao") {
+    return Boolean(
+      texto(operacao.rede) && texto(operacao.nsu) && texto(operacao.finalizacao)
+    );
+  }
+  return true;
+}
+
 export type ModalidadeTef = "debito" | "credito";
 
 export type FormaTef = {
@@ -314,6 +338,46 @@ export function validarPagamentoMisto(
     }
   }
   return { ok: true as const, operacaoIds: [...usados] };
+}
+
+export function classificarPendenciaTef(operacao: {
+  status: string;
+  teste?: boolean;
+  nsu?: string | null;
+  rede?: string | null;
+  finalizacao?: string | null;
+}) {
+  const prova = Boolean(texto(operacao.nsu) && texto(operacao.rede) && texto(operacao.finalizacao));
+  if (operacao.teste === true) {
+    return {
+      origem: "simulacao" as const,
+      rotulo: "Simulação TEF, sem cobrança real",
+      simulacao: true,
+      recuperarNoCaixa: operacao.status === "desconhecida" || operacao.status === "iniciada",
+    };
+  }
+  if (operacao.status === "desconhecida" && !prova) {
+    return {
+      origem: "conector" as const,
+      rotulo: "Resultado desconhecido do Connector financeiro, sem autorização comprovada",
+      simulacao: false,
+      recuperarNoCaixa: false,
+    };
+  }
+  if (prova) {
+    return {
+      origem: "autorizacao" as const,
+      rotulo: "Autorização financeira pendente",
+      simulacao: false,
+      recuperarNoCaixa: true,
+    };
+  }
+  return {
+    origem: "conector" as const,
+    rotulo: operacao.status || "pendente",
+    simulacao: false,
+    recuperarNoCaixa: false,
+  };
 }
 
 export function decidirRecuperacao(input: {

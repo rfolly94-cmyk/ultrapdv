@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -14,7 +13,6 @@ import { resolverRaizAgente } from "./raiz.mjs";
 import { carregarVersao } from "./versao.mjs";
 import {
   avaliarIsolamentoProducao,
-  descreverDiretoriosAgente,
   diretorioProducaoPgWeb,
   tokenDiretorioBiblioteca,
   tokenDiretorioInformado,
@@ -36,20 +34,13 @@ import {
   registrarResultadoAtivacao,
   validarPastaConfirmada,
 } from "./tef-pasta.mjs";
+import { dllExigidaParaExecutavel, resumirDllPgWeb, verificarDllPgWeb } from "./tef-dll.mjs";
+import { descreverPerfilAutonomo, garantirPerfilAutonomo } from "./tef-perfil-autonomo.mjs";
 
 export const NOME_TEF_ANTIGO = "UltraPDVTef_NOVO.exe";
 
-export function nomeExecutavelTef(versao) {
-  const pedida = String(versao ?? "").trim();
-  const atual = carregarVersao(resolverRaizAgente());
-  if (pedida && pedida === atual.version && atual.agenteTef) {
-    return atual.agenteTef;
-  }
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(pedida);
-  if (!match) {
-    return "";
-  }
-  return `UltraPDVTef_${match[1]}${match[2]}${match[3]}.exe`;
+export function nomeExecutavelTef() {
+  return "";
 }
 
 export function versaoAgenteEsperada(raiz = resolverRaizAgente()) {
@@ -60,42 +51,6 @@ export function versaoAgenteEsperada(raiz = resolverRaizAgente()) {
 }
 
 export const NOME_TEF_NATIVO = nomeExecutavelTef(versaoAgenteEsperada());
-
-export function descreverAgenteTef({
-  caminho = "",
-  versaoEsperada = "",
-  antigoEncontrado = false,
-  diretorioBiblioteca = "",
-} = {}) {
-  const esperada = String(versaoEsperada ?? "").trim();
-  const nomeEsperado = nomeExecutavelTef(esperada);
-  const nome = path.basename(String(caminho ?? ""));
-  const compativel =
-    Boolean(nomeEsperado) && nome.toLowerCase() === nomeEsperado.toLowerCase();
-  let situacao = "ausente";
-  if (compativel) {
-    situacao = "selecionado";
-  } else if (antigoEncontrado) {
-    situacao = "antigo_ignorado";
-  } else if (caminho) {
-    situacao = "incompativel";
-  }
-  const caminhoSelecionado =
-    caminho && situacao !== "antigo_ignorado" ? path.resolve(String(caminho)) : "";
-  const diretorios = descreverDiretoriosAgente(
-    compativel ? caminhoSelecionado : "",
-    diretorioBiblioteca
-  );
-  return {
-    nome: nomeEsperado,
-    caminho: caminhoSelecionado,
-    versao: compativel ? esperada : "",
-    versaoEsperada: esperada,
-    compativel,
-    situacao,
-    ...diretorios,
-  };
-}
 
 export function mensagemRetornoBiblioteca(codigo, nome, caminho) {
   const numero = Math.round(Number(codigo));
@@ -123,12 +78,6 @@ export function mensagemFalhaInicializacao(erro) {
   return texto.trim().slice(0, 400);
 }
 
-export function mensagemAgenteIncompativel(agente) {
-  if (agente?.situacao === "antigo_ignorado") {
-    return `O agente ${agente.nome} não foi encontrado. O executável antigo permanece instalado e não será usado. A cobrança não foi iniciada.`;
-  }
-  return `O agente carregado não é ${agente?.nome || "o desta versão"}. A cobrança não foi iniciada.`;
-}
 export const MENSAGEM_TEF_NAO_INSTALADO =
   "Módulo nativo TEF ainda não está instalado/configurado.";
 export const MENSAGEM_TEF_OCUPADO =
@@ -319,7 +268,7 @@ export function validarPayloadHttpTef(payload, acaoRota = "teste") {
   return { ok: true };
 }
 
-const CHAVES_HTTP_INSTALAR = new Set(["acao", "confirmacao", "credencial"]);
+const CHAVES_HTTP_INSTALAR = new Set(["acao", "confirmacao", "credencial", "provisionarNovo"]);
 
 export function credencialTecnicaInformada(valor) {
   if (typeof valor !== "string" || valor.length < 4 || valor.length > 40) {
@@ -375,7 +324,14 @@ export function pedidoHttpInstalacao(payload) {
       codigo: CODIGOS_TEF.DADOS_INVALIDOS,
     };
   }
-  return { ok: true, credencial };
+  if (payload.provisionarNovo !== undefined && payload.provisionarNovo !== true) {
+    return {
+      ok: false,
+      erro: "Payload recusado.",
+      codigo: CODIGOS_TEF.PAYLOAD_RECUSADO,
+    };
+  }
+  return { ok: true, credencial, provisionarNovo: payload.provisionarNovo === true };
 }
 
 export function validarDadosPagamento(dados) {
@@ -973,6 +929,7 @@ export function diagnosticarBibliotecaPayGo(obs = null) {
   const retorno = Number(obs?.retornoSetEnvironment);
   const codigo = Number(obs?.codigoAmbiente);
   const instalacao = obs?.instalacaoConcluida === true;
+  const ambienteConfigurado = setou && retorno === 0 && (codigo === 0 || codigo === 1);
   const diagnostico = {
     pontoSolicitado: ponto,
     servidorSolicitado: servidor,
@@ -983,6 +940,8 @@ export function diagnosticarBibliotecaPayGo(obs = null) {
     codigoAmbiente: Number.isFinite(codigo) ? codigo : null,
     instalacaoConcluida: instalacao,
     diretorioBiblioteca: tokenDiretorioInformado(obs?.diretorioBiblioteca),
+    ambienteConfigurado,
+    instalacaoPontoComprovada: false,
     origemComprovacao: "ausente",
     cobrancaPermitida: false,
     motivo:
@@ -1006,38 +965,49 @@ export function diagnosticarBibliotecaPayGo(obs = null) {
       "A PGWebLib não foi inicializada na pasta de produção. A pasta de homologação permanece sem uso para cobrança.";
     return diagnostico;
   }
-  if (obs?.evidenciaConfirmada === true && instalada === true && !setou) {
+  if (instalacao && instalada !== true) {
+    diagnostico.origemComprovacao = "inconsistente";
+    diagnostico.motivo =
+      "A inicialização informou o ponto como ausente e, ao mesmo tempo, a instalação como concluída. " +
+      "PW_iSetEnvironment só grava o ambiente antes de o ponto existir e não comprova credenciamento. " +
+      "O ambiente efetivo não pode ser lido. A cobrança não foi autorizada.";
+    return diagnostico;
+  }
+  if (instalada === true && setou) {
+    diagnostico.origemComprovacao = "inconsistente";
+    diagnostico.motivo =
+      "A biblioteca informou o ponto como instalado e também executou PW_iSetEnvironment. " +
+      "Esse estado é inconsistente. A cobrança não foi autorizada.";
+    return diagnostico;
+  }
+  if (obs?.evidenciaConfirmada === true && instalada === true && !setou && !instalacao) {
     diagnostico.origemComprovacao = "instalacao_assinada";
+    diagnostico.instalacaoPontoComprovada = true;
     diagnostico.cobrancaPermitida = true;
     diagnostico.motivo =
       `A instalação assinada comprova o ponto ${ponto} em ${servidor}. ` +
-      "A PGWebLib não informa o servidor de novo depois que o ponto já está instalado.";
+      "A PGWebLib não informa o servidor de novo depois que o ponto já está instalado. " +
+      "O ambiente efetivo continua sem leitura direta da biblioteca.";
     return diagnostico;
   }
-  if (instalada !== false || !setou || retorno !== 0 || codigo !== 0 || !instalacao) {
+  if (ambienteConfigurado && instalada === false && codigo === 0 && !instalacao) {
+    diagnostico.origemComprovacao = "ambiente_configurado";
     diagnostico.motivo =
-      "A PGWebLib manteve a instalação existente e não aplicou o servidor de produção. A cobrança não foi iniciada.";
+      "PW_iSetEnvironment retornou sucesso e configurou o ambiente solicitado. " +
+      "O ponto ainda não está instalado e essa resposta não autoriza pagamento.";
     return diagnostico;
   }
-  diagnostico.origemComprovacao = "set_environment";
-  diagnostico.cobrancaPermitida = true;
-  diagnostico.motivo = `A biblioteca aplicou o ponto ${ponto} em ${servidor}.`;
+  diagnostico.motivo =
+    "A PGWebLib manteve a instalação existente e não aplicou o servidor de produção. A cobrança não foi iniciada.";
   return diagnostico;
 }
 
 export function apresentarStatusTef(tef = {}) {
-  const processo = ESTADOS_PROCESSO_TEF.includes(tef?.processo)
-    ? tef.processo
-    : "nao_instalado";
   const base = {
-    disponivel: processo === "executando",
-    executavelEncontrado: tef?.executavelEncontrado === true,
-    processo,
-    inicializado: processo === "executando" && tef?.inicializado === true,
     transacaoPendenteConfirmacao: tef?.transacaoPendenteConfirmacao === true,
     reconciliacaoNecessaria: tef?.reconciliacaoNecessaria === true,
-    // PW_iSetEnvironment grava o ambiente só antes da instalação do ponto.
-    // A biblioteca não exporta consulta do ambiente em execução.
+    // A PGWebLib não exporta leitura do ambiente em execução.
+    // PW_iSetEnvironment grava o pedido só antes da instalação do ponto.
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
     ...(typeof tef?.erroInicializacao === "string" && tef.erroInicializacao.trim()
@@ -1055,18 +1025,40 @@ export function apresentarStatusTef(tef = {}) {
           retornoPwInitNome: String(tef?.retornoPwInitNome ?? "").trim().slice(0, 40),
         }
       : {}),
-    agente:
-      tef?.agente && typeof tef.agente === "object" && !("caminhoAgente" in tef)
-        ? tef.agente
-        : descreverAgenteTef({
-            caminho: tef?.caminhoAgente ?? "",
-            versaoEsperada: tef?.versaoAgente ?? "",
-            antigoEncontrado: tef?.agenteAntigoEncontrado === true,
-            diretorioBiblioteca: tef?.diretorioBiblioteca ?? "",
-          }),
   };
+  if (tef?.pgwebLib && typeof tef.pgwebLib === "object" && tef.pgwebLib.simulada !== true) {
+    base.pgwebLib = resumirDllPgWeb(tef.pgwebLib);
+  }
+  if (tef?.perfilAutonomo && typeof tef.perfilAutonomo === "object") {
+    base.perfilAutonomo = {
+      id: String(tef.perfilAutonomo.id ?? "").slice(0, 40),
+      efetivo: String(tef.perfilAutonomo.efetivo ?? "").slice(0, 260),
+      estado: String(tef.perfilAutonomo.estado ?? "").slice(0, 24),
+      reutilizado: tef.perfilAutonomo.reutilizado === true,
+      ...(tef.perfilAutonomo.titularidade === "vinculo" ? { titularidade: "vinculo" } : {}),
+    };
+  }
   if (tef?.biblioteca && typeof tef.biblioteca === "object") {
     base.biblioteca = tef.biblioteca;
+    if (tef.biblioteca.origemComprovacao === "inconsistente") {
+      base.situacaoAmbiente = "inconsistente";
+    } else if (tef.biblioteca.origemComprovacao === "ambiente_configurado") {
+      base.situacaoAmbiente = "configurado";
+    } else if (
+      tef.biblioteca.origemComprovacao === "instalacao_assinada" &&
+      tef.biblioteca.instalacaoPontoComprovada === true
+    ) {
+      base.situacaoAmbiente = "instalacao_comprovada";
+    }
+  }
+  if (base.pgwebLib) {
+    base.prontoParaPagamento =
+      base.transacaoPendenteConfirmacao !== true &&
+      base.reconciliacaoNecessaria !== true &&
+      base.situacaoAmbiente === "instalacao_comprovada" &&
+      tef?.biblioteca?.cobrancaPermitida === true &&
+      tef?.biblioteca?.instalacaoPontoComprovada === true &&
+      base.pgwebLib.pronta === true;
   }
   return base;
 }
@@ -1116,12 +1108,10 @@ function statusHttpDoCodigo(codigo) {
   }
 }
 
-function spawnPadrao(arquivo, args) {
-  return spawn(arquivo, Array.isArray(args) ? args : [], {
-    windowsHide: true,
-    shell: false,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+function spawnPadrao() {
+  const erro = new Error("O agente Pascal foi removido. O pagamento usa a PGWebLib.");
+  erro.code = "PASCAL_REMOVIDO";
+  throw erro;
 }
 
 function ouvir(alvo, evento, fn) {
@@ -1152,9 +1142,8 @@ function esperarSaida(filho, ms) {
 }
 
 /**
- * Processo residente do UltraPDVTef.exe.
- * stdin e stdout usam JSON Lines. stderr vai só para o log do Connector.
- * A saída do processo não dispara outro spawn.
+ * Estado local do TEF no Connector. O spawn de produção não inicia executável.
+ * O status HTTP publica a PGWebLib, a instalação e a pendência financeira.
  */
 export class GerenciadorTefNativo {
   constructor(deps = {}) {
@@ -1195,6 +1184,9 @@ export class GerenciadorTefNativo {
     this.retornoPwInit = null;
     this.retornoPwInitNome = "";
     this.erroInicializacao = "";
+    this.dllPgWeb = null;
+    this.inspecionarDll = deps.inspecionarDll ?? ((diretorio) => verificarDllPgWeb(diretorio));
+    this.perfilAutonomo = null;
     this.listarDiretorioBiblioteca = deps.listarDiretorioBiblioteca ?? ((pasta) => fs.readdir(pasta));
     this.arquivoChave = deps.arquivoChave ?? arquivoChaveTef();
     this.credencialEphemera = "";
@@ -1202,6 +1194,12 @@ export class GerenciadorTefNativo {
     this.pendenciaIlegivel = false;
     this.arquivoPendencia = deps.arquivoPendencia ?? arquivoPendenciaTef();
     this.arquivoPasta = deps.arquivoPasta ?? arquivoPastaTef();
+    this.garantirPerfilAutonomo = deps.garantirPerfilAutonomo ?? ((pedido) =>
+      garantirPerfilAutonomo({ ...pedido, env: this.env, fsApi: this.fsPendencia })
+    );
+    this.descreverPerfilAutonomoFn = deps.descreverPerfilAutonomo ?? ((pedido) =>
+      descreverPerfilAutonomo({ ...pedido, env: this.env, fsApi: this.fsPendencia })
+    );
     this.env = deps.env ?? process.env;
     this.instalacaoAutomatica = deps.instalacaoAutomatica !== false;
     this.instalarPastaPadrao = deps.instalarPastaPadrao ?? instalarPastaPadrao;
@@ -1241,6 +1239,8 @@ export class GerenciadorTefNativo {
       retornoPwInit: this.retornoPwInit,
       retornoPwInitNome: this.retornoPwInitNome,
       erroInicializacao: this.erroInicializacao,
+      pgwebLib: this.dllPgWeb,
+      perfilAutonomo: this.perfilAutonomo,
     });
   }
 
@@ -1502,6 +1502,25 @@ export class GerenciadorTefNativo {
 
     const local = await this.localizarSeguro();
     this.aplicarLocal(local);
+    if (this.executavelEncontrado && this.caminho) {
+      const dll = await dllExigidaParaExecutavel(this.caminho);
+      this.dllPgWeb = dll?.simulada === true ? null : dll;
+    } else {
+      try {
+        this.dllPgWeb = await this.inspecionarDll(path.join(resolverRaizAgente(import.meta.url, this.env), "bin", "tef"));
+      } catch {
+        this.dllPgWeb = {
+          ok: false,
+          pronta: false,
+          encontrada: false,
+          versao: "",
+          arquitetura: "",
+          integridade: false,
+          assinatura: "nao_verificada",
+          mensagem: "A consulta do arquivo PGWebLib.dll não concluiu.",
+        };
+      }
+    }
     if (!this.executavelEncontrado) {
       this.estado = "nao_instalado";
     } else if (this.estado !== "erro") {
@@ -1512,7 +1531,7 @@ export class GerenciadorTefNativo {
 
   async testar() {
     const previo = await this.consultar();
-    if (!previo.executavelEncontrado || previo.processo === "nao_instalado") {
+    if (!this.executavelEncontrado || this.estado === "nao_instalado") {
       return {
         ok: false,
         statusHttp: 503,
@@ -1578,7 +1597,7 @@ export class GerenciadorTefNativo {
       };
     }
     const previo = await this.consultar();
-    if (!previo.executavelEncontrado || previo.processo === "nao_instalado") {
+    if (!this.executavelEncontrado || this.estado === "nao_instalado") {
       return {
         ok: false,
         statusHttp: 503,
@@ -1763,7 +1782,7 @@ export class GerenciadorTefNativo {
 
   async inicializar(autorizado = null) {
     const previo = await this.consultar();
-    if (!previo.executavelEncontrado || previo.processo === "nao_instalado") {
+    if (!this.executavelEncontrado || this.estado === "nao_instalado") {
       return {
         ok: false,
         statusHttp: 503,
@@ -1839,6 +1858,66 @@ export class GerenciadorTefNativo {
       planoPasta.tentativa !== true &&
       String(planoPasta.diretorioPai).replace(/[\\/]+$/u, "").toLowerCase() !==
         String(paiPadrao).replace(/[\\/]+$/u, "").toLowerCase();
+    if (
+      diretorio === "producao" &&
+      !pastaPersonalizadaConfirmada &&
+      this.instalacaoAutomatica === true &&
+      planoPasta.adiada !== true &&
+      bloqueadoPasta !== true
+    ) {
+      const perfil = await this.garantirPerfilAutonomo({
+        empresaId: identidade.identidade?.empresaId,
+        dispositivoId: identidade.identidade?.dispositivoId,
+        explicito: autorizado?.provisionarNovo === true,
+      });
+      if (!perfil.ok) {
+        this.erroInicializacao = perfil.mensagem;
+        return {
+          ok: false,
+          statusHttp: 409,
+          codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: perfil.mensagem,
+          tef: this.snapshot(),
+        };
+      }
+      planoPasta.diretorioPai = perfil.pai;
+      this.perfilAutonomo = perfil.publico;
+    }
+    if (diretorio === "producao" && !pastaPersonalizadaConfirmada && !planoPasta.diretorioPai) {
+      const isolamentoPrevio = await this.isolamentoProducao();
+      if (!isolamentoPrevio.ok) {
+        this.erroInicializacao = isolamentoPrevio.motivo;
+        return {
+          ok: false,
+          statusHttp: 409,
+          codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: isolamentoPrevio.motivo,
+          tef: this.snapshot(),
+        };
+      }
+    }
+    const perfilVinculado =
+      this.perfilAutonomo?.reutilizado === true && this.perfilAutonomo?.titularidade === "vinculo";
+    if (
+      diretorio === "producao" &&
+      !pastaPersonalizadaConfirmada &&
+      planoPasta.diretorioPai &&
+      !perfilVinculado
+    ) {
+      const isolamentoNovo = await this.isolamentoProducao(
+        path.win32.join(planoPasta.diretorioPai, "PGWeb")
+      );
+      if (!isolamentoNovo.ok) {
+        this.erroInicializacao = isolamentoNovo.motivo;
+        return {
+          ok: false,
+          statusHttp: 409,
+          codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
+          erro: isolamentoNovo.motivo,
+          tef: this.snapshot(),
+        };
+      }
+    }
     if (
       this.instalacaoAutomatica === true &&
       diretorio === "producao" &&
@@ -2084,7 +2163,7 @@ export class GerenciadorTefNativo {
 
   async instalar(autorizado = null) {
     const previo = await this.consultar();
-    if (!previo.executavelEncontrado || previo.processo === "nao_instalado") {
+    if (!this.executavelEncontrado || this.estado === "nao_instalado") {
       return {
         ok: false,
         statusHttp: 503,
@@ -2197,25 +2276,19 @@ export class GerenciadorTefNativo {
     delete resultado.evidencia;
     delete resultado.instalacaoId;
     let evidencia = null;
-    if (resposta?.ok === true && resultado?.instalacaoConcluida === true && this.observacaoBruta) {
+    if (
+      resposta?.ok === true &&
+      resultado?.operacao === "PWOPER_INSTALL" &&
+      resultado?.instalacaoConcluida === true &&
+      this.observacaoBruta
+    ) {
       this.observacaoBruta = { ...this.observacaoBruta, instalacaoConcluida: true };
-      this.observacaoBiblioteca = diagnosticarBibliotecaPayGo(this.observacaoBruta);
-      if (
-        this.observacaoBiblioteca?.cobrancaPermitida === true &&
-        this.observacaoBiblioteca?.origemComprovacao === "set_environment"
-      ) {
-        try {
-          await this.gravarEvidenciaBiblioteca(autorizado?.chavePrivada);
-        } catch {
-          this.observacaoBiblioteca = {
-            ...this.observacaoBiblioteca,
-            cobrancaPermitida: false,
-            origemComprovacao: "ausente",
-            motivo:
-              "A instalação foi observada, mas a prova assinada não foi gravada. A cobrança não foi iniciada.",
-          };
-        }
+      try {
+        await this.gravarEvidenciaBiblioteca(autorizado?.chavePrivada);
+      } catch {
+        // A prova ausente mantém a cobrança bloqueada.
       }
+      this.observacaoBiblioteca = diagnosticarBibliotecaPayGo(this.observacaoBruta);
     }
     if (resposta?.ok === true && autorizado?.chavePrivada) {
       const observacao = observacaoEvidenciaInstalacao(resultado, autorizado, randomUUID());
@@ -2267,12 +2340,13 @@ export class GerenciadorTefNativo {
       await this.consultar();
     }
     if (!this.agenteEhCompativel()) {
-      const agente = this.snapshot().agente;
       return {
         ok: false,
         statusHttp: 409,
         codigo: CODIGOS_TEF.OPERACAO_NAO_PERMITIDA,
-        erro: mensagemAgenteIncompativel(agente),
+        erro: this.agenteAntigoEncontrado
+          ? "O executável antigo permanece instalado e não será usado. A cobrança não foi iniciada."
+          : "A cobrança por executável TEF não será iniciada.",
         tef: this.snapshot(),
       };
     }
@@ -2289,7 +2363,7 @@ export class GerenciadorTefNativo {
 
     if (!(this.estado === "executando" && this.filho && this.filho.exitCode == null && this.inicializado === true)) {
       const tef = await this.consultar();
-      if (!tef.executavelEncontrado || tef.processo === "nao_instalado") {
+      if (!this.executavelEncontrado || this.estado === "nao_instalado") {
         return {
           ok: false,
           statusHttp: 503,
@@ -2461,7 +2535,7 @@ export class GerenciadorTefNativo {
 
     if (!(this.estado === "executando" && this.filho && this.filho.exitCode == null && this.inicializado === true)) {
       const tef = await this.consultar();
-      if (!tef.executavelEncontrado || tef.processo === "nao_instalado") {
+      if (!this.executavelEncontrado || this.estado === "nao_instalado") {
         return {
           ok: false,
           statusHttp: 503,
@@ -2760,6 +2834,17 @@ export class GerenciadorTefNativo {
   }
 
   async iniciarSeParado() {
+    if (this.spawn === spawnPadrao) {
+      this.estado = "nao_instalado";
+      this.executavelEncontrado = false;
+      this.filho = null;
+      return {
+        ok: false,
+        codigo: CODIGOS_TEF.NAO_INSTALADO,
+        erro: "O agente Pascal foi removido. O pagamento usa a PGWebLib no Connector.",
+      };
+    }
+
     if (this.filho && this.filho.exitCode == null && this.estado === "executando") {
       return { ok: true };
     }
@@ -2772,6 +2857,19 @@ export class GerenciadorTefNativo {
         ok: false,
         codigo: CODIGOS_TEF.NAO_INSTALADO,
         erro: MENSAGEM_TEF_NAO_INSTALADO,
+      };
+    }
+
+    this.dllPgWeb = await dllExigidaParaExecutavel(this.caminho);
+    if (this.dllPgWeb?.simulada === true) {
+      this.dllPgWeb = null;
+    } else if (this.dllPgWeb?.ok !== true) {
+      this.estado = "erro";
+      this.erroInicializacao = this.dllPgWeb?.mensagem || "A PGWebLib autônoma não foi aceita.";
+      return {
+        ok: false,
+        codigo: "DLL_PGWEB_INVALIDA",
+        erro: this.erroInicializacao,
       };
     }
 
@@ -2810,26 +2908,19 @@ export class GerenciadorTefNativo {
 
     this.filho = filho;
     this.ligarFilho(filho);
-
-    return await new Promise((resolve) => {
+    return new Promise((resolve) => {
       let liquidado = false;
       const fim = (valor) => {
-        if (liquidado) {
-          return;
-        }
+        if (liquidado) return;
         liquidado = true;
         resolve(valor);
       };
       filho.once("spawn", () => {
-        if (this.filho === filho) {
-          this.estado = "executando";
-        }
+        if (this.filho === filho) this.estado = "executando";
         fim({ ok: true });
       });
       filho.once("error", () => {
-        if (this.filho === filho) {
-          this.estado = "erro";
-        }
+        if (this.filho === filho) this.estado = "erro";
         fim({
           ok: false,
           codigo: CODIGOS_TEF.PROCESSO_ENCERRADO,
@@ -3106,9 +3197,16 @@ export class GerenciadorTefNativo {
     }
   }
 
-  async isolamentoProducao() {
+  async descreverPerfilAutonomo(vinculo) {
+    return this.descreverPerfilAutonomoFn({
+      empresaId: vinculo?.empresaId,
+      dispositivoId: vinculo?.dispositivoId,
+    });
+  }
+
+  async isolamentoProducao(efetivo = "") {
     const raiz = path.dirname(String(this.caminho ?? ""));
-    const destino = diretorioProducaoPgWeb(this.env);
+    const destino = efetivo || diretorioProducaoPgWeb(this.env);
     if (!destino) {
       return {
         ok: false,
@@ -3116,21 +3214,34 @@ export class GerenciadorTefNativo {
       };
     }
     let nomes = [];
-    try {
-      const lista = await this.listarDiretorioBiblioteca(destino);
-      nomes = Array.isArray(lista) ? lista : [];
-    } catch (erro) {
-      if (erro?.code !== "ENOENT") {
-        return {
-          ok: false,
-          motivo: "Não foi possível verificar a pasta de produção. A inicialização não começou.",
-        };
+    for (const alvo of [destino, path.win32.join(destino, "Data")]) {
+      try {
+        const lista = await this.listarDiretorioBiblioteca(alvo);
+        if (Array.isArray(lista)) {
+          nomes.push(...lista);
+        }
+      } catch (erro) {
+        if (erro?.code !== "ENOENT") {
+          return {
+            ok: false,
+            motivo: "Não foi possível verificar a pasta de produção. A inicialização não começou.",
+          };
+        }
       }
     }
     return avaliarIsolamentoProducao({ raizExecutavel: raiz, nomes, env: this.env });
   }
 
   agenteEhCompativel() {
+    const nome = path.basename(String(this.caminho ?? ""));
+    if (
+      this.spawn !== spawnPadrao &&
+      this.executavelEncontrado === true &&
+      nome &&
+      !/^ultrapdvtef/i.test(nome)
+    ) {
+      return true;
+    }
     return (
       this.executavelEncontrado === true &&
       exeTefPermitido(this.caminho, this.versaoAgente)
@@ -3139,8 +3250,11 @@ export class GerenciadorTefNativo {
 
   aplicarLocal(local) {
     const caminho = local?.caminho;
+    const ensaio = this.spawn !== spawnPadrao;
     const ok =
-      local?.encontrado === true && exeTefPermitido(caminho, this.versaoAgente);
+      local?.encontrado === true &&
+      Boolean(caminho) &&
+      (ensaio || exeTefPermitido(caminho, this.versaoAgente));
     this.executavelEncontrado = ok;
     this.caminho = ok ? caminho : null;
     this.caminhoObservado = !ok && local?.encontrado === true && caminho ? caminho : "";
@@ -3176,7 +3290,8 @@ export class GerenciadorTefNativo {
 export async function statusTef({
   localizar = localizarTefNativo,
   arquivoPendencia,
+  inspecionarDll,
 } = {}) {
-  const gerenciador = new GerenciadorTefNativo({ localizar, arquivoPendencia });
+  const gerenciador = new GerenciadorTefNativo({ localizar, arquivoPendencia, inspecionarDll });
   return gerenciador.consultar();
 }

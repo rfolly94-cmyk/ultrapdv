@@ -102,10 +102,15 @@ function criarGerenciador() {
     os.tmpdir(),
     `ultrapdv-evidencia-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
   );
+  const arquivoPasta = path.join(
+    os.tmpdir(),
+    `ultrapdv-evidencia-pasta-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+  );
   let seq = 0;
   const gerenciador = new GerenciadorTefNativo({
     arquivoPendencia,
-    localizar: async () => ({ encontrado: true, caminho: `C:\\UltraPDV\\${NOME_TEF_NATIVO}` }),
+    arquivoPasta,
+    localizar: async () => ({ encontrado: true, caminho: "C:\\UltraPDV\\ensaio-tef.exe" }),
     spawn: () => {
       const proc = criarProcesso();
       processos.push(proc);
@@ -125,6 +130,7 @@ function criarGerenciador() {
     },
     limiteEncerramentoMs: 20,
     instalacaoAutomatica: false,
+    listarDiretorioBiblioteca: async () => [],
   });
   return { gerenciador, processos, arquivoPendencia };
 }

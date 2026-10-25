@@ -80,6 +80,8 @@ function leituraConnector(valor: Partial<LeituraConnector> | undefined): Leitura
     executavelEncontrado: valor?.executavelEncontrado === true,
     processo: valor?.processo ? String(valor.processo).slice(0, 40) : null,
     paygoInicializado: valor?.paygoInicializado === true,
+    pgwebLibPronta: valor?.pgwebLibPronta === true,
+    pgwebVersao: valor?.pgwebVersao ? String(valor.pgwebVersao).slice(0, 40) : null,
     // A PGWebLib exporta PW_iSetEnvironment e não exporta leitura do ambiente.
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
@@ -148,71 +150,15 @@ function rascunhoDe(data: {
   };
 }
 
-export async function lerRascunhoAssistente(empresaId: string) {
-  const cliente = createAdminClient();
-  const completo = await cliente
-    .from("tef_instalacoes")
-    .select(`${COLUNAS_RASCUNHO}, servidor_homologacao, servidor_producao, servidor_confirmado`)
-    .eq("empresa_id", empresaId)
-    .maybeSingle();
-  if (completo.error && colunaServidorAusente(completo.error)) {
-    const anterior = await cliente
-      .from("tef_instalacoes")
-      .select(COLUNAS_RASCUNHO)
-      .eq("empresa_id", empresaId)
-      .maybeSingle();
-    if (anterior.error) {
-      if (migracaoAusente(anterior.error)) {
-        return { migracaoPendente: true as const, rascunho: null };
-      }
-      throw new ErroTef("Não foi possível consultar o andamento do TEF.", 500);
-    }
-    if (!anterior.data) {
-      return { migracaoPendente: false as const, rascunho: null };
-    }
-    return { migracaoPendente: false as const, rascunho: rascunhoDe(anterior.data) };
-  }
-  if (completo.error) {
-    if (migracaoAusente(completo.error)) {
-      return { migracaoPendente: true as const, rascunho: null };
-    }
-    throw new ErroTef("Não foi possível consultar o andamento do TEF.", 500);
-  }
-  if (!completo.data) {
-    return { migracaoPendente: false as const, rascunho: null };
-  }
-  return { migracaoPendente: false as const, rascunho: rascunhoDe(completo.data) };
+export async function lerRascunhoAssistente(empresaId: string): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
 
-export async function lerPaginaAssistenteTef() {
-  const ctx = await contextoEdicao();
-  const [{ data: empresa }, { data: fiscal }, config, instalacao, plano, servidores] = await Promise.all([
-    ctx.supabase.from("empresas").select("cnpj").eq("id", ctx.empresaId).maybeSingle(),
-    ctx.supabase.from("empresas_fiscal").select("ambiente").eq("empresa_id", ctx.empresaId).maybeSingle(),
-    lerHabilitacaoTef(ctx.supabase, ctx.empresaId),
-    lerRascunhoAssistente(ctx.empresaId),
-    planoPermiteRecursoEmpresa(ctx.empresaId, "pdv"),
-    lerServidoresOficiais(ctx.empresaId),
-  ]);
-  return {
-    empresaId: ctx.empresaId,
-    cnpj: digitosCnpj(empresa?.cnpj),
-    ambienteFiscal: fiscal?.ambiente == null ? null : Number(fiscal.ambiente),
-    permissaoEditar: ctx.permissaoEditar,
-    perfil: ctx.perfil,
-    administrador: ctx.perfil === "administrador",
-    planoPdv: plano.permitido === true,
-    plataformaHabilitada: config.plataformaHabilitada === true,
-    empresaJaHabilitada: config.empresaHabilitada === true,
-    ambienteAtual: config.ambiente === "producao" ? "producao" : "homologacao",
-    pontoAtual: config.pontoCaptura,
-    estabelecimentoAtual: config.estabelecimento,
-    servidorHomologacao: servidores.servidorHomologacao,
-    servidorProducao: servidores.servidorProducao,
-    migracaoInstalacaoPendente: instalacao.migracaoPendente,
-    rascunho: instalacao.rascunho,
-  };
+
+export async function lerPaginaAssistenteTef(): Promise<any> {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 function credenciamentoEfetivo(
   pagina: Awaited<ReturnType<typeof lerPaginaAssistenteTef>>,
@@ -346,71 +292,15 @@ async function terminaisDaObservacao(empresaId: string, dispositivoId: string) {
   }));
 }
 
-export async function avaliarAssistenteTefSessao(observacao: ObservacaoAssistente) {
-  const pagina = await lerPaginaAssistenteTef();
-  const dispositivoId = String(observacao.dispositivoId ?? "").trim();
-  const terminais = dispositivoId
-    ? await terminaisDaObservacao(pagina.empresaId, dispositivoId)
-    : [];
-  const pendencias = await pendenciasDaEmpresa(pagina.empresaId);
-  const efetivo = credenciamentoEfetivo(pagina, observacao.credenciamento);
-  const evidencia = await consultarEvidenciaDaEmpresa({
-    empresaId: pagina.empresaId,
-    dispositivoId,
-    ambienteDeclarado: efetivo.ambienteAutorizado,
-  });
-  const provaTecnica = await consultarProvaTecnicaDaEmpresa(pagina.empresaId, dispositivoId);
-  return avaliarInstalacao({
-    credenciamento: efetivo.credenciamento,
-    connector: leituraConnector(observacao.connector),
-    pinpad: leituraPinpad(observacao.pinpad),
-    pinpadExigido:
-      pagina.rascunho?.credenciamentoConfirmado
-        ? pagina.rascunho.pinpadExigido !== false
-        : observacao.pinpadExigido !== false,
-    empresaId: pagina.empresaId,
-    terminais,
-    dispositivoId,
-    pontoAutorizado: efetivo.pontoAutorizado,
-    ambienteAutorizado: efetivo.ambienteAutorizado,
-    pendenciasFinanceiras: pendencias,
-    planoPdv: pagina.planoPdv,
-    permissaoEditar: pagina.permissaoEditar,
-    plataformaHabilitada: pagina.plataformaHabilitada,
-    ambienteFiscal: pagina.ambienteFiscal,
-    evidencia,
-    biblioteca: sanitizarObservacaoBiblioteca(observacao.biblioteca),
-    provaTecnica,
-  });
+export async function avaliarAssistenteTefSessao(observacao: ObservacaoAssistente): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
 
+
 async function consultarProvaTecnicaDaEmpresa(empresaId: string, dispositivoId: string) {
-  const id = dispositivoId.trim().toLowerCase();
-  if (!ID_EVIDENCIA.test(id)) {
-    return null;
-  }
-  const cliente = createAdminClient();
-  const registro = await cliente
-    .from("tef_validacoes_biblioteca")
-    .select("ambiente, diretorio")
-    .eq("empresa_id", empresaId)
-    .eq("dispositivo_id", id)
-    .is("revogada_em", null)
-    .limit(1);
-  if (registro.error) {
-    if (migracaoAusente(registro.error)) {
-      return null;
-    }
-    throw new ErroTef("Não foi possível consultar a prova técnica da biblioteca.", 500);
-  }
-  const linha = registro.data?.[0];
-  if (!linha) {
-    return null;
-  }
-  return {
-    instalacaoComprovada: true,
-    ambienteConfigurado: linha.ambiente === "producao" && linha.diretorio === "producao",
-  };
+  void empresaId;
+  void dispositivoId;
+  return null;
 }
 
 export async function salvarRascunhoAssistenteSessao(input: {
@@ -426,140 +316,10 @@ export async function salvarRascunhoAssistenteSessao(input: {
   servidorHomologacao: string;
   servidorProducao: string;
   servidorConfirmado: boolean;
-}) {
-  const pagina = await lerPaginaAssistenteTef();
-  if (!pagina.permissaoEditar) {
-    throw new ErroTef("A ativação exige permissão de edição do financeiro.", 403);
-  }
-  const credenciamento = validarCredenciamento({
-    cnpjEmpresa: pagina.cnpj,
-    cnpjConfirmado: input.cnpjConfirmado,
-    credenciamentoConfirmado: input.credenciamentoConfirmado,
-    ambienteAutorizado: ambienteInformado(
-      input.ambienteAutorizado === "producao" || input.ambienteAutorizado === "homologacao"
-        ? input.ambienteAutorizado
-        : ""
-    ),
-    pontoCaptura: input.pontoCaptura,
-    estabelecimento: input.estabelecimento,
-    parametrosOficiais: input.parametrosOficiais,
-    adquirentes: input.adquirentes,
-    servidorHomologacao: input.servidorHomologacao,
-    servidorProducao: input.servidorProducao,
-    servidorConfirmado: input.servidorConfirmado,
-  });
-  if (!credenciamento.ok) {
-    return {
-      ok: false as const,
-      pendencias: credenciamento.pendencias,
-      etapa: "credenciamento" as const,
-    };
-  }
-  const ambienteNovo = credenciamento.ambienteAutorizado;
-  if (ambienteNovo !== "homologacao" && ambienteNovo !== "producao") {
-    return {
-      ok: false as const,
-      pendencias: ["Informe o ambiente autorizado: homologação ou produção."],
-      etapa: "credenciamento" as const,
-    };
-  }
-  const servidorNovo =
-    ambienteNovo === "producao" ? credenciamento.servidorProducao : credenciamento.servidorHomologacao;
-  const oficiais = await lerServidoresOficiais(pagina.empresaId);
-  const servidorOficialGravado =
-    ambienteNovo === "producao" ? oficiais.servidorProducao : oficiais.servidorHomologacao;
-  const pareados = await servidoresPareados(pagina.empresaId);
-  const servidorTerminal = pareados.map((item) => item.servidor.trim()).find(Boolean) ?? "";
-  if (servidorTerminal && servidorTerminal !== servidorNovo) {
-    return {
-      ok: false as const,
-      pendencias: ["O servidor deste terminal já foi pareado e não pode ser trocado."],
-      etapa: "credenciamento" as const,
-    };
-  }
-  const pendenciasFinanceiras = await pendenciasDaEmpresa(pagina.empresaId);
-  const decisao = decidirGravacaoServidor({
-    perfil: pagina.perfil ?? "",
-    confirmacaoExplicita: input.servidorConfirmado === true,
-    empresaJaHabilitada: pagina.empresaJaHabilitada,
-    pendenciaFinanceira: pendenciasFinanceiras > 0,
-    terminalPareado: pareados.length > 0,
-    servidorAtual: servidorOficialGravado.trim(),
-    servidorNovo,
-    ambienteAtual: pagina.ambienteAtual === "producao" ? "producao" : pagina.ambienteAtual === "homologacao" ? "homologacao" : "",
-    ambienteNovo,
-  });
-  if (decisao.efeito === "recusar") {
-    return {
-      ok: false as const,
-      pendencias: [decisao.motivo],
-      etapa: "credenciamento" as const,
-    };
-  }
-  const etapa = etapaPersistida(input.etapa, true);
-  const cliente = createAdminClient();
-  const { error } = await cliente.from("tef_instalacoes").upsert({
-    empresa_id: pagina.empresaId,
-    etapa,
-    credenciamento_confirmado: true,
-    ambiente_autorizado: credenciamento.ambienteAutorizado || "homologacao",
-    ponto_captura: credenciamento.pontoCaptura,
-    estabelecimento: credenciamento.estabelecimento,
-    parametros_oficiais: input.parametrosOficiais.trim().slice(0, 500),
-    adquirentes: credenciamento.adquirentes,
-    pinpad_exigido: input.pinpadExigido !== false,
-    servidor_homologacao: credenciamento.servidorHomologacao,
-    servidor_producao: credenciamento.servidorProducao,
-    servidor_confirmado: input.servidorConfirmado === true,
-    atualizado_em: new Date().toISOString(),
-  });
-  if (error) {
-    if (colunaServidorAusente(error)) {
-      throw new ErroTef(
-        "O servidor PayGoWeb ainda não foi aplicado no banco. A migration 20261011190000_tef_servidor_paygo.sql precisa ser aplicada antes de confirmar o servidor.",
-        503
-      );
-    }
-    if (migracaoAusente(error)) {
-      throw new ErroTef(
-        "O andamento do assistente ainda não foi aplicado no banco. A migration 20261011140000_tef_assistente_instalacao.sql precisa ser aplicada antes de retomar a instalação.",
-        503
-      );
-    }
-    throw new ErroTef("Não foi possível salvar o andamento do TEF.", 500);
-  }
-  if (decisao.efeito === "gravar") {
-    await gravarServidoresPayGoEmpresa(pagina.empresaId, {
-      ambiente: ambienteNovo,
-      estabelecimento: pagina.empresaJaHabilitada ? pagina.estabelecimentoAtual : credenciamento.estabelecimento,
-      pontoCaptura: pagina.empresaJaHabilitada ? pagina.pontoAtual : credenciamento.pontoCaptura,
-      servidorHomologacao: credenciamento.servidorHomologacao,
-      servidorProducao: credenciamento.servidorProducao,
-    });
-  }
-  const relido = await lerServidoresOficiais(pagina.empresaId);
-  const confirmado = confirmarServidorPersistido({
-    ambiente: ambienteNovo,
-    informado: servidorNovo,
-    gravadoHomologacao: relido.servidorHomologacao,
-    gravadoProducao: relido.servidorProducao,
-  });
-  if (!confirmado.ok) {
-    return {
-      ok: false as const,
-      pendencias: [confirmado.motivo],
-      etapa: "credenciamento" as const,
-    };
-  }
-  return {
-    ok: true as const,
-    preservado: decisao.efeito === "preservar",
-    etapa,
-    pendencias: [] as string[],
-    servidorHomologacao: relido.servidorHomologacao,
-    servidorProducao: relido.servidorProducao,
-  };
+}): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 async function servidoresPareados(empresaId: string) {
   const cliente = createAdminClient();
@@ -582,72 +342,10 @@ async function servidoresPareados(empresaId: string) {
   }));
 }
 
-export async function ativarAssistenteTefSessao(observacao: ObservacaoAssistente) {
-  const pagina = await lerPaginaAssistenteTef();
-  const avaliacao = await avaliarAssistenteTefSessao(observacao);
-  const efetivo = credenciamentoEfetivo(pagina, observacao.credenciamento);
-  const decisao = decidirAtivacao({
-    permissaoEditar: pagina.permissaoEditar,
-    empresaJaHabilitada: pagina.empresaJaHabilitada,
-    podeAtivar: avaliacao.podeAtivar,
-    pontoAtual: pagina.pontoAtual,
-    ambienteAtual: pagina.ambienteAtual === "producao" ? "producao" : "homologacao",
-    pontoInformado: efetivo.pontoAutorizado,
-    ambienteInformado: efetivo.ambienteAutorizado === "producao" ? "producao" : efetivo.ambienteAutorizado === "homologacao" ? "homologacao" : "",
-  });
-  if (decisao.efeito === "recusar") {
-    return {
-      ok: false as const,
-      efeito: decisao.efeito,
-      motivo: decisao.motivo,
-      mensagens: avaliacao.mensagens,
-    };
-  }
-  if (decisao.efeito === "preservar") {
-    return { ok: true as const, efeito: decisao.efeito, mensagens: avaliacao.mensagens };
-  }
-  if (decisao.ambiente !== "producao" && decisao.ambiente !== "homologacao") {
-    return {
-      ok: false as const,
-      efeito: "recusar" as const,
-      motivo: "requisitos",
-      mensagens: avaliacao.mensagens,
-    };
-  }
-  const evidencia = await consultarEvidenciaDaEmpresa({
-    empresaId: pagina.empresaId,
-    dispositivoId: String(observacao.dispositivoId ?? "").trim(),
-    ambienteDeclarado: efetivo.ambienteAutorizado,
-  });
-  const ambienteEvidencia = evidencia.ambienteEfetivo;
-  if (
-    evidencia.situacao !== "comprovado" ||
-    evidencia.deveRevogar ||
-    (ambienteEvidencia !== "homologacao" && ambienteEvidencia !== "producao") ||
-    ambienteEvidencia !== decisao.ambiente
-  ) {
-    return {
-      ok: false as const,
-      efeito: "recusar" as const,
-      motivo: "requisitos",
-      mensagens: [evidencia.motivo],
-    };
-  }
-  const gravacao = montarGravacaoAtivacao({
-    empresaSessaoId: pagina.empresaId,
-    empresaInformada: observacao.empresaId ?? null,
-    ambiente: ambienteEvidencia,
-    pontoCaptura: decisao.ponto || "",
-    estabelecimento: efetivo.estabelecimento,
-  });
-  await salvarConfigTefEmpresa(gravacao.empresaId, {
-    habilitado: true,
-    ambiente: gravacao.ambiente,
-    estabelecimento: gravacao.estabelecimento,
-    pontoCaptura: gravacao.pontoCaptura,
-  });
-  return { ok: true as const, efeito: decisao.efeito, mensagens: [] as string[] };
+export async function ativarAssistenteTefSessao(observacao: ObservacaoAssistente): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 const ID_EVIDENCIA =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -663,192 +361,17 @@ export async function consultarEvidenciaDaEmpresa(input: {
   dispositivoId: string;
   ambienteDeclarado: AmbienteTefAssistente | "";
 }): Promise<ClassificacaoAmbienteInstalacao> {
-  const declarado = ambienteDeclaradoDaEvidencia(input.ambienteDeclarado);
-  const dispositivoId = input.dispositivoId.trim().toLowerCase();
-  if (!ID_EVIDENCIA.test(dispositivoId)) {
-    return classificacaoSemEvidencia(declarado);
-  }
-  const cliente = createAdminClient();
-  const terminal = await cliente
-    .from("tef_terminais")
-    .select("id, dispositivo_id, chave_publica, estabelecimento, ponto_captura")
-    .eq("empresa_id", input.empresaId)
-    .eq("dispositivo_id", dispositivoId)
-    .eq("ativo", true)
-    .is("revogada_em", null)
-    .maybeSingle();
-  if (terminal.error) {
-    if (migracaoAusente(terminal.error)) {
-      return classificacaoSemEvidencia(declarado);
-    }
-    throw new ErroTef("Não foi possível consultar o terminal da evidência.", 500);
-  }
-  const armazenada = await cliente
-    .from("tef_evidencias_instalacao")
-    .select(
-      "id, dispositivo_id, terminal_id, ponto_captura, estabelecimento, ambiente, instalacao_id, assinatura"
-    )
-    .eq("empresa_id", input.empresaId)
-    .eq("dispositivo_id", dispositivoId)
-    .is("revogada_em", null)
-    .maybeSingle();
-  if (armazenada.error) {
-    if (migracaoAusente(armazenada.error)) {
-      return classificacaoSemEvidencia(declarado);
-    }
-    throw new ErroTef("Não foi possível consultar a evidência de instalação.", 500);
-  }
-  const linha = armazenada.data;
-  const terminalLinha = terminal.data;
-  const ambienteLinha =
-    linha?.ambiente === "producao" || linha?.ambiente === "homologacao" ? linha.ambiente : null;
-  const classificacao = consultarEvidenciaArmazenada({
-    evidencia:
-      linha && ambienteLinha
-        ? {
-            campos: {
-              empresaId: input.empresaId,
-              dispositivoId: String(linha.dispositivo_id),
-              terminalId: String(linha.terminal_id),
-              pontoCaptura: String(linha.ponto_captura ?? ""),
-              estabelecimento: String(linha.estabelecimento ?? ""),
-              ambiente: ambienteLinha,
-              instalacaoId: String(linha.instalacao_id),
-            },
-            assinatura: String(linha.assinatura ?? ""),
-            revogada: false,
-          }
-        : null,
-    chavePublicaPem: terminalLinha?.chave_publica ? String(terminalLinha.chave_publica) : "",
-    empresaSessaoId: input.empresaId,
-    dispositivoAutorizado: terminalLinha ? String(terminalLinha.dispositivo_id) : "",
-    terminalAutorizadoId: terminalLinha ? String(terminalLinha.id) : "",
-    pontoTerminal: terminalLinha ? String(terminalLinha.ponto_captura ?? "") : "",
-    estabelecimentoTerminal: terminalLinha ? String(terminalLinha.estabelecimento ?? "") : "",
-    ambienteDeclarado: declarado,
-    evento: "nenhum",
-  });
-  if (classificacao.deveRevogar && linha?.id) {
-    const { error } = await cliente
-      .from("tef_evidencias_instalacao")
-      .update({
-        revogada_em: new Date().toISOString(),
-        motivo_revogacao: classificacao.motivo.slice(0, 200),
-      })
-      .eq("id", linha.id)
-      .eq("empresa_id", input.empresaId)
-      .is("revogada_em", null);
-    if (error && !migracaoAusente(error)) {
-      throw new ErroTef("Não foi possível revogar a evidência de instalação.", 500);
-    }
-  }
-  return classificacao;
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 export async function registrarEvidenciaInstalacaoSessao(input: {
   campos: CamposEvidenciaInstalacao;
   assinatura: string;
-}) {
-  const ctx = await contextoEdicao();
-  if (!ctx.permissaoEditar) {
-    throw new ErroTef("O registro da evidência exige permissão de edição do financeiro.", 403);
-  }
-  const dispositivoId = String(input.campos?.dispositivoId ?? "").trim().toLowerCase();
-  if (!ID_EVIDENCIA.test(dispositivoId)) {
-    throw new ErroTef("Os identificadores da instalação estão incompletos.", 400);
-  }
-  const cliente = createAdminClient();
-  const { data: terminal, error: erroTerminal } = await cliente
-    .from("tef_terminais")
-    .select("id, dispositivo_id, chave_publica, estabelecimento, ponto_captura")
-    .eq("empresa_id", ctx.empresaId)
-    .eq("dispositivo_id", dispositivoId)
-    .eq("ativo", true)
-    .is("revogada_em", null)
-    .maybeSingle();
-  if (erroTerminal) {
-    throw new ErroTef("Não foi possível consultar o terminal da evidência.", 500);
-  }
-  if (!terminal?.chave_publica) {
-    throw new ErroTef("O terminal ainda não está autorizado nesta empresa.", 403);
-  }
-  const instalacaoId = String(input.campos.instalacaoId ?? "").trim().toLowerCase();
-  const { data: conhecida, error: erroConhecida } = await cliente
-    .from("tef_evidencias_instalacao")
-    .select("id")
-    .eq("instalacao_id", instalacaoId)
-    .maybeSingle();
-  if (erroConhecida) {
-    if (migracaoAusente(erroConhecida)) {
-      throw new ErroTef(
-        "A evidência de instalação ainda não foi aplicada no banco. A migration 20261011180000_tef_evidencia_instalacao.sql precisa ser aplicada antes do registro.",
-        503
-      );
-    }
-    throw new ErroTef("Não foi possível conferir a evidência de instalação.", 500);
-  }
-  const { data: ativa, error: erroAtiva } = await cliente
-    .from("tef_evidencias_instalacao")
-    .select("id")
-    .eq("empresa_id", ctx.empresaId)
-    .eq("dispositivo_id", dispositivoId)
-    .is("revogada_em", null)
-    .maybeSingle();
-  if (erroAtiva) {
-    throw new ErroTef("Não foi possível conferir a evidência ativa.", 500);
-  }
-  const plano = prepararRegistroEvidencia({
-    campos: input.campos,
-    assinatura: input.assinatura,
-    chavePublicaPem: String(terminal.chave_publica),
-    empresaSessaoId: ctx.empresaId,
-    dispositivoAutorizado: String(terminal.dispositivo_id),
-    terminalAutorizadoId: String(terminal.id),
-    pontoAutorizado: String(terminal.ponto_captura ?? ""),
-    estabelecimentoAutorizado: String(terminal.estabelecimento ?? ""),
-    instalacaoJaRegistrada: Boolean(conhecida?.id),
-    evidenciaAtivaNoDispositivo: Boolean(ativa?.id),
-  });
-  if (!plano.ok) {
-    throw new ErroTef(plano.motivo, 403);
-  }
-  if (plano.registro.empresa_id !== ctx.empresaId.trim().toLowerCase()) {
-    throw new ErroTef("A evidência de instalação pertence a outra empresa.", 403);
-  }
-  if (plano.revogarAtiva && ativa?.id) {
-    const { error } = await cliente
-      .from("tef_evidencias_instalacao")
-      .update({
-        revogada_em: new Date().toISOString(),
-        motivo_revogacao: "Substituída por nova instalação controlada.",
-      })
-      .eq("id", ativa.id)
-      .eq("empresa_id", ctx.empresaId)
-      .is("revogada_em", null);
-    if (error) {
-      throw new ErroTef("Não foi possível revogar a evidência anterior.", 500);
-    }
-  }
-  const { error } = await cliente.from("tef_evidencias_instalacao").insert({
-    empresa_id: ctx.empresaId,
-    dispositivo_id: plano.registro.dispositivo_id,
-    terminal_id: plano.registro.terminal_id,
-    instalacao_id: plano.registro.instalacao_id,
-    ponto_captura: plano.registro.ponto_captura,
-    estabelecimento: plano.registro.estabelecimento,
-    ambiente: plano.registro.ambiente,
-    origem: "instalacao_controlada",
-    assinatura: plano.registro.assinatura,
-  });
-  if (error) {
-    throw new ErroTef("Não foi possível registrar a evidência de instalação.", 500);
-  }
-  return {
-    ok: true as const,
-    ambiente: plano.registro.ambiente,
-    origem: "instalacao_controlada" as const,
-  };
+}): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 async function lerServidoresOficiais(empresaId: string) {
   const cliente = createAdminClient();
@@ -875,144 +398,16 @@ export async function prepararInstalacaoAssistenteSessao(input: {
   credencialInformada: boolean;
   autorizacaoExplicitaReset: boolean;
   proposta: { pontoCaptura: string; ambiente: string; servidor: string } | null;
-}) {
-  const pagina = await lerPaginaAssistenteTef();
-  const proposta = input.proposta
-    ? {
-        pontoCaptura: String(input.proposta.pontoCaptura ?? "").trim().slice(0, 40),
-        ambiente:
-          input.proposta.ambiente === "producao" || input.proposta.ambiente === "homologacao"
-            ? input.proposta.ambiente
-            : "",
-        servidor: String(input.proposta.servidor ?? "").trim().slice(0, 200),
-      }
-    : null;
-  const servidores = await lerServidoresOficiais(pagina.empresaId);
-  const servidorAtual =
-    pagina.ambienteAtual === "producao" ? servidores.servidorProducao : servidores.servidorHomologacao;
-  const rascunho = pagina.rascunho;
-  let pontoOficial = pagina.empresaJaHabilitada ? pagina.pontoAtual : rascunho?.pontoCaptura ?? "";
-  let ambienteOficial = pagina.empresaJaHabilitada
-    ? pagina.ambienteAtual
-    : rascunho?.ambienteAutorizado ?? "";
-  let servidorOficial = pagina.empresaJaHabilitada
-    ? servidorAtual
-    : ambienteOficial === "producao"
-      ? rascunho?.servidorProducao ?? ""
-      : rascunho?.servidorHomologacao ?? "";
-  const estabelecimentoOficial = pagina.empresaJaHabilitada
-    ? pagina.estabelecimentoAtual
-    : rascunho?.estabelecimento ?? "";
-  if (pagina.empresaJaHabilitada && pagina.pontoAtual.trim() && proposta) {
-    pontoOficial = proposta.pontoCaptura || pontoOficial;
-    ambienteOficial = proposta.ambiente || ambienteOficial;
-    servidorOficial = proposta.servidor || servidorOficial;
-  }
-  const dispositivoId = String(input.dispositivoId ?? "").trim().toLowerCase();
-  const terminais = ID_EVIDENCIA.test(dispositivoId)
-    ? await terminaisDaObservacao(pagina.empresaId, dispositivoId)
-    : [];
-  const destaEmpresa = terminais.filter((item) => item.empresaId === pagina.empresaId);
-  const pendencias = await pendenciasDaEmpresa(pagina.empresaId);
-  const decisao = decidirInstalacaoControlada({
-    empresaSessaoId: pagina.empresaId,
-    empresaInformada: "",
-    permissaoEditar: pagina.permissaoEditar,
-    administrador: pagina.administrador,
-    plataformaHabilitada: pagina.plataformaHabilitada,
-    pendenciaFinanceira: pendencias > 0,
-    confirmacaoExplicita: input.confirmacaoExplicita === true,
-    credencialInformada: input.credencialInformada === true,
-    pontoJaInstalado: pagina.empresaJaHabilitada && pagina.pontoAtual.trim() !== "",
-    procedimentoOficialConfirmado: false,
-    autorizacaoExplicitaReset: input.autorizacaoExplicitaReset === true,
-    pontoAtual: pagina.pontoAtual,
-    ambienteAtual: pagina.ambienteAtual,
-    servidorAtual,
-    pontoOficial,
-    ambienteOficial,
-    servidorOficial,
-    cnpjEmpresa: pagina.cnpj,
-    estabelecimentoOficial,
-    pontoVinculado: destaEmpresa[0]?.pontoCaptura ?? "",
-    ambienteVinculado: "",
-    servidorVinculado: "",
-    dispositivoPareado: destaEmpresa.length > 0,
-    dispositivoOutraEmpresa:
-      terminais.some((item) => item.empresaId !== pagina.empresaId) && destaEmpresa.length === 0,
-  });
-  return {
-    ok: true as const,
-    efeito: decisao.efeito,
-    motivo: decisao.motivo,
-    atual: {
-      cnpj: pagina.cnpj,
-      pontoCaptura: pagina.pontoAtual,
-      ambiente: pagina.ambienteAtual,
-      servidor: servidorAtual,
-      estabelecimento: pagina.estabelecimentoAtual,
-      instalado: pagina.empresaJaHabilitada && pagina.pontoAtual.trim() !== "",
-    },
-  };
+}): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 export async function prepararBibliotecaProducaoSessao(input: {
   confirmacaoExplicita: boolean;
   dispositivoId: string;
   credencialInformada: boolean;
-}) {
-  const pagina = await lerPaginaAssistenteTef();
-  const pastas = diretoriosRelativosBiblioteca();
-  const dispositivoId = String(input.dispositivoId ?? "").trim().toLowerCase();
-  const terminais = ID_EVIDENCIA.test(dispositivoId)
-    ? await terminaisDaObservacao(pagina.empresaId, dispositivoId)
-    : [];
-  const destaEmpresa = terminais.filter((item) => item.empresaId === pagina.empresaId);
-  const pendencias = await pendenciasDaEmpresa(pagina.empresaId);
-  const pontoOficial = pagina.empresaJaHabilitada
-    ? pagina.pontoAtual
-    : pagina.rascunho?.pontoCaptura ?? "";
-  const ambienteOficial = pagina.empresaJaHabilitada
-    ? pagina.ambienteAtual
-    : pagina.rascunho?.ambienteAutorizado ?? "";
-  const servidorOficial = pagina.servidorProducao;
-  const estabelecimentoOficial = pagina.empresaJaHabilitada
-    ? pagina.estabelecimentoAtual
-    : pagina.rascunho?.estabelecimento ?? "";
-  const decisao = decidirInstalacaoProducaoIsolada({
-    empresaSessaoId: pagina.empresaId,
-    empresaInformada: "",
-    permissaoEditar: pagina.permissaoEditar,
-    administrador: pagina.administrador,
-    plataformaHabilitada: pagina.plataformaHabilitada,
-    pendenciaFinanceira: pendencias > 0,
-    confirmacaoExplicita: input.confirmacaoExplicita === true,
-    credencialInformada: input.credencialInformada === true,
-    pontoOficial,
-    ambienteOficial,
-    servidorOficial,
-    cnpjEmpresa: pagina.cnpj,
-    estabelecimentoOficial,
-    pontoVinculado: destaEmpresa[0]?.pontoCaptura ?? "",
-    ambienteVinculado: "",
-    servidorVinculado: "",
-    dispositivoPareado: destaEmpresa.length > 0,
-    dispositivoOutraEmpresa:
-      terminais.some((item) => item.empresaId !== pagina.empresaId) && destaEmpresa.length === 0,
-    diretorioSandbox: pastas.sandbox,
-    diretorioProducao: pastas.producao,
-  });
-  return {
-    ok: true as const,
-    efeito: decisao.efeito,
-    motivo: decisao.motivo,
-    diretorio: decisao.efeito === "instalar" ? ("producao" as const) : ("" as const),
-    pastaSandbox: pastas.sandbox,
-    pastaProducao: pastas.producao,
-    pontoCaptura: pontoOficial,
-    servidor: servidorOficial,
-    estabelecimento: estabelecimentoOficial,
-    gravaBanco: false as const,
-    apagaSandbox: false as const,
-  };
+}): Promise<any>  {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+

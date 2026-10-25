@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -18,6 +18,7 @@ import {
   auditarAcl,
   avaliarMigracao,
   concederAcessoProcesso,
+  contaTemAcessoNaAcl,
   contaProcessoTef,
   diretorioPaiPersistido,
   diretoriosOperacionais,
@@ -318,21 +319,7 @@ test("o seletor e o agente não apagam dados nem iniciam cobrança", async () =>
   const fonte = await fs.readFile(path.join(raizRepo, "print-agent", "src", "tef-pasta.mjs"), "utf8");
   assert.equal(fonte.includes("PW_iInit"), false);
   assert.equal(fonte.includes("PWOPER_"), false);
-  const agente = await fs.readFile(path.join(raizRepo, "tef-agent", "UltraPDVTef.lpr"), "utf8");
-  const inicio = agente.indexOf("function AplicarDiretorioBiblioteca");
-  const fim = agente.indexOf("function PedidoInformaIdentidade");
-  const rotina = agente.slice(inicio, fim);
-  assert.match(rotina, /nao cria, copia nem apaga arquivos/);
-  assert.equal(rotina.includes("DeleteFile"), false);
-  assert.match(rotina, /diretorioPai|PaiExplicito/);
-  const inicioInit = agente.indexOf("procedure InicializarTEF");
-  const fimInit = agente.indexOf("function TextoComprovante");
-  const inicializacao = agente.slice(inicioInit, fimInit);
-  assert.equal(inicializacao.includes("PWOPER_INSTALL"), false);
-  assert.equal(inicializacao.includes("EfetuarPagamento"), false);
-  assert.equal(inicializacao.includes("Desfazer"), false);
-  assert.match(inicializacao, /diretorioPai/);
-  assert.match(inicializacao, /DiretorioPwInitObservado/);
+  await assert.rejects(fs.access(path.join(raizRepo, "tef-agent", "UltraPDVTef.lpr")));
   assert.match(fonte, /windowsHide: false/);
   const tela = await fs.readFile(
     path.join(raizRepo, "components", "pdv", "tef-pasta-form.tsx"),
@@ -402,6 +389,7 @@ function criarGerenciadorPasta(arquivoPasta, extras = {}) {
     classificarUnidadePasta: async () => "local",
     restringirPasta: async () => ({ ok: true }),
     instalacaoAutomatica: false,
+    listarDiretorioBiblioteca: async () => [],
     ...extras,
   });
   return { gerenciador, processos };
@@ -472,6 +460,9 @@ test("a migração copia só o que falta e interrompe arquivo divergente", async
     () => {}
   );
   assert.equal(auditarAcl("Everyone:(F)").ok, false);
+  assert.equal(auditarAcl("BUILTIN\\Users:(OI)(CI)(M)").ok, false);
+  assert.equal(auditarAcl("BUILTIN\\Administradores:(OI)(CI)(F)").ok, false);
+  assert.equal(auditarAcl("Everyone:(DENY)(W)\ncaixa:(M)").ok, true);
 });
 
 test("acesso negado em PGWeb\\Data preserva certificado, .pos, log e pendência", async () => {
@@ -678,19 +669,48 @@ test("homologação não é migrada e a ACL usa o SID do processo TEF", async ()
 
   const sid = "S-1-5-21-1-2-3-1001";
   const chamadas = [];
+  let gravavel = false;
+  const fsApi = {
+    access: async () => {
+      if (!gravavel) {
+        const erro = new Error("acesso");
+        erro.code = "EACCES";
+        throw erro;
+      }
+    },
+    writeFile: async () => {},
+    readFile: async () => "ultrapdv",
+    rename: async () => {},
+    unlink: async () => {},
+  };
+  let leituras = 0;
   const acl = await concederAcessoProcesso(
     path.join(destino, "Data"),
-    async (comando, args) => {
-      chamadas.push([comando, args]);
-      return `S-1-5-21-1-2-3-1001:(OI)(CI)(M)\nNT AUTHORITY\\SYSTEM:(OI)(CI)(F)\nBUILTIN\\Administrators:(OI)(CI)(F)`;
+    async (_comando, args) => {
+      chamadas.push(args);
+      if (args.includes("/grant")) {
+        gravavel = true;
+        return "ok";
+      }
+      leituras += 1;
+      if (leituras === 1) {
+        return "NT AUTHORITY\\SYSTEM:(OI)(CI)(F)";
+      }
+      return `${sid}:(OI)(CI)(M)\nNT AUTHORITY\\SYSTEM:(OI)(CI)(F)`;
     },
-    { uid: sid, username: "caixa" }
+    { uid: sid, username: "caixa" },
+    fsApi
   );
   assert.equal(acl.ok, true);
-  assert.equal(chamadas[0][1].includes("/inheritance:r"), false);
-  assert.equal(chamadas[0][1].includes(`*${sid}:(OI)(CI)(M)`), true);
-  assert.equal(chamadas[0][1].includes("caixa:(M)"), false);
-  assert.equal(chamadas[0][1].some((item) => /everyone|todos|users:\\(f\\)/i.test(item)), false);
+  assert.equal(acl.alterada, true);
+  const grant = chamadas.find((args) => args.includes("/grant"));
+  assert.ok(grant);
+  assert.equal(grant.includes("/inheritance:r"), false);
+  assert.equal(grant.includes(`*${sid}:(OI)(CI)(M)`), true);
+  assert.equal(grant.includes("*S-1-5-18:(OI)(CI)(F)"), false);
+  assert.equal(grant.includes("*S-1-5-4:(OI)(CI)(M)"), false);
+  assert.equal(grant.includes("caixa:(M)"), false);
+  assert.equal(grant.slice(1).some((item) => /everyone|todos|\\users/i.test(item)), false);
   assert.equal(contaProcessoTef({ uid: sid }), `*${sid}`);
   assert.equal(contaProcessoTef({ uid: 1000, username: "caixa" }), "");
 
@@ -702,13 +722,7 @@ test("homologação não é migrada e a ACL usa o SID do processo TEF", async ()
     path.join(efetivo, "Data", "Backup"),
     path.join(efetivo, "Log"),
   ]);
-  const agente = readFileSync(path.join(raizRepo, "tef-agent", "UltraPDVTef.lpr"), "utf8");
-  const inicio = agente.indexOf("procedure InicializarTEF");
-  const chamada = agente.indexOf("if not AplicarDiretorioBiblioteca(", inicio);
-  const inicializar = agente.indexOf("TEF.Inicializar;", chamada);
-  assert.ok(chamada > 0 && chamada < inicializar);
-  assert.match(agente.slice(chamada, inicializar), /TextoDados\(Dados, 'diretorioPai'\)/);
-  assert.match(agente, /Biblioteca := IncludeTrailingPathDelimiter\(Pai\) \+ 'PGWeb'/);
+  assert.equal(existsSync(path.join(raizRepo, "tef-agent", "UltraPDVTef.lpr")), false);
 });
 
 test("inicialização usa a pasta padrão, a personalizada e preserva a anterior se PW_iInit falhar", async () => {
@@ -1007,30 +1021,274 @@ test("acesso negado e falha ao criar diretório identificam a pasta, a operaçã
   );
 });
 
-test("a ACL da pasta usa o SID do processo e a sessão interativa, sem Todos e sem remover negação", async () => {
+function fsAcessoComprovado() {
+  return {
+    access: async () => {},
+    writeFile: async (_alvo, _dados, opcoes) => {
+      assert.equal(opcoes?.flag, "wx");
+    },
+    readFile: async () => "ultrapdv",
+    rename: async () => {},
+    unlink: async () => {},
+  };
+}
+
+test("a ACL da pasta existente não é alterada quando a conta do processo já grava", async () => {
   const sid = "S-1-5-21-1-2-3-1001";
   const chamadas = [];
   const acl = await concederAcessoProcesso(
     "D:\\dados\\PGWeb\\Data",
-    async (comando, args) => {
+    async (_comando, args) => {
       chamadas.push(args);
-      return "NT AUTHORITY\\SYSTEM:(OI)(CI)(F)\nBUILTIN\\Administrators:(OI)(CI)(F)\n*S-1-5-4:(OI)(CI)(M)";
+      return [
+        "C:\\ProgramData\\UltraPDV\\TEF\\Producao\\PGWeb TERMINAL2\\rfoll:(OI)(CI)(M)",
+        "AUTORIDADE NT\\INTERATIVO:(OI)(CI)(M)",
+        "BUILTIN\\Administradores:(OI)(CI)(F)",
+        "AUTORIDADE NT\\SISTEMA:(OI)(CI)(F)",
+      ].join("\n");
     },
-    { uid: sid, username: "caixa" }
+    { uid: sid, username: "rfoll" },
+    fsAcessoComprovado()
   );
   assert.equal(acl.ok, true);
-  const grant = chamadas[0].join(" ");
-  assert.equal(grant.includes("/inheritance:r"), false);
-  assert.equal(grant.includes("/remove"), false);
-  assert.equal(grant.includes("/deny"), false);
-  assert.equal(grant.includes("*S-1-5-18:(OI)(CI)(F)"), true);
-  assert.equal(grant.includes("*S-1-5-32-544:(OI)(CI)(F)"), true);
-  assert.equal(grant.includes("*S-1-5-4:(OI)(CI)(M)"), true);
-  assert.equal(grant.includes(`*${sid}:(OI)(CI)(M)`), true);
-  assert.equal(/S-1-1-0|S-1-5-32-545|everyone|todos/iu.test(grant), false);
+  assert.equal(acl.alterada, false);
+  assert.equal(acl.agente, "herda-token-do-connector");
+  assert.equal(chamadas.some((args) => args.includes("/grant")), false);
+  assert.equal(chamadas.some((args) => args.includes("/inheritance:r")), false);
+  assert.equal(
+    contaTemAcessoNaAcl(chamadas.length ? "TERMINAL2\\rfoll:(OI)(CI)(M)" : "", { sid, usuario: "rfoll" }),
+    true
+  );
   const semConta = entradasAclDiretorio("");
-  assert.equal(semConta.includes("*S-1-5-4:(OI)(CI)(M)"), true);
+  assert.equal(semConta.includes("*S-1-5-18:(OI)(CI)(F)"), true);
+  assert.equal(semConta.includes("*S-1-5-32-544:(OI)(CI)(F)"), true);
+  assert.equal(semConta.includes("*S-1-5-4:(OI)(CI)(M)"), false);
   assert.equal(semConta.some((item) => item.includes("caixa")), false);
+});
+
+test("falha real do icacls preserva o código e não abre permissão ampla", async () => {
+  const sid = "S-1-5-21-1-2-3-1001";
+  const chamadas = [];
+  const fsApi = {
+    access: async () => {
+      const erro = new Error("acesso");
+      erro.code = "EACCES";
+      throw erro;
+    },
+  };
+  const acl = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async (_comando, args) => {
+      chamadas.push(args);
+      if (args.includes("/grant")) {
+        const erro = new Error("Command failed: icacls.exe");
+        erro.status = 5;
+        erro.code = 5;
+        erro.stderr = "Acesso negado.\r\n";
+        throw erro;
+      }
+      return "BUILTIN\\Administradores:(OI)(CI)(F)";
+    },
+    { uid: sid, username: "rfoll" },
+    fsApi
+  );
+  assert.equal(acl.ok, false);
+  assert.equal(acl.operacao, "icacls /grant");
+  assert.equal(acl.codigoErro, "5");
+  assert.match(acl.mensagem, /código 5/);
+  assert.match(acl.mensagem, /Acesso negado/);
+  assert.match(acl.mensagem, /alterar a ACL/);
+  const grant = chamadas.find((args) => args.includes("/grant"));
+  assert.deepEqual(grant.slice(1), ["/grant", `*${sid}:(OI)(CI)(M)`]);
+  assert.equal(grant.some((item) => /S-1-1-0|S-1-5-4|S-1-5-32-545|everyone|todos/i.test(item)), false);
+});
+
+test("identidade incorreta e ACL ampla não autorizam a preparação", async () => {
+  const sid = "S-1-5-21-9-9-9-1001";
+  const chamadas = [];
+  const outra = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async (_comando, args) => {
+      chamadas.push(args);
+      return "TERMINAL2\\rfoll:(OI)(CI)(M)";
+    },
+    { uid: sid, username: "caixa" },
+    fsAcessoComprovado()
+  );
+  assert.equal(outra.ok, false);
+  assert.equal(outra.codigoErro, "IDENTIDADE");
+  assert.equal(outra.alterada, false);
+  assert.equal(chamadas.some((args) => args.includes("/grant")), false);
+
+  const ampla = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async () => "BUILTIN\\Users:(OI)(CI)(M)\nTERMINAL2\\rfoll:(OI)(CI)(M)",
+    { uid: "S-1-5-21-1-2-3-1001", username: "rfoll" },
+    fsAcessoComprovado()
+  );
+  assert.equal(ampla.ok, false);
+  assert.equal(ampla.codigoErro, "ACL_AMPLA");
+  assert.match(ampla.mensagem, /não foi alterada/i);
+
+  const semSid = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async (comando) => {
+      if (comando === "whoami.exe") {
+        const erro = new Error("whoami");
+        erro.code = "ENOENT";
+        throw erro;
+      }
+      return "BUILTIN\\Administradores:(OI)(CI)(F)";
+    },
+    { uid: -1, username: "rfoll" },
+    fsAcessoComprovado()
+  );
+  assert.equal(semSid.ok, false);
+  assert.equal(semSid.operacao, "whoami");
+  assert.equal(semSid.codigoErro, "SEM_SID");
+
+  assert.equal(
+    contaTemAcessoNaAcl("AUTORIDADE NT\\INTERATIVO:(OI)(CI)(M)", {
+      sid: "S-1-5-4",
+      usuario: "INTERATIVO",
+    }),
+    false
+  );
+  assert.equal(
+    contaTemAcessoNaAcl("Everyone:(OI)(CI)(F)", { sid: "S-1-1-0", usuario: "Everyone" }),
+    false
+  );
+  assert.equal(
+    contaTemAcessoNaAcl("BUILTIN\\Users:(OI)(CI)(M)", { sid: "S-1-5-32-545", usuario: "Users" }),
+    false
+  );
+  assert.equal(
+    contaTemAcessoNaAcl("AUTORIDADE NT\\Usuários autenticados:(OI)(CI)(M)", {
+      sid: "S-1-5-11",
+      usuario: "Usuários autenticados",
+    }),
+    false
+  );
+  assert.equal(
+    contaTemAcessoNaAcl("S-1-5-21-1-2-3-1001:(OI)(CI)(M)", {
+      sid: "S-1-5-21-1-2-3-1001",
+      usuario: "caixa",
+    }),
+    true
+  );
+  assert.equal(
+    contaTemAcessoNaAcl("S-1-5-21-1-2-3-1001:(OI)(CI)(M)", {
+      sid: "S-1-5-21-9-9-9-1001",
+      usuario: "caixa",
+    }),
+    false
+  );
+});
+
+test("o SID efetivo do whoami reutiliza a pasta e grupo amplo não comprova a conta", async () => {
+  const sid = "S-1-5-21-7-8-9-1001";
+  const csv = `"User Name","SID"\r\n"TERMINAL2\\caixa","${sid}"\r\n`;
+  const chamadas = [];
+  const comSid = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async (comando, args) => {
+      chamadas.push([comando, args]);
+      if (comando === "whoami.exe") {
+        return csv;
+      }
+      return `${sid}:(OI)(CI)(M)\nAUTORIDADE NT\\INTERATIVO:(OI)(CI)(M)`;
+    },
+    { uid: -1, username: "outro" },
+    fsAcessoComprovado()
+  );
+  assert.equal(comSid.ok, true);
+  assert.equal(comSid.alterada, false);
+  assert.equal(chamadas.some((item) => item[1]?.includes("/grant")), false);
+  assert.equal(chamadas.some((item) => item[0] === "whoami.exe" && item[1]?.includes("/user")), true);
+
+  const soInterativo = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async (comando) => (comando === "whoami.exe" ? csv : "AUTORIDADE NT\\INTERATIVO:(OI)(CI)(M)"),
+    { uid: -1, username: "caixa" },
+    fsAcessoComprovado()
+  );
+  assert.equal(soInterativo.ok, false);
+  assert.equal(soInterativo.codigoErro, "IDENTIDADE");
+  assert.equal(soInterativo.alterada, false);
+
+  const grupo = await concederAcessoProcesso(
+    "D:\\dados\\PGWeb\\Data",
+    async (comando) =>
+      comando === "whoami.exe"
+        ? `"User Name","SID"\r\n"AUTORIDADE NT\\INTERATIVO","S-1-5-4"\r\n`
+        : "AUTORIDADE NT\\INTERATIVO:(OI)(CI)(M)",
+    { uid: -1, username: "INTERATIVO" },
+    fsAcessoComprovado()
+  );
+  assert.equal(grupo.ok, false);
+  assert.equal(grupo.codigoErro, "SEM_SID");
+  assert.equal(grupo.alterada, false);
+});
+
+test("o teste de gravação é exclusivo e não altera arquivos PayGo", async () => {
+  const raiz = await fs.mkdtemp(path.join(os.tmpdir(), "ultrapdv-gravacao-"));
+  const pasta = path.join(raiz, "PGWeb", "Data");
+  await fs.mkdir(pasta, { recursive: true });
+  const pos = path.join(pasta, "nota.pos");
+  const certificado = path.join(pasta, "certificado.crt");
+  await fs.writeFile(pos, "original-pos", "utf8");
+  await fs.writeFile(certificado, "original-crt", "utf8");
+  const antes = (await fs.readdir(pasta)).sort();
+  const ok = await testarGravacaoPasta(pasta);
+  assert.equal(ok.ok, true);
+  assert.equal(await fs.readFile(pos, "utf8"), "original-pos");
+  assert.equal(await fs.readFile(certificado, "utf8"), "original-crt");
+  assert.deepEqual((await fs.readdir(pasta)).sort(), antes);
+
+  let apagou = false;
+  const bloqueado = await testarGravacaoPasta(pasta, {
+    access: async (alvo) => {
+      if (path.win32.basename(String(alvo)).startsWith(".ultrapdv-teste-")) {
+        const erro = new Error("ausente");
+        erro.code = "ENOENT";
+        throw erro;
+      }
+    },
+    writeFile: async (_alvo, _dados, opcoes) => {
+      assert.equal(opcoes?.flag, "wx");
+    },
+    readFile: async () => "ultrapdv",
+    rename: async () => {},
+    unlink: async () => {
+      const erro = new Error("bloqueado");
+      erro.code = "EBUSY";
+      throw erro;
+    },
+  });
+  assert.equal(bloqueado.ok, false);
+  assert.match(bloqueado.mensagem, /remover o arquivo temporário/);
+  assert.equal(await fs.readFile(certificado, "utf8"), "original-crt");
+
+  const criacao = await testarGravacaoPasta(pasta, {
+    access: async (alvo) => {
+      if (path.win32.basename(String(alvo)).startsWith(".ultrapdv-teste-")) {
+        const erro = new Error("ausente");
+        erro.code = "ENOENT";
+        throw erro;
+      }
+    },
+    writeFile: async () => {
+      const erro = new Error("existe");
+      erro.code = "EEXIST";
+      throw erro;
+    },
+    unlink: async () => {
+      apagou = true;
+    },
+  });
+  assert.equal(criacao.ok, false);
+  assert.equal(apagou, false);
+  assert.match(criacao.mensagem, /exclusivo/);
 });
 
 test("falha de gravação preserva o financeiro e a tentativa seguinte recupera a pasta", async () => {
@@ -1162,7 +1420,7 @@ test("pasta confirmada inicia sem arquivo temporário e a biblioteca informa o p
   assert.equal(concessoes, 0);
   const sucesso = await inicio;
   assert.equal(sucesso.ok, true);
-  assert.equal(sucesso.tef.inicializado, true);
+  assert.equal("inicializado" in sucesso.tef, false);
   assert.equal(sucesso.tef.retornoPwInit, 0);
   assert.notEqual(sucesso.tef.biblioteca?.cobrancaPermitida, true);
   assert.equal(liberado.processos[0].stdin.partes.length, 1);
@@ -1237,7 +1495,7 @@ test("pasta confirmada inicia sem arquivo temporário e a biblioteca informa o p
   assert.equal(falhaBiblioteca.ok, false);
   assert.match(falhaBiblioteca.erro, /Código -2485 PWRET_WRITERR/);
   assert.equal(falhaBiblioteca.erro.includes(efetivo), true);
-  assert.equal(falhaBiblioteca.tef.inicializado, false);
+  assert.equal("inicializado" in falhaBiblioteca.tef, false);
   assert.equal(falhaBiblioteca.tef.retornoPwInit, -2485);
   assert.equal(concessoes, 0);
   const pago = await biblioteca.gerenciador.pagar({ identificador: "VENDA", valor: 1 });
@@ -1289,7 +1547,7 @@ test("pendência financeira não prepara outra pasta nem apaga o .pos", async ()
   assert.equal(pago.ok, false);
 });
 
-test("a pasta padrão é enviada ao agente só depois do teste de gravação", async () => {
+test("o perfil autônomo é enviado ao agente só depois do teste de gravação", async () => {
   const raiz = await fs.mkdtemp(path.join(os.tmpdir(), "ultrapdv-padrao-"));
   const programData = path.join(raiz, "ProgramData");
   const pai = path.join(programData, "UltraPDV", "TEF", "Producao");
@@ -1348,7 +1606,8 @@ test("a pasta padrão é enviada ao agente só depois do teste de gravação", a
     retornoPwInit: 0,
     retornoPwInitNome: "PWRET_OK",
   });
-  assert.equal(pedido.dados.diretorioPai, pai);
+  assert.match(pedido.dados.diretorioPai, /\\TEF\\Producao\\perfis\\[0-9a-f-]{36}$/i);
+  assert.notEqual(path.win32.normalize(pedido.dados.diretorioPai), path.win32.normalize(pai));
   const semProgramData = await prepararPastaPadraoInstalador({});
   assert.equal(semProgramData.ok, false);
   assert.match(semProgramData.mensagem, /ProgramData/);

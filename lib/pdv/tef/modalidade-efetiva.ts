@@ -1,7 +1,7 @@
 import { classificarFormaTef, type FormaTef, type ModalidadeTef } from "@/lib/pdv/tef/regras";
 
 /**
- * PWINFO_CARDTYPE da PGWebLib, lido pelo ACBr em TACBrTEFResp.
+ * PWINFO_CARDTYPE da PGWebLib, lido por PW_iGetResult.
  * 1 = crédito e 2 = débito. Qualquer outro valor, soma ou texto não vira modalidade.
  */
 export const TPAG_CREDITO = "03";

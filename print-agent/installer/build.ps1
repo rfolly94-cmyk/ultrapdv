@@ -49,6 +49,7 @@ $obrigatorios = @(
   (Join-Path $raiz "src\tray.mjs"),
   (Join-Path $raiz "src\pagina-status.html"),
   (Join-Path $raiz "launcher\start.vbs"),
+  (Join-Path $raiz "launcher\supervisor.ps1"),
   (Join-Path $raiz "launcher\tray.ps1"),
   (Join-Path $raiz "config\origins.json"),
   (Join-Path $raiz "THIRD-PARTY-NOTICES.txt"),
@@ -163,13 +164,25 @@ if ($pkgAtualizado -ne $pkgRaw) {
 New-Item -ItemType Directory -Force -Path $generated, $dist | Out-Null
 $setupOut = Join-Path $dist "$setupName.exe"
 
-Write-Info "Limpando Setup antigos em dist..."
-Get-ChildItem -Path $dist -File -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -like "*Setup*.exe" -or $_.Name -like "UltraPDV-Conector*" } |
-  ForEach-Object {
-    Write-Info ("  removendo {0}" -f $_.Name)
-    Remove-Item -LiteralPath $_.FullName -Force
+if (Test-Path -LiteralPath $setupOut) {
+  $infoAnterior = Get-Item -LiteralPath $setupOut
+  $versaoAnterior = [string]$infoAnterior.VersionInfo.ProductVersion
+  if ($versaoAnterior -match '^(\d+\.\d+\.\d+)') {
+    $versaoAnterior = $Matches[1]
+  } else {
+    $versaoAnterior = $infoAnterior.LastWriteTime.ToString("yyyyMMdd-HHmmss")
   }
+  $rollback = Join-Path $dist "$setupName-$versaoAnterior.exe"
+  if ($versaoAnterior -eq $productVersion -or (Test-Path -LiteralPath $rollback)) {
+    $rollback = Join-Path $dist "$setupName-$versaoAnterior-$($infoAnterior.LastWriteTime.ToString('yyyyMMdd-HHmmss')).exe"
+  }
+  Write-Info "Preservando Setup anterior para rollback: $rollback"
+  Copy-Item -LiteralPath $setupOut -Destination $rollback -Force
+  if (-not (Test-Path -LiteralPath $rollback)) {
+    Write-Fail "Nao foi possivel preservar o Setup anterior."
+    exit 1
+  }
+}
 
 Write-Info "Limpando staging/cache anterior..."
 if (Test-Path $staging) {
@@ -180,9 +193,8 @@ if ($productVersion -notmatch '^\d+\.\d+\.\d+$') {
   Write-Fail "A versao do Connector precisa ser numerica."
   exit 1
 }
-$nomeAgente = [string]$versao.agenteTef
-if ($nomeAgente -ne "UltraPDVTef_1313.exe") {
-  Write-Fail "Esta atualizacao deve distribuir UltraPDVTef_1313.exe e manter UltraPDVTef_139.exe intacto."
+if ([string]$versao.agenteTef) {
+  Write-Fail "O pacote nao distribui mais o agente Pascal."
   exit 1
 }
 $setupOutNsis = ConvertTo-NsisPath $setupOut
@@ -194,7 +206,6 @@ $nsh = @"
 !define SETUP_NAME "$setupName"
 !define SETUP_OUTFILE "$setupOutNsis"
 !define STAGING_DIR "$stagingNsis"
-!define TEF_EXE_NAME "$nomeAgente"
 "@
 Set-Content -Path (Join-Path $generated "version.nsh") -Value $nsh -Encoding ASCII
 
@@ -232,70 +243,35 @@ if ($appFiles -notcontains "tef-prova.mjs" -or $appFiles -notcontains "tef-recup
 foreach ($nome in $appFiles) {
   Copy-Item (Join-Path $raiz "src\$nome") (Join-Path $staging "app\$nome")
 }
-$tefExe = Join-Path $raiz "bin\tef\$nomeAgente"
-if (-not (Test-Path -LiteralPath $tefExe -PathType Leaf)) {
-  throw "Executavel TEF nao encontrado: $tefExe"
-}
-$hashAgente1313 = "F1E32D1B339B07378B828A0076B088B83F18B1945E996D7B539090D8D4C4EA61"
-$hashAgente = (Get-FileHash -Algorithm SHA256 -LiteralPath $tefExe).Hash
-if ($hashAgente -ne $hashAgente1313) {
-  Write-Fail "O agente TEF nao e o binario conferido."
-  Write-Host "  esperado: $hashAgente1313"
-  Write-Host "  obtido:   $hashAgente"
+$exesLegados = @(Get-ChildItem -LiteralPath (Join-Path $raiz "bin\tef") -Filter "UltraPDVTef*.exe" -File -ErrorAction SilentlyContinue)
+if ($exesLegados.Count -gt 0) {
+  Write-Fail "O diretorio bin\tef ainda contem executavel do agente Pascal."
   exit 1
 }
-$hash139Esperado = "EE9909238404931649F98A7437C499D257BB3080E1D23F89DEA5A2CF60814904"
-$agente139 = Join-Path $raiz "bin\tef\UltraPDVTef_139.exe"
-if (-not (Test-Path -LiteralPath $agente139)) {
-  Write-Fail "UltraPDVTef_139.exe precisa permanecer no diretorio para rollback."
+$dllOrigem = Join-Path $raiz "bin\tef\PGWebLib.dll"
+$hashDllEsperado = "D17AC81323396AE172648935B0B797B74705B1CA01C9AE0CD3B2FF78119D4220"
+if (-not (Test-Path -LiteralPath $dllOrigem)) {
+  Write-Fail "PGWebLib.dll x64 4.1.50.924 ausente em bin\tef."
   exit 1
 }
-$hash139 = (Get-FileHash -Algorithm SHA256 -LiteralPath $agente139).Hash
-if ($hash139 -ne $hash139Esperado) {
-  Write-Fail "UltraPDVTef_139.exe foi alterado. A compilacao 1.3.9 precisa permanecer intacta."
-  Write-Host "  esperado: $hash139Esperado"
-  Write-Host "  obtido:   $hash139"
+$hashDll = (Get-FileHash -Algorithm SHA256 -LiteralPath $dllOrigem).Hash
+if ($hashDll -ne $hashDllEsperado) {
+  Write-Fail "A integridade da PGWebLib.dll nao confere com o kit 4.1.50.924."
+  Write-Host "  esperado: $hashDllEsperado"
+  Write-Host "  obtido:   $hashDll"
   exit 1
 }
-$agenteAnterior = Join-Path $raiz "bin\tef\UltraPDVTef_138.exe"
-if (Test-Path -LiteralPath $agenteAnterior) {
-  $hashAnteriorEsperado = "C51E326DC6B0FD4D6D91810C46F0132147D450E531C93B02366A14C2F6D12C56"
-  $hashAnterior = (Get-FileHash -Algorithm SHA256 -LiteralPath $agenteAnterior).Hash
-  if ($hashAnterior -ne $hashAnteriorEsperado) {
-    Write-Fail "UltraPDVTef_138.exe foi alterado. A compilacao anterior precisa permanecer intacta."
-    Write-Host "  esperado: $hashAnteriorEsperado"
-    Write-Host "  obtido:   $hashAnterior"
-    exit 1
-  }
-}
-Write-Info "Agente TEF conferido: $hashAgente"
-Copy-Item -LiteralPath $tefExe -Destination (Join-Path $staging "bin\tef\$nomeAgente") -ErrorAction Stop
-$hashDepoisDaCopia = (Get-FileHash -Algorithm SHA256 -LiteralPath $tefExe).Hash
-if ($hashDepoisDaCopia -ne $hashAgente1313) {
-  Write-Fail "A copia para o instalador alterou UltraPDVTef_1313.exe."
+$assinaturaDll = Get-AuthenticodeSignature -LiteralPath $dllOrigem
+$assuntoDll = [string]$assinaturaDll.SignerCertificate.Subject
+if ($assinaturaDll.Status -ne "Valid" -or $assuntoDll -notmatch "SETIS Automacao e Sistemas Ltda") {
+  Write-Fail "A assinatura da PGWebLib.dll nao foi confirmada como SETIS."
   exit 1
 }
-$agenteTexto = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($tefExe))
-foreach ($marca in @("117473", "pos-transac-sb.tpgweb.io", "42.741.754/0001-42", "6696546", "pos-transac.pgweb.io")) {
-  if ($agenteTexto.Contains($marca)) {
-    Write-Fail "O agente TEF contem ponto, servidor ou documento fixo: $marca"
-    exit 1
-  }
-}
-if (-not $agenteTexto.Contains("bibliotecaInstalada") -or -not $agenteTexto.Contains("pontoSolicitado") -or -not $agenteTexto.Contains("diretorioBiblioteca")) {
-  Write-Fail "O agente TEF nao informa a pasta nem a observacao da biblioteca."
-  exit 1
-}
-foreach ($marcaAgente in @("tipoCartao", "PWINFO_CARDTYPE", "UltraPDV\TEF\Producao", "PROGRAMDATA")) {
-  if (-not $agenteTexto.Contains($marcaAgente)) {
-    Write-Fail "O agente TEF nao declara a producao em ProgramData nem o tipo do cartao: $marcaAgente"
-    exit 1
-  }
-}
+Copy-Item -LiteralPath $dllOrigem -Destination (Join-Path $staging "bin\tef\PGWebLib.dll") -ErrorAction Stop
 $extrasTef = Get-ChildItem -LiteralPath (Join-Path $staging "bin\tef") -Recurse -Force |
-  Where-Object { $_.Name -ne $nomeAgente }
+  Where-Object { $_.Name -ne "PGWebLib.dll" }
 if ($extrasTef) {
-  Write-Fail "O pacote TEF so pode levar $nomeAgente. O executavel antigo e os dados do PayGo ficam na maquina."
+  Write-Fail "O pacote TEF so pode levar a PGWebLib.dll. Journals, certificados e o executavel antigo ficam na maquina."
   $extrasTef | ForEach-Object { Write-Host "  $($_.FullName)" }
   exit 1
 }
@@ -307,30 +283,48 @@ if (-not (Test-Path -LiteralPath $pacoteTef)) {
   exit 1
 }
 $pacoteObj = Get-Content -Raw $pacoteTef | ConvertFrom-Json
-if ([string]$pacoteObj.executavel -ne ("bin/tef/" + $nomeAgente)) {
-  Write-Fail "tef-pacote.json aponta para $($pacoteObj.executavel), mas a versao $productVersion exige bin/tef/$nomeAgente."
+if ([string]$pacoteObj.executavel) {
+  Write-Fail "tef-pacote.json ainda aponta para um executavel Pascal."
   exit 1
 }
-if (-not $agenteTexto.Contains("1.3.13") -or -not $agenteTexto.Contains("PortaPinPad") -or -not $agenteTexto.Contains("LIMITE_REPETICOES_PPCOMM")) {
-  Write-Fail "O agente TEF nao e a compilacao 1.3.13 com o diagnostico de pinpad."
+if ([string]$pacoteObj.dll -ne "bin/tef/PGWebLib.dll") {
+  Write-Fail "tef-pacote.json nao aponta para a PGWebLib.dll x64."
   exit 1
-}
-if ($agenteTexto.Contains("COM7")) {
-  Write-Fail "O agente TEF nao pode forcar a COM7."
-  exit 1
-}
-foreach ($marcaNova in @("diretorioPai", "diretorioPwInit", "retornoPwInit", "retornoPwInitNome")) {
-  if (-not $agenteTexto.Contains($marcaNova)) {
-    Write-Fail "O agente TEF nao informa o diretorio enviado a PW_iInit: $marcaNova"
-    exit 1
-  }
 }
 Copy-Item $pacoteTef (Join-Path $staging "tef-pacote.json")
 Copy-Item $sumatra (Join-Path $staging "print-engine\SumatraPDF.exe")
 Copy-Item $sumatraDll (Join-Path $staging "print-engine\libmupdf.dll")
 Copy-Item (Join-Path $raiz "licenses\*") (Join-Path $staging "licenses") -Recurse -Force
 Copy-Item (Join-Path $raiz "launcher\start.vbs") (Join-Path $staging "launcher\start.vbs")
+Copy-Item (Join-Path $raiz "launcher\supervisor.ps1") (Join-Path $staging "launcher\supervisor.ps1")
 Copy-Item (Join-Path $raiz "launcher\tray.ps1") (Join-Path $staging "launcher\tray.ps1")
+$koffiOrigem = Join-Path $raiz "node_modules\koffi"
+$koffiNativo = Join-Path $raiz "node_modules\@koromix\koffi-win32-x64\win32_x64\koffi.node"
+if (-not (Test-Path -LiteralPath $koffiNativo)) {
+  Write-Fail "O carregador nativo koffi win32-x64 nao esta em node_modules. A PGWebLib nao seria carregada pelo Connector."
+  exit 1
+}
+$koffiDestino = Join-Path $staging "app\node_modules\koffi"
+New-Item -ItemType Directory -Force -Path $koffiDestino | Out-Null
+foreach ($parte in @("package.json", "LICENSE.txt", "index.js", "index.cjs", "indirect.js", "indirect.cjs", "src", "lib")) {
+  $item = Join-Path $koffiOrigem $parte
+  if (Test-Path -LiteralPath $item) {
+    Copy-Item -LiteralPath $item -Destination (Join-Path $koffiDestino $parte) -Recurse -Force
+  }
+}
+$koromix = Join-Path $staging "app\node_modules\@koromix"
+New-Item -ItemType Directory -Force -Path $koromix | Out-Null
+Copy-Item -Path (Join-Path $raiz "node_modules\@koromix\koffi-win32-x64") -Destination $koromix -Recurse -Force
+$nativoDestino = Join-Path $koromix "koffi-win32-x64\win32_x64\koffi.node"
+if (-not (Test-Path -LiteralPath $nativoDestino)) {
+  Write-Fail "A copia do koffi win32-x64 nao chegou ao staging."
+  exit 1
+}
+$licencaKoffi = Get-Content -Raw (Join-Path $koffiDestino "LICENSE.txt")
+if ($licencaKoffi -notmatch "MIT") {
+  Write-Fail "A licenca do koffi nao e a MIT esperada."
+  exit 1
+}
 Copy-Item (Join-Path $raiz "config\origins.json") (Join-Path $staging "config\origins.json")
 Copy-Item (Join-Path $raiz "THIRD-PARTY-NOTICES.txt") (Join-Path $staging "THIRD-PARTY-NOTICES.txt")
 

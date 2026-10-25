@@ -12,6 +12,10 @@ export function pastaConfigMaquina(env = process.env) {
 }
 
 export function candidatosPastaConfig(env = process.env) {
+  const isolada = String(env.ULTRAPDV_CONFIG_DIR ?? "").trim();
+  if (isolada) {
+    return [isolada];
+  }
   const lista = [];
   const programData = String(env.PROGRAMDATA || env.ALLUSERSPROFILE || "").trim();
   const localApp = String(env.LOCALAPPDATA || "").trim();
@@ -86,20 +90,71 @@ export async function carregarConfigLocal({
   return configPadrao();
 }
 
+const CHAVES_CONFIG = new Set([
+  "preferredPort",
+  "activePort",
+  "lastPrinter",
+  "lastPaper",
+  "drawerEnabled",
+  "drawerPin",
+]);
+
+function extrasPreservados(bruto) {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const extras = {};
+  for (const [chave, valor] of Object.entries(bruto)) {
+    if (CHAVES_CONFIG.has(chave) || chave.startsWith("_")) continue;
+    extras[chave] = valor;
+  }
+  return extras;
+}
+
+async function gravarAtomico(fsApi, arquivo, json) {
+  if (typeof fsApi.rename !== "function") {
+    await fsApi.writeFile(arquivo, json, "utf8");
+    return;
+  }
+  const temporario = `${arquivo}.${process.pid}.tmp`;
+  await fsApi.writeFile(temporario, json, "utf8");
+  try {
+    await fsApi.rename(temporario, arquivo);
+  } catch (erro) {
+    if (erro?.code === "EEXIST" || erro?.code === "EPERM") {
+      await fsApi.rm?.(arquivo, { force: true });
+      await fsApi.rename(temporario, arquivo);
+      return;
+    }
+    await fsApi.rm?.(temporario, { force: true });
+    throw erro;
+  }
+}
+
 export async function salvarConfigLocal(patch, { env = process.env, fsApi = fs } = {}) {
-  const atual = await carregarConfigLocal({ env, fsApi });
+  let bruto = {};
+  for (const pasta of candidatosPastaConfig(env)) {
+    try {
+      bruto = JSON.parse(await fsApi.readFile(path.join(pasta, "print-agent.json"), "utf8"));
+      break;
+    } catch {
+      bruto = {};
+    }
+  }
+  const atual = sanitizar(bruto);
   const proxima = sanitizar({ ...atual, ...patch });
-  const json = `${JSON.stringify(proxima, null, 2)}\n`;
+  const gravada = { ...extrasPreservados(bruto), ...proxima };
+  const json = `${JSON.stringify(gravada, null, 2)}\n`;
+  let ultimoErro = null;
   for (const pasta of candidatosPastaConfig(env)) {
     try {
       await fsApi.mkdir(pasta, { recursive: true });
       const arquivo = path.join(pasta, "print-agent.json");
-      await fsApi.writeFile(arquivo, json, "utf8");
+      await gravarAtomico(fsApi, arquivo, json);
       ultimoArquivo = arquivo;
       return proxima;
-    } catch {
-      continue;
+    } catch (erro) {
+      ultimoErro = erro;
     }
   }
+  if (ultimoErro) throw ultimoErro;
   return proxima;
 }

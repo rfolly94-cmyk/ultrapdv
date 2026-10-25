@@ -1,0 +1,13 @@
+﻿zig.exe : In file included from C:\ultrapdv\UltraPDV.TEF\native\sonda-header-oficial.c:1:
+No C:\Users\rfoll\AppData\Local\Temp\ps-script-aa0f9ab8-c456-412c-9564-37ddc819e4bd.ps1:112 caractere:1
++ & $zig cc -target x86_64-windows-gnu "-I$sdk" -o (Join-Path $out "son ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (In file include...er-oficial.c:1::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+C:\ultrapdv-backup-tef-20261023-093138\20260923-Integracao-PGWebLib_v4.1.50.924/PGWebLib.h:92:10: fatal error: 
+'PWL_Type.h' file not found
+   92 | #include "PWL_Type.h"
+      |          ^~~~~~~~~~~~
+1 error generated.
+SONDA_EXIT 1

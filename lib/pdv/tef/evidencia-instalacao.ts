@@ -238,6 +238,7 @@ export function consultarEvidenciaArmazenada(input: {
   dispositivoAutorizado: string;
   terminalAutorizadoId: string;
   pontoTerminal: string;
+  pontoHomologacao?: string;
   estabelecimentoTerminal: string;
   ambienteDeclarado: AmbienteEvidenciaInstalacao | "";
   evento: EventoRevogacaoEvidencia;
@@ -267,7 +268,9 @@ export function consultarEvidenciaArmazenada(input: {
   if (!input.chavePublicaPem || !identificador(input.terminalAutorizadoId)) {
     return recusar(
       input.ambienteDeclarado,
-      "O terminal vinculado ainda não permite conferir a evidência de instalação.",
+      input.evidencia.campos.ambiente === "homologacao"
+        ? "A chave de homologação ainda não está vinculada a esta empresa."
+        : "O terminal vinculado ainda não permite conferir a evidência de instalação.",
       false
     );
   }
@@ -312,10 +315,15 @@ export function consultarEvidenciaArmazenada(input: {
       true
     );
   }
-  if (campos.pontoCaptura !== limpar(input.pontoTerminal)) {
+  const comparaHomologacao =
+    campos.ambiente === "homologacao" && input.pontoHomologacao !== undefined;
+  const pontoEsperado = comparaHomologacao ? limpar(input.pontoHomologacao ?? "") : limpar(input.pontoTerminal);
+  if (campos.pontoCaptura !== pontoEsperado) {
     return recusar(
       input.ambienteDeclarado,
-      "A evidência de instalação deixou de valer porque o ponto de captura mudou.",
+      comparaHomologacao
+        ? "A evidência de homologação não confere com o ponto de homologação da empresa."
+        : "A evidência de instalação deixou de valer porque o ponto de captura mudou.",
       true
     );
   }
@@ -363,6 +371,7 @@ export function prepararRegistroEvidencia(input: {
     dispositivoAutorizado: input.dispositivoAutorizado,
     terminalAutorizadoId: input.terminalAutorizadoId,
     pontoTerminal: input.pontoAutorizado,
+    pontoHomologacao: input.campos.ambiente === "homologacao" ? input.pontoAutorizado : undefined,
     estabelecimentoTerminal: input.estabelecimentoAutorizado,
     ambienteDeclarado: "",
     evento: "nenhum",

@@ -209,7 +209,7 @@ test("7. F2 no pagamento continua concluindo a venda", () => {
     "utf8"
   );
   assert.match(shell, /event\.key === "F2"/);
-  assert.match(shell, /if \(modalPagamento\) \{[\s\S]*?finalizar\(\);/);
+  assert.match(shell, /if \(modalPagamento\) \{[\s\S]*?concluirVenda\(\);/);
   assert.match(shell, /event\.key === "F3"/);
   assert.match(shell, /event\.key === "Escape"/);
   assert.match(shell, /data-pagamento-formas/);

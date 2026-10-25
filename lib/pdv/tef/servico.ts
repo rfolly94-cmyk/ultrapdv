@@ -3,6 +3,11 @@ import "server-only";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { juntarComprovante } from "@/lib/pdv/tef/ambiente-transacao";
+import {
+  autorizarComputadorHomologacao,
+  selecionarPontoDoAmbiente,
+  terminalExclusivoHomologacao,
+} from "@/lib/pdv/tef/configuracao-paygo";
 
 import { ErroAcessoSessao } from "@/lib/auth/contexto-autorizado";
 import { resolverContextoAutorizadoEmpresa } from "@/lib/auth/contexto-autorizado";
@@ -13,6 +18,7 @@ import { exigirOperacaoPdv } from "@/lib/pdv/acesso-operacao";
 import {
   definirTefPlataforma,
   desfazerTefPersistido,
+  recuperarSimulacaoTefPersistida,
   dispositivoAtivoDeOutraEmpresa,
   ErroTef,
   iniciarTefPersistido,
@@ -21,6 +27,7 @@ import {
   liberarConfirmacaoTefPersistida,
   listarPendenciasTefPersistidas,
   marcarPendenciaFormaTefPersistida,
+  diagnosticoPinpadBloqueado,
   listarTerminaisAtivosEmpresa,
   marcarConfirmacaoTefPersistida,
   registrarDesfazimentoTefPersistido,
@@ -28,12 +35,20 @@ import {
   reservarOperacoesTefParaVenda,
   revogarTerminalTef,
   autorizarPareamentoTef,
+  alinharTerminaisAoPontoSalvo,
   carregarFatosSincronizacaoVinculo,
   consultarConflitoChaveTef,
   concluirPareamentoTef,
   salvarConfigTefEmpresa,
+  gravarServidoresPayGoEmpresa,
+  lerServidoresPayGoEmpresa,
+  lerPerfilHomologacaoEmpresa,
+  instalacaoPayGoConfirmada,
+  salvarIdentidadeHomologacao,
   substituirAutorizacaoTerminalTef,
 } from "@/lib/pdv/tef/persistencia";
+import { aceitarVinculoIdentidadeHomologacao } from "@/lib/pdv/tef/identidade-homologacao";
+import { credencialPayGoDoAmbiente, persistirConfiguracaoPayGo, validarConfiguracaoPayGo, type EstadoConfiguracaoPayGo } from "@/lib/pdv/tef/configuracao-paygo";
 import { tipoCartaoOficial } from "@/lib/pdv/tef/modalidade-efetiva";
 import { hashSegredoVinculo, verificarIdentidadeTef, verificarProvaTef } from "@/lib/pdv/tef/prova";
 import { fingerprintChavePublicaEd25519 } from "@/lib/pdv/tef/fingerprint-chave";
@@ -73,9 +88,45 @@ async function sessaoPdv() {
   return ctx;
 }
 
+function resumirPendencias(
+  pendencias: Awaited<ReturnType<typeof listarPendenciasTefPersistidas>>
+) {
+  return pendencias.map((item) => ({
+    id: item.id,
+    status: item.status,
+    valorCentavos: item.valorCentavos,
+    modalidade: item.modalidade,
+    modalidadeSolicitada: item.modalidadeSolicitada,
+    modalidadeEfetiva: item.modalidadeEfetiva,
+    tipoCartaoPayGo: item.tipoCartaoPayGo,
+    diagnostico: item.diagnostico,
+    proibirDesfazimento: item.proibirDesfazimento,
+    origem: item.origem,
+    rotulo: item.rotulo,
+    simulacao: item.simulacao,
+    recuperarNoCaixa: item.recuperarNoCaixa,
+    identificador: item.identificador,
+    terminalCodigo: item.terminalCodigo,
+  }));
+}
+
 export async function lerConfigTefSessao() {
   const ctx = await sessaoPdv();
   const habilitacao = await lerHabilitacaoTef(ctx.supabase, ctx.empresaId);
+  const perfil = await lerPerfilHomologacaoEmpresa(ctx.empresaId);
+  const pontoCapturaProducao = habilitacao.pontoCaptura;
+  const pontoHomologacao = perfil.pontoHomologacao;
+  const selecao = selecionarPontoDoAmbiente({
+    ambiente: habilitacao.ambienteGravado,
+    pontoCapturaProducao,
+    pontoHomologacao,
+  });
+  const pontos = {
+    pontoCaptura: pontoCapturaProducao,
+    pontoCapturaProducao,
+    pontoHomologacao,
+    pontoCapturaAtivo: selecao.ok ? selecao.pontoCapturaAtivo : "",
+  };
   if (!habilitacao.habilitado) {
     return {
       ok: true as const,
@@ -84,35 +135,67 @@ export async function lerConfigTefSessao() {
       plataformaHabilitada: habilitacao.plataformaHabilitada,
       permitirOperacaoManual: habilitacao.permitirOperacaoManual,
       migracaoPendente: habilitacao.migracaoPendente,
+      ambiente: habilitacao.ambienteGravado,
+      ...pontos,
       pendencias: [],
     };
   }
-  const pendencias = await listarPendenciasTefPersistidas(ctx.empresaId);
-  return {
-    ok: true as const,
-    habilitado: true,
-    empresaHabilitada: true,
-    plataformaHabilitada: true,
+  const pendencias = resumirPendencias(await listarPendenciasTefPersistidas(ctx.empresaId));
+  const base = {
+    habilitado: true as const,
+    empresaHabilitada: true as const,
+    plataformaHabilitada: true as const,
     permitirOperacaoManual: habilitacao.permitirOperacaoManual,
-    migracaoPendente: false,
-    ambiente: habilitacao.ambiente,
+    migracaoPendente: false as const,
+    ambiente: habilitacao.ambienteGravado,
     estabelecimento: habilitacao.estabelecimento,
-    pontoCaptura: habilitacao.pontoCaptura,
-    pendencias: pendencias.map((item) => ({
-      id: item.id,
-      status: item.status,
-      valorCentavos: item.valorCentavos,
-      modalidade: item.modalidade,
-      modalidadeSolicitada: item.modalidadeSolicitada,
-      modalidadeEfetiva: item.modalidadeEfetiva,
-      tipoCartaoPayGo: item.tipoCartaoPayGo,
-      diagnostico: item.diagnostico,
-      proibirDesfazimento: item.proibirDesfazimento,
-      identificador: item.identificador,
-      terminalCodigo: item.terminalCodigo,
-    })),
+    ...pontos,
+    pendencias,
     empresaId: ctx.empresaId,
   };
+  if (!selecao.ok) {
+    return { ok: false as const, codigo: selecao.codigo, mensagem: selecao.erro, ...base };
+  }
+  return { ok: true as const, ...base };
+}
+
+export async function lerTerminalHomologacaoSessao() {
+  const config = await lerConfigTefSessao();
+  if (!("empresaId" in config) || !config.empresaId || config.ambiente !== "homologacao") {
+    return { ok: false as const, codigo: "perfil" as const, config };
+  }
+  if (config.ok === false) {
+    return { ok: false as const, codigo: config.codigo, config };
+  }
+  const servidores = await lerServidoresPayGoEmpresa(config.empresaId);
+  const decisao = terminalExclusivoHomologacao({
+    empresaId: config.empresaId,
+    empresaOrigem: config.empresaId,
+    identificador: config.pontoHomologacao,
+    pontoHomologacao: config.pontoHomologacao,
+    servidorHomologacao: servidores.servidorHomologacao,
+    servidorProducao: servidores.servidorProducao,
+  });
+  if (!decisao.ok) {
+    return { ok: false as const, codigo: decisao.codigo, config };
+  }
+  return { ok: true as const, config, posid: decisao.posid, terminalCodigo: decisao.terminalCodigo };
+}
+
+export async function autorizarComputadorHomologacaoSessao(dispositivoId: string, posid: string) {
+  const ctx = await sessaoPdv();
+  const terminais = await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
+  return autorizarComputadorHomologacao({
+    empresaId: ctx.empresaId,
+    dispositivoId,
+    posid,
+    terminais: terminais.map((terminal) => ({
+      empresaId: ctx.empresaId,
+      dispositivoId: terminal.dispositivoId,
+      codigo: terminal.codigo,
+      ativo: true,
+    })),
+  });
 }
 
 export async function iniciarTefSessao(body: Record<string, unknown>) {
@@ -234,6 +317,14 @@ export async function desfazerTefSessao(body: Record<string, unknown>) {
   });
 }
 
+export async function recuperarSimulacaoTefSessao(body: Record<string, unknown>) {
+  const ctx = await sessaoPdv();
+  return recuperarSimulacaoTefPersistida({
+    empresaId: ctx.empresaId,
+    operacaoId: uuid(body.operacaoId),
+  });
+}
+
 export async function registrarDesfazimentoTefSessao(body: Record<string, unknown>) {
   const ctx = await sessaoPdv();
   return registrarDesfazimentoTefPersistido({
@@ -304,13 +395,7 @@ export async function revogarTerminalTefSessao(terminalId: string) {
   });
 }
 
-export async function salvarConfigTefSessao(input: {
-  habilitado: boolean;
-  ambiente: "homologacao" | "producao";
-  estabelecimento: string;
-  pontoCaptura: string;
-  permitirOperacaoManual?: boolean;
-}) {
+async function estadoConfiguracaoDaSessao() {
   const ctx = await resolverContextoAutorizadoEmpresa();
   try {
     await exigirPermissao({ modulo: "financeiro", acao: "editar" });
@@ -320,32 +405,130 @@ export async function salvarConfigTefSessao(input: {
     }
     throw error;
   }
-  const estabelecimento = input.estabelecimento.trim().slice(0, 40);
-  const pontoCaptura = input.pontoCaptura.trim().slice(0, 40);
-  if (input.habilitado && (!estabelecimento || !pontoCaptura)) {
-    throw new ErroTef("Informe o estabelecimento e o ponto de captura.");
+  const atual = await lerHabilitacaoTef(ctx.supabase, ctx.empresaId);
+  const [servidores, perfil, homologacaoConfirmada, producaoConfirmada] = await Promise.all([
+    lerServidoresPayGoEmpresa(ctx.empresaId),
+    lerPerfilHomologacaoEmpresa(ctx.empresaId),
+    instalacaoPayGoConfirmada(ctx.empresaId, "homologacao"),
+    instalacaoPayGoConfirmada(ctx.empresaId, "producao"),
+  ]);
+  const ambiente: EstadoConfiguracaoPayGo["ambiente"] =
+    atual.ambiente === "producao" || atual.ambiente === "homologacao" ? atual.ambiente : "";
+  return {
+    ctx,
+    estado: {
+      habilitado: atual.habilitado,
+      ambiente,
+      estabelecimento: atual.estabelecimento,
+      cnpjInstalacao: perfil.cnpjInstalacao,
+      cnpjProducao: perfil.cnpjProducao,
+      pontoCaptura: atual.pontoCaptura,
+      pontoHomologacao: perfil.pontoHomologacao,
+      servidorHomologacao: servidores.servidorHomologacao,
+      servidorProducao: servidores.servidorProducao,
+      permitirOperacaoManual: atual.permitirOperacaoManual,
+      instalacaoHomologacaoConfirmada: homologacaoConfirmada,
+      instalacaoProducaoConfirmada: producaoConfirmada,
+    },
+  };
+}
+
+export async function validarConfiguracaoTefSessao(input: {
+  habilitado: boolean;
+  ambiente: "homologacao" | "producao";
+  estabelecimento: string;
+  cnpjInstalacao: string;
+  pontoCaptura: string;
+  servidor: string;
+}) {
+  const { estado } = await estadoConfiguracaoDaSessao();
+  return validarConfiguracaoPayGo(estado, { ...input, habilitado: true });
+}
+
+export async function salvarConfigTefSessao(input: {
+  habilitado: boolean;
+  ambiente: "homologacao" | "producao";
+  estabelecimento: string;
+  cnpjInstalacao: string;
+  pontoCaptura: string;
+  servidor: string;
+  permitirOperacaoManual?: boolean;
+}) {
+  const { ctx, estado: atual } = await estadoConfiguracaoDaSessao();
+  if (atual.ambiente && atual.ambiente !== input.ambiente) {
+    const abertas = await listarPendenciasTefPersistidas(ctx.empresaId);
+    if (abertas.length > 0) {
+      throw new ErroTef("Há transação TEF em aberto. O ambiente não foi alterado.");
+    }
+  }
+  const plano = persistirConfiguracaoPayGo(atual, input);
+  if (!plano.ok) {
+    throw new ErroTef(plano.erro);
   }
   await salvarConfigTefEmpresa(ctx.empresaId, {
-    habilitado: input.habilitado,
-    ambiente: input.ambiente === "producao" ? "producao" : "homologacao",
-    estabelecimento,
-    pontoCaptura,
+    habilitado: plano.estado.habilitado,
+    ambiente: plano.estado.ambiente === "producao" ? "producao" : "homologacao",
+    estabelecimento: plano.estado.estabelecimento,
+    cnpjInstalacao: plano.estado.cnpjInstalacao,
+    cnpjProducao: plano.estado.cnpjProducao,
+    pontoCaptura: plano.estado.pontoCaptura,
+    pontoHomologacao: plano.estado.pontoHomologacao,
     permitirOperacaoManual: input.permitirOperacaoManual,
   });
-  return { ok: true as const };
+  if (plano.associacao === "gravar") {
+    await gravarServidoresPayGoEmpresa(ctx.empresaId, {
+      ambiente: plano.estado.ambiente === "producao" ? "producao" : "homologacao",
+      estabelecimento: plano.estado.estabelecimento,
+      pontoCaptura: plano.estado.pontoCaptura,
+      servidorHomologacao: plano.estado.servidorHomologacao,
+      servidorProducao: plano.estado.servidorProducao,
+    });
+  }
+  const producao = plano.estado.ambiente === "producao";
+  await alinharTerminaisAoPontoSalvo(ctx.empresaId, {
+    ambiente: producao ? "producao" : "homologacao",
+    pontoAtivo: producao ? plano.estado.pontoCaptura : plano.estado.pontoHomologacao,
+    pontoOutro: producao ? plano.estado.pontoHomologacao : plano.estado.pontoCaptura,
+    estabelecimento: plano.estado.estabelecimento,
+    servidor: producao ? plano.estado.servidorProducao : plano.estado.servidorHomologacao,
+    cnpj: producao ? plano.estado.cnpjProducao : plano.estado.cnpjInstalacao,
+  });
+  return { ok: true as const, associacao: plano.associacao };
 }
 
 export async function lerConfigTefAdministrativa() {
   const ctx = await resolverContextoAutorizadoEmpresa();
   await exigirPermissao({ modulo: "financeiro", acao: "editar" });
   const config = await lerHabilitacaoTef(ctx.supabase, ctx.empresaId);
-  const terminais = config.migracaoPendente
+  const [perfil, instalacaoHomologacaoConfirmada, instalacaoProducaoConfirmada] = config.migracaoPendente
+    ? [{ cnpjInstalacao: "", cnpjProducao: "", pontoHomologacao: "" }, false, false]
+    : await Promise.all([
+        lerPerfilHomologacaoEmpresa(ctx.empresaId),
+        instalacaoPayGoConfirmada(ctx.empresaId, "homologacao"),
+        instalacaoPayGoConfirmada(ctx.empresaId, "producao"),
+      ]);
+  const servidores = await lerServidoresPayGoEmpresa(ctx.empresaId);
+  const producao = config.ambiente === "producao";
+  await alinharTerminaisAoPontoSalvo(ctx.empresaId, {
+    ambiente: producao ? "producao" : "homologacao",
+    pontoAtivo: producao ? config.pontoCaptura : perfil.pontoHomologacao,
+    pontoOutro: producao ? perfil.pontoHomologacao : config.pontoCaptura,
+    estabelecimento: config.estabelecimento,
+    servidor: producao ? servidores.servidorProducao : servidores.servidorHomologacao,
+    cnpj: producao ? perfil.cnpjProducao : perfil.cnpjInstalacao,
+  });
+  const terminaisAlinhados = config.migracaoPendente
     ? []
     : await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
   return {
     ...config,
+    cnpjInstalacao: perfil.cnpjInstalacao,
+    cnpjProducao: perfil.cnpjProducao,
+    pontoHomologacao: perfil.pontoHomologacao,
+    instalacaoHomologacaoConfirmada,
+    instalacaoProducaoConfirmada,
     empresaId: ctx.empresaId,
-    terminais,
+    terminais: terminaisAlinhados,
     podeRevogar: true as const,
   };
 }
@@ -369,7 +552,7 @@ export async function prepararAcessoPinpad(dispositivoId: string) {
       403
     );
   }
-  if (terminal.temPendencia) {
+  if (await diagnosticoPinpadBloqueado(ctx.supabase, ctx.empresaId, terminal.id)) {
     throw new ErroTef("Terminal ocupado com operação financeira.", 409);
   }
   return {
@@ -379,6 +562,201 @@ export async function prepararAcessoPinpad(dispositivoId: string) {
     estabelecimento: terminal.estabelecimento,
     desafio: randomBytes(32).toString("hex"),
   };
+}
+
+export async function autorizarDiagnosticoHomologacao(dispositivoId: string) {
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  try {
+    await exigirPermissao({ modulo: "financeiro", acao: "editar" });
+  } catch (error) {
+    if (error instanceof ErroPermissao) {
+      throw new ErroTef(error.message, error.status);
+    }
+    throw error;
+  }
+  const id = uuid(dispositivoId);
+  const terminais = await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
+  const terminal = terminais.find((item) => item.dispositivoId === id);
+  if (!terminal) {
+    throw new ErroTef("Este computador não está autorizado para o TEF desta empresa.", 403);
+  }
+  if (await diagnosticoPinpadBloqueado(ctx.supabase, ctx.empresaId, terminal.id)) {
+    throw new ErroTef("Terminal ocupado com operação financeira.", 409);
+  }
+  const [perfil, servidores, habilitacao] = await Promise.all([
+    lerPerfilHomologacaoEmpresa(ctx.empresaId),
+    lerServidoresPayGoEmpresa(ctx.empresaId),
+    lerHabilitacaoTef(ctx.supabase, ctx.empresaId),
+  ]);
+  const credencial = credencialPayGoDoAmbiente({
+    ambiente: "homologacao",
+    pontoCaptura: habilitacao.pontoCaptura,
+    pontoHomologacao: perfil.pontoHomologacao,
+    servidorHomologacao: servidores.servidorHomologacao,
+    servidorProducao: servidores.servidorProducao,
+    cnpjHomologacao: perfil.cnpjInstalacao,
+    cnpjProducao: perfil.cnpjProducao,
+    cnpjTerminal: "",
+  });
+  if (!credencial.ok) {
+    throw new ErroTef(credencial.erro, 409);
+  }
+  return { ok: true as const, autorizado: true as const };
+}
+
+export async function autorizarDiagnosticoComunicacao(dispositivoId: string) {
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  try {
+    await exigirPermissao({ modulo: "financeiro", acao: "editar" });
+  } catch (error) {
+    if (error instanceof ErroPermissao) {
+      throw new ErroTef(error.message, error.status);
+    }
+    throw error;
+  }
+  const id = uuid(dispositivoId);
+  const terminais = await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
+  const terminal = terminais.find((item) => item.dispositivoId === id);
+  if (!terminal) {
+    throw new ErroTef("Este computador não está autorizado para o TEF desta empresa.", 403);
+  }
+  if (await diagnosticoPinpadBloqueado(ctx.supabase, ctx.empresaId, terminal.id)) {
+    throw new ErroTef("Terminal ocupado com operação financeira.", 409);
+  }
+  const [perfil, servidores, habilitacao] = await Promise.all([
+    lerPerfilHomologacaoEmpresa(ctx.empresaId),
+    lerServidoresPayGoEmpresa(ctx.empresaId),
+    lerHabilitacaoTef(ctx.supabase, ctx.empresaId),
+  ]);
+  if (habilitacao.ambiente !== "producao") {
+    throw new ErroTef("O ambiente desta empresa não é produção. Nenhum teste foi enviado.", 409);
+  }
+  const credencial = credencialPayGoDoAmbiente({
+    ambiente: "producao",
+    pontoCaptura: habilitacao.pontoCaptura,
+    pontoHomologacao: perfil.pontoHomologacao,
+    servidorHomologacao: servidores.servidorHomologacao,
+    servidorProducao: servidores.servidorProducao,
+    cnpjHomologacao: perfil.cnpjInstalacao,
+    cnpjProducao: perfil.cnpjProducao,
+    cnpjTerminal: "",
+  });
+  if (!credencial.ok || credencial.ambiente !== "producao") {
+    throw new ErroTef(
+      credencial.ok ? "O ambiente desta empresa não é produção. Nenhum teste foi enviado." : credencial.erro,
+      409
+    );
+  }
+  return { ok: true as const, autorizado: true as const, ambiente: "producao" as const };
+}
+
+export async function credencialInstalacaoHomologacao(dispositivoId: string) {
+  const autorizado = await autorizarDiagnosticoHomologacao(dispositivoId);
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  const [perfil, servidores, habilitacao] = await Promise.all([
+    lerPerfilHomologacaoEmpresa(ctx.empresaId),
+    lerServidoresPayGoEmpresa(ctx.empresaId),
+    lerHabilitacaoTef(ctx.supabase, ctx.empresaId),
+  ]);
+  const credencial = credencialPayGoDoAmbiente({
+    ambiente: "homologacao",
+    pontoCaptura: habilitacao.pontoCaptura,
+    pontoHomologacao: perfil.pontoHomologacao,
+    servidorHomologacao: servidores.servidorHomologacao,
+    servidorProducao: servidores.servidorProducao,
+    cnpjHomologacao: perfil.cnpjInstalacao,
+    cnpjProducao: perfil.cnpjProducao,
+    cnpjTerminal: "",
+  });
+  if (!credencial.ok || credencial.ambiente !== "homologacao") {
+    throw new ErroTef("A instalação usa somente a configuração de homologação desta empresa.", 409);
+  }
+  const id = uuid(dispositivoId);
+  const terminais = await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
+  const terminal = terminais.find((item) => item.dispositivoId === id);
+  if (!terminal) {
+    throw new ErroTef("Este computador não está autorizado para o TEF desta empresa.", 403);
+  }
+  return {
+    autorizado,
+    credencial,
+    empresaId: ctx.empresaId,
+    terminal: {
+      id: terminal.id,
+      dispositivoId: terminal.dispositivoId,
+      estabelecimento: terminal.estabelecimento,
+    },
+  };
+}
+
+export async function credencialInstalacaoProducao(dispositivoId: string) {
+  await autorizarDiagnosticoComunicacao(dispositivoId);
+  const ctx = await resolverContextoAutorizadoEmpresa();
+  const [perfil, servidores, habilitacao] = await Promise.all([
+    lerPerfilHomologacaoEmpresa(ctx.empresaId),
+    lerServidoresPayGoEmpresa(ctx.empresaId),
+    lerHabilitacaoTef(ctx.supabase, ctx.empresaId),
+  ]);
+  const credencial = credencialPayGoDoAmbiente({
+    ambiente: "producao",
+    pontoCaptura: habilitacao.pontoCaptura,
+    pontoHomologacao: perfil.pontoHomologacao,
+    servidorHomologacao: servidores.servidorHomologacao,
+    servidorProducao: servidores.servidorProducao,
+    cnpjHomologacao: perfil.cnpjInstalacao,
+    cnpjProducao: perfil.cnpjProducao,
+    cnpjTerminal: "",
+  });
+  if (!credencial.ok || credencial.ambiente !== "producao") {
+    throw new ErroTef("A instalação de produção usa somente a configuração desta empresa.", 409);
+  }
+  const id = uuid(dispositivoId);
+  const terminais = await listarTerminaisAtivosEmpresa(ctx.supabase, ctx.empresaId);
+  const terminal = terminais.find((item) => item.dispositivoId === id);
+  if (!terminal) {
+    throw new ErroTef("Este computador não está autorizado para o TEF desta empresa.", 403);
+  }
+  return {
+    credencial,
+    empresaId: ctx.empresaId,
+    terminal: {
+      id: terminal.id,
+      dispositivoId: terminal.dispositivoId,
+      estabelecimento: terminal.estabelecimento,
+    },
+  };
+}
+
+export async function vincularIdentidadeHomologacaoSessao(input: {
+  dispositivoId: string;
+  chavePublica: string;
+  chaveId: string;
+  codigo: string;
+  assinaturaPareamento: string;
+}) {
+  const { empresaId, terminal } = await credencialInstalacaoHomologacao(input.dispositivoId);
+  const aceite = aceitarVinculoIdentidadeHomologacao({
+    empresaSessaoId: empresaId,
+    dispositivoInformado: input.dispositivoId,
+    terminalInformadoId: terminal.id,
+    dispositivoAutorizado: terminal.dispositivoId,
+    terminalAutorizadoId: terminal.id,
+    chavePublica: input.chavePublica,
+    chaveId: input.chaveId,
+    codigo: input.codigo,
+    assinaturaPareamento: input.assinaturaPareamento,
+  });
+  if (!aceite.ok) {
+    throw new ErroTef(aceite.motivo, 403);
+  }
+  await salvarIdentidadeHomologacao({
+    empresaId: aceite.registro.empresa_id,
+    terminalId: aceite.registro.terminal_id,
+    dispositivoId: aceite.registro.dispositivo_id,
+    chavePublica: aceite.registro.chave_publica,
+    chaveId: aceite.registro.chave_id,
+  });
+  return { ok: true as const, vinculada: true as const, chaveId: aceite.registro.chave_id };
 }
 
 export async function prepararAcessoPastaTef(dispositivoId: string) {

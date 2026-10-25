@@ -161,10 +161,10 @@ export function planejarSincronizacaoVinculo(
   const cnpjEmpresa = input.cnpjEmpresa.replace(/\D/g, "");
   const cnpjTerminal = terminal.cnpj.replace(/\D/g, "");
   if (cnpjEmpresa.length !== 14) {
-    return recusar("O cadastro da empresa não possui CNPJ.");
+    return recusar("O CNPJ de instalação deste ambiente não está definido.");
   }
   if (cnpjTerminal && cnpjTerminal !== cnpjEmpresa) {
-    return recusar("O CNPJ do terminal não confere com o cadastro da empresa.");
+    return recusar("O CNPJ do terminal não confere com o CNPJ de instalação deste ambiente.");
   }
   const servidorTerminal = servidorInformado(terminal.servidor);
   const servidorOficial = servidorInformado(input.config.servidor);
@@ -300,7 +300,6 @@ export function lerVinculoDoStatus(vinculo: {
 }
 
 export function exigirIdentidadeFiscalDoStatus(status: {
-  tef?: { agente?: { versao?: string } };
   vinculo?: {
     ambiente?: string;
     servidor?: string;
@@ -310,9 +309,6 @@ export function exigirIdentidadeFiscalDoStatus(status: {
   if (!status) {
     return false;
   }
-  if (versaoInformaIdentidadeFiscal(status.tef?.agente?.versao)) {
-    return true;
-  }
   const vinculo = status.vinculo;
   if (!vinculo || typeof vinculo !== "object") {
     return false;
@@ -321,14 +317,6 @@ export function exigirIdentidadeFiscalDoStatus(status: {
     Object.prototype.hasOwnProperty.call(vinculo, "ambiente") ||
     Object.prototype.hasOwnProperty.call(vinculo, "servidor") ||
     Object.prototype.hasOwnProperty.call(vinculo, "cnpjInformado")
-  );
-}
-
-export function processoTefAtivo(leitura: LeituraProcessoTef) {
-  return (
-    leitura.inicializado === true ||
-    leitura.processo === "executando" ||
-    leitura.processo === "iniciando"
   );
 }
 
@@ -394,14 +382,6 @@ export function avaliarProcessoAntesDeGravar(input: {
     };
   }
   const divergencias = divergenciasVinculo(local, input.vinculoAutorizado);
-  if (processoTefAtivo(input.processo) && divergencias.length > 0) {
-    return {
-      efeito: "recusar",
-      motivo:
-        "O processo TEF está ativo com identidade diferente do ponto oficial. Encerre o processo antes de sincronizar. A instalação não será chamada.",
-      divergencias,
-    };
-  }
   if (divergencias.length === 0) {
     return { efeito: "ja_sincronizado", motivo: "", divergencias: [] };
   }
@@ -504,7 +484,14 @@ export function concluirSincronizacaoLocal(input: {
       servidor?: string;
       cnpjInformado?: boolean;
     };
-    tef?: { processo?: string; agente?: { versao?: string } };
+    tef?: {
+      pgwebLib?: { pronta?: boolean };
+      processo?: string;
+      inicializado?: boolean;
+      transacaoPendenteConfirmacao?: boolean;
+      reconciliacaoNecessaria?: boolean;
+      agente?: { versao?: string };
+    };
   } | null;
   esperado: VinculoAutorizado;
   exigirIdentidadeFiscal?: boolean;
@@ -531,7 +518,7 @@ export function concluirSincronizacaoLocal(input: {
         terminalCodigo: lido.terminalCodigo.trim(),
         pontoCaptura: lido.pontoCaptura.trim(),
         estabelecimento: lido.estabelecimento.trim(),
-        processo: String(input.status?.tef?.processo ?? ""),
+        processo: input.status?.tef?.pgwebLib?.pronta === true ? "pronta" : "",
         ambiente: lido.informaIdentidadeFiscal ? lido.ambiente : "",
         servidor: lido.informaIdentidadeFiscal ? lido.servidor : "",
         cnpjInformado: lido.informaIdentidadeFiscal ? lido.cnpjInformado : false,

@@ -1,7 +1,9 @@
 {
   "nome": "UltraPDV Connector",
-  "executavel": "bin/tef/UltraPDVTef_1313.exe",
-  "dll": "C:\\Program Files (x86)\\PayGo\\PGWebLib\\x64\\PGWebLib.dll",
+  "executavel": "bin/tef/UltraPDVTef_1316.exe",
+  "dll": "bin/tef/PGWebLib.dll",
+  "dllVersao": "4.1.50.924",
+  "dllSha256": "d17ac81323396ae172648935b0b797b74705b1ca01c9ae0cd3b2ff78119d4220",
   "diretorioTrabalho": "bin/tef/TEF/PGWeb",
   "diretorioProducao": "C:/ProgramData/UltraPDV/TEF/Producao/PGWeb",
   "pontoProducao": "6696546",
@@ -20,10 +22,6 @@
     "%PROGRAMDATA%\\UltraPDV\\TEF\\Producao",
     "%PROGRAMDATA%\\UltraPDV\\backup-connector"
   ],
-  "compartilhadoForaDaPasta": [
-    "C:\\Program Files (x86)\\PayGo\\PGWebLib\\x64\\PGWebLib.dll",
-    "HKCU\\Environment\\PathPGWebLib_x64",
-    "C:\\ProgramData\\PayGo"
-  ],
+  "compartilhadoForaDaPasta": [],
   "cobranca": "bloqueada-sem-prova-da-biblioteca"
 }

@@ -83,6 +83,11 @@ Function BackupConnectorAnterior
   CopyFiles /SILENT "$INSTDIR\app\*.*" "$1\UltraPDV\backup-connector\anterior\app\"
   IfErrors backup_falhou
   CopyFiles /SILENT "$INSTDIR\version.json" "$1\UltraPDV\backup-connector\anterior\version.json"
+  IfFileExists "$INSTDIR\launcher\start.vbs" 0 backup_launcher_fim
+  CreateDirectory "$1\UltraPDV\backup-connector\anterior\launcher"
+  CopyFiles /SILENT "$INSTDIR\launcher\*.*" "$1\UltraPDV\backup-connector\anterior\launcher\"
+  IfErrors backup_falhou
+  backup_launcher_fim:
   StrCpy $FezBackup "1"
   Goto backup_fim
   backup_falhou:
@@ -98,6 +103,9 @@ Function RestaurarConnectorAnterior
   Call StopConnector
   CopyFiles /SILENT "$1\UltraPDV\backup-connector\anterior\app\*.*" "$INSTDIR\app\"
   CopyFiles /SILENT "$1\UltraPDV\backup-connector\anterior\version.json" "$INSTDIR\version.json"
+  IfFileExists "$1\UltraPDV\backup-connector\anterior\launcher\start.vbs" 0 restaurar_launcher_fim
+  CopyFiles /SILENT "$1\UltraPDV\backup-connector\anterior\launcher\*.*" "$INSTDIR\launcher\"
+  restaurar_launcher_fim:
   nsExec::ExecToLog '"$SYSDIR\wscript.exe" //nologo "$INSTDIR\launcher\start.vbs"'
   restaurar_fim:
 FunctionEnd
@@ -106,6 +114,22 @@ Section "UltraPDV Connector" SecPrincipal
   SectionIn RO
   SetRegView 64
   SetOverwrite on
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File "${STAGING_DIR}\runtime\node.exe"
+  File "${STAGING_DIR}\app\atualizacao-conector.mjs"
+  File "${STAGING_DIR}\app\conector-ciclo.mjs"
+  File "${STAGING_DIR}\app\portas.mjs"
+  nsExec::ExecToStack '"$PLUGINSDIR\node.exe" "$PLUGINSDIR\atualizacao-conector.mjs" --bloquear'
+  Pop $0
+  Pop $1
+  IntCmp $0 0 atualizacao_livre
+  StrCmp $1 "" 0 atualizacao_motivo
+  StrCpy $1 "A verificacao financeira nao iniciou. Nenhum journal foi lido e o Connector nao foi consultado."
+  atualizacao_motivo:
+  MessageBox MB_OK|MB_ICONSTOP "$1$\r$\n$\r$\nA atualizacao foi cancelada e nenhum arquivo foi alterado."
+  Abort
+  atualizacao_livre:
   Call StopConnector
   Call BackupConnectorAnterior
 
@@ -117,13 +141,15 @@ Section "UltraPDV Connector" SecPrincipal
   File "${STAGING_DIR}\app\*.mjs"
   File "${STAGING_DIR}\app\*.html"
   File "${STAGING_DIR}\app\version.json"
+  SetOutPath "$INSTDIR\app\node_modules\koffi"
+  File /r "${STAGING_DIR}\app\node_modules\koffi\*.*"
+  SetOutPath "$INSTDIR\app\node_modules\@koromix\koffi-win32-x64"
+  File /r "${STAGING_DIR}\app\node_modules\@koromix\koffi-win32-x64\*.*"
 
-  ; Acrescenta somente o executavel desta versao.
-  ; Executaveis TEF anteriores permanecem no diretorio para rollback.
-  ; SetOverwrite on substitui arquivo de mesmo nome. Um agente antigo
-  ; bloqueado pelo Windows nao entra neste File e nao e tocado.
+  ; Distribui somente a PGWebLib Windows x64. O agente Pascal nao entra no pacote.
+  ; Executaveis e dados ja presentes na maquina nao sao apagados por esta secao.
   SetOutPath "$INSTDIR\bin\tef"
-  File "${STAGING_DIR}\bin\tef\${TEF_EXE_NAME}"
+  File "${STAGING_DIR}\bin\tef\PGWebLib.dll"
 
   SetOutPath "$INSTDIR\print-engine"
   File "${STAGING_DIR}\print-engine\SumatraPDF.exe"
@@ -135,6 +161,7 @@ Section "UltraPDV Connector" SecPrincipal
   SetOutPath "$INSTDIR\launcher"
   File "${STAGING_DIR}\launcher\start.vbs"
   File "${STAGING_DIR}\launcher\tray.ps1"
+  File "${STAGING_DIR}\launcher\supervisor.ps1"
 
   SetOutPath "$INSTDIR\config"
   File "${STAGING_DIR}\config\origins.json"
@@ -205,7 +232,7 @@ Section "Uninstall"
   DeleteRegKey HKLM "Software\UltraPDV\Connector"
   ; A desinstalacao nao apaga tef-chave.json, tef-pendencia.json,
   ; tef-recuperacao.json, tef-vinculo.json, tef-pareamento.json,
-  ; tef-biblioteca.json, tef-pasta.json, backup-connector nem a pasta TEF\Producao.
+  ; tef-biblioteca.json, tef-pasta.json, tef-perfil-autonomo.json, backup-connector nem a pasta TEF\Producao.
   ReadEnvStr $1 PROGRAMDATA
   Delete "$1\UltraPDV\print-agent.json"
   Delete "$1\UltraPDV\print-agent.log"

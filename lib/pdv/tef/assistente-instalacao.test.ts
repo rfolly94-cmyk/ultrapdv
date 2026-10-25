@@ -60,8 +60,10 @@ function connector(parcial: Partial<LeituraConnector> = {}): LeituraConnector {
     respondeu: true,
     versao: "1.3.3",
     disponivel: true,
-    executavelEncontrado: true,
-    processo: "executando",
+    executavelEncontrado: false,
+    processo: null,
+    pgwebLibPronta: true,
+    pgwebVersao: null,
     paygoInicializado: true,
     ambienteEfetivo: null,
     situacaoAmbiente: "desconhecido",
@@ -634,11 +636,12 @@ test("biblioteca validada comprova produção e biblioteca sem prova permanece d
 test("agente incompatível pede atualização pelo instalador e status antigo não inventa compatibilidade", () => {
   const status = situacaoAgenteTef({
     tef: {
-      agente: { compativel: false, nome: "UltraPDVTef_135.exe", versao: "1.3.5" },
+      pgwebLib: { pronta: false, versao: "4.1.50.924" },
       biblioteca: { cobrancaPermitida: false },
     },
   });
   assert.equal(status.compativel, false);
+  assert.equal(status.nome, "PGWebLib.dll");
   assert.equal(status.cobrancaPermitida, false);
   assert.equal(status.ambienteEfetivo, null);
   assert.equal(situacaoAgenteTef({ tef: {} }).compativel, null);
@@ -693,13 +696,9 @@ function statusConnectorAcessivel() {
   return {
     ok: true,
     tef: {
-      disponivel: true,
-      executavelEncontrado: true,
-      processo: "executando",
-      inicializado: true,
       ambienteEfetivo: null,
       situacaoAmbiente: "desconhecido",
-      agente: { nome: "agente.exe", versao: "1.3.5", compativel: true },
+      pgwebLib: { pronta: true, versao: "4.1.50.924" },
       biblioteca: {
         ambienteSolicitado: "producao",
         setEnvironmentExecutado: true,
@@ -730,9 +729,10 @@ test("Connector acessível com resposta válida não vira desconectado nem produ
   assert.equal(consulta.leitura.respondeu, true);
   assert.equal(consulta.leitura.disponivel, true);
   assert.equal(consulta.leitura.paygoInicializado, true);
-  assert.equal(consulta.leitura.processo, "executando");
+  assert.equal(consulta.leitura.processo, null);
+  assert.equal(consulta.leitura.pgwebLibPronta, true);
   assert.equal(consulta.agente.compativel, true);
-  assert.equal(consulta.agente.evidenciaInstalacao, true);
+  assert.equal(consulta.agente.evidenciaInstalacao, false);
   assert.equal(consulta.agente.cobrancaPermitida, true);
   assert.equal(consulta.agente.ambienteBiblioteca, "producao");
   assert.equal(consulta.agente.ambienteEfetivo, null);
@@ -749,7 +749,7 @@ test("Connector acessível com resposta válida não vira desconectado nem produ
   assert.equal(itemPainel(painel, "connector").situacao, "conectado");
   assert.equal(itemPainel(painel, "paygo").situacao, "inicializado");
   assert.equal(itemPainel(painel, "ambiente").situacao, "desconhecido");
-  assert.match(itemPainel(painel, "ambiente").explicacao, /adquirente/);
+  assert.match(itemPainel(painel, "ambiente").explicacao, /ambiente efetivo continua desconhecido/);
 });
 
 test("Connector indisponível, timeout e CORS têm mensagens diferentes", () => {
@@ -879,7 +879,8 @@ test("instalação comprovada com agente parado mantém Connector conectado e a 
     fatos({
       connector: connector({
         disponivel: false,
-        processo: "parado",
+        processo: null,
+        pgwebLibPronta: false,
         paygoInicializado: false,
         versao: "1.3.6",
       }),
@@ -891,7 +892,7 @@ test("instalação comprovada com agente parado mantém Connector conectado e a 
   assert.equal(estado(avaliacao, "connector"), "aprovado");
   assert.match(avaliacao.requisitos.find((item) => item.id === "connector")?.mensagem ?? "", /conectado/);
   assert.equal(estado(avaliacao, "processo"), "pendente");
-  assert.match(avaliacao.requisitos.find((item) => item.id === "processo")?.mensagem ?? "", /parado/);
+  assert.match(avaliacao.requisitos.find((item) => item.id === "processo")?.mensagem ?? "", /não está pronta/);
   assert.equal(estado(avaliacao, "paygo"), "aprovado");
   assert.match(avaliacao.requisitos.find((item) => item.id === "paygo")?.mensagem ?? "", /biblioteca-v2/);
   assert.equal(estado(avaliacao, "ambiente"), "nao_verificavel");
@@ -907,7 +908,7 @@ test("instalação comprovada com agente parado mantém Connector conectado e a 
 
   const painel = painelSituacaoTef({
     credenciamentoOk: true,
-    connector: connector({ processo: "parado", disponivel: false, paygoInicializado: false }),
+    connector: connector({ pgwebLibPronta: false, disponivel: false, paygoInicializado: false }),
     pinpad: null,
     pinpadExigido: true,
     bibliotecaValidada: false,
@@ -917,7 +918,7 @@ test("instalação comprovada com agente parado mantém Connector conectado e a 
   });
   assert.equal(itemPainel(painel, "connector").situacao, "conectado");
   assert.equal(itemPainel(painel, "connector").pendente, false);
-  assert.equal(itemPainel(painel, "processo").situacao, "parado");
+  assert.equal(itemPainel(painel, "processo").situacao, "pendente");
   assert.equal(itemPainel(painel, "processo").pendente, true);
   assert.equal(itemPainel(painel, "paygo").situacao, "instalação comprovada");
   assert.equal(itemPainel(painel, "paygo").pendente, false);
@@ -933,10 +934,11 @@ test("instalação comprovada com agente parado mantém Connector conectado e a 
   assert.match(inicializacao, /corpoInicializacaoExplicita/);
   assert.doesNotMatch(inicializacao, /\/tef\/instalar|\/tef\/pagar|PWOPER_/);
   const pagina = fonte("app/configuracoes/financeiro/tef/page.tsx");
-  const botaoInicializar = pagina.indexOf("<TefInicializacaoBiblioteca");
-  const suporte = pagina.indexOf("<details");
-  assert.ok(botaoInicializar > 0 && suporte > botaoInicializar);
-  assert.match(pagina, /TefProducaoIsolada/);
+  assert.equal(pagina.includes("<TefInicializacaoBiblioteca"), false);
+  assert.equal(pagina.includes("TefProducaoIsolada"), false);
+  assert.equal(pagina.includes("TefPastaForm"), false);
+  assert.equal(pagina.includes("TefAssistente"), false);
+  assert.match(pagina, /Download e status do Connector/);
   assert.match(fonte("components/pdv/tef-producao-isolada.tsx"), /Instalar PayGoWeb/);
   assert.match(
     fonte("components/pdv/tef-producao-isolada.tsx"),
@@ -948,7 +950,7 @@ test("instalação comprovada com agente parado mantém Connector conectado e a 
   assert.match(fonte("components/pdv/tef-pinpad-diagnostico.tsx"), /Não inicia/);
   assert.match(fonte("components/pdv/tef-pinpad-diagnostico.tsx"), /pagamento/);
   const sessao = fonte("lib/pdv/tef/assistente-sessao.ts");
-  assert.match(sessao, /tef_validacoes_biblioteca/);
+  assert.doesNotMatch(sessao, /from\("tef_validacoes_biblioteca"\)/);
   assert.doesNotMatch(sessao, /from\("tef_operacoes"\)\.update|from\("fiscal_emissoes"\)\.update/);
 });
 

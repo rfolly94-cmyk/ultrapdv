@@ -6,10 +6,12 @@ import { redirect } from "next/navigation";
 import { validarPixNaFinalizacaoComercial } from "@/lib/pagamentos/pix/modo-ativo-servidor";
 import {
   validarTefNaFinalizacao,
+  vincularJournalNaVenda,
   vincularTefNaVenda,
 } from "@/lib/pdv/tef/finalizacao";
 import {
   ErroTef,
+  gravarFiscalMotorNaVenda,
   listarDadosFiscaisTefPorIds,
   reservarOperacoesTefParaVenda,
 } from "@/lib/pdv/tef/persistencia";
@@ -72,7 +74,9 @@ export type FinalizarVendaPdvInput = {
     tefOperacaoId?: string | null;
     tefVinculoSegredo?: string | null;
     cartaoManual?: boolean | null;
+    motorChave?: string | null;
   }>;
+  motorOrigem?: string | null;
   cpfNaNota?: string | null;
   usarDocumentoClienteNaNota?: boolean;
   correlacao?: string | null;
@@ -85,6 +89,9 @@ export type FinalizarVendaPdvResultado =
       numero: number;
       valorTotalCentavos: number;
       tefConfirmacaoLiberada?: boolean;
+      suprimirNfceComercial?: boolean;
+      ambienteMotor?: "producao" | "homologacao";
+      motorComprovado?: boolean;
     }
   | {
       ok: false;
@@ -537,6 +544,7 @@ export async function executarFinalizacaoVendaPdv(
       empresaId: String(vinculo.empresa_id),
       usuarioId: String(claimsData.claims.sub),
       pagamentos: input.pagamentos,
+      motorOrigem: input.motorOrigem,
     })
     );
 
@@ -544,6 +552,53 @@ export async function executarFinalizacaoVendaPdv(
       return {
         ok: false,
         erro: tef.erro,
+      };
+    }
+
+    if ("vendaJaRegistradaId" in tef && tef.vendaJaRegistradaId) {
+      const { data: existente } = await supabase
+        .from("vendas")
+        .select("id, numero, valor_total, empresa_id")
+        .eq("empresa_id", vinculo.empresa_id)
+        .eq("id", tef.vendaJaRegistradaId)
+        .maybeSingle();
+      if (!existente || !registroPertenceAEmpresaAtiva(existente, vinculo.empresa_id)) {
+        return {
+          ok: false,
+          erro: "Este pagamento confirmado já está vinculado a uma venda. Ele não pode ser usado em outra venda. Nenhuma nova cobrança foi iniciada.",
+        };
+      }
+      if ("motorComprovado" in tef && tef.motorComprovado === true && input.motorOrigem) {
+        const ambienteMotor = "ambienteMotor" in tef && tef.ambienteMotor === "producao" ? 0 : 1;
+        for (const pagamento of input.pagamentos) {
+          if (!pagamento.motorChave) continue;
+          await vincularJournalNaVenda({
+            origem: input.motorOrigem,
+            empresaId: String(vinculo.empresa_id),
+            chave: pagamento.motorChave,
+            vendaId: String(existente.id),
+            valorCentavos: pagamento.valorCentavos,
+            ambiente: ambienteMotor,
+          }).catch(() => false);
+        }
+      }
+      const fiscaisJaRegistrados = "fiscaisMotor" in tef && Array.isArray(tef.fiscaisMotor) ? tef.fiscaisMotor : [];
+      if (fiscaisJaRegistrados.length > 0) {
+        await gravarFiscalMotorNaVenda({
+          empresaId: String(vinculo.empresa_id),
+          vendaId: String(existente.id),
+          itens: fiscaisJaRegistrados,
+        }).catch(() => undefined);
+      }
+      return {
+        ok: true,
+        vendaId: String(existente.id),
+        numero: Number(existente.numero),
+        valorTotalCentavos: Math.round(Number(existente.valor_total ?? 0) * 100),
+        suprimirNfceComercial: "suprimirNfceComercial" in tef && tef.suprimirNfceComercial === true,
+        ...("ambienteMotor" in tef && (tef.ambienteMotor === "producao" || tef.ambienteMotor === "homologacao")
+          ? { ambienteMotor: tef.ambienteMotor }
+          : {}),
       };
     }
 
@@ -599,6 +654,22 @@ export async function executarFinalizacaoVendaPdv(
         });
       } catch {
         // A venda segue. A NFC-e bloqueia se a credenciadora ou a bandeira não estiverem gravadas.
+      }
+    }
+
+    if ("fiscaisMotor" in tef && Array.isArray(tef.fiscaisMotor)) {
+      for (const fiscal of tef.fiscaisMotor) {
+        const indice = input.pagamentos.findIndex((pagamento) => pagamento.motorChave === fiscal.chave);
+        const linha = pagamentos[indice] as { autorizacao?: string; bandeira?: string } | undefined;
+        if (!linha) {
+          continue;
+        }
+        if (fiscal.fiscal.autorizacao) {
+          linha.autorizacao = fiscal.fiscal.autorizacao;
+        }
+        if (fiscal.fiscal.bandeiraNome) {
+          linha.bandeira = fiscal.fiscal.bandeiraNome;
+        }
       }
     }
 
@@ -879,6 +950,30 @@ export async function executarFinalizacaoVendaPdv(
       }
     }
 
+    const fiscaisMotor = "fiscaisMotor" in tef && Array.isArray(tef.fiscaisMotor) ? tef.fiscaisMotor : [];
+    if (fiscaisMotor.length > 0) {
+      await gravarFiscalMotorNaVenda({
+        empresaId: String(vinculo.empresa_id),
+        vendaId: String(registro.venda_id),
+        itens: fiscaisMotor,
+      }).catch(() => undefined);
+    }
+
+    if ("motorComprovado" in tef && tef.motorComprovado === true && input.motorOrigem) {
+      const ambienteMotor = "ambienteMotor" in tef && tef.ambienteMotor === "producao" ? 0 : 1;
+      for (const pagamento of input.pagamentos) {
+        if (!pagamento.motorChave) continue;
+        await vincularJournalNaVenda({
+          origem: input.motorOrigem,
+          empresaId: String(vinculo.empresa_id),
+          chave: pagamento.motorChave,
+          vendaId: String(registro.venda_id),
+          valorCentavos: pagamento.valorCentavos,
+          ambiente: ambienteMotor,
+        }).catch(() => false);
+      }
+    }
+
     const vinculoTef = await relogio.medir("supabase_vinculo_tef", "supabase", () =>
       vincularTefNaVenda({
       empresaId: String(vinculo.empresa_id),
@@ -913,6 +1008,11 @@ export async function executarFinalizacaoVendaPdv(
         tef.operacaoIds.length === 0
           ? undefined
           : vinculoTef.confirmacaoLiberada,
+      suprimirNfceComercial:
+        "suprimirNfceComercial" in tef && tef.suprimirNfceComercial === true,
+      ...("ambienteMotor" in tef && (tef.ambienteMotor === "producao" || tef.ambienteMotor === "homologacao")
+        ? { ambienteMotor: tef.ambienteMotor }
+        : {}),
     };
   } catch (error) {
     console.error(

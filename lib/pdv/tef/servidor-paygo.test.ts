@@ -7,7 +7,9 @@ import { validarCredenciamento } from "@/lib/pdv/tef/assistente-instalacao";
 import {
   confirmarServidorPersistido,
   conferirServidorAutorizado,
+  decidirAssociacaoPontoServidor,
   decidirGravacaoServidor,
+  separarServidorPayGo,
   servidorDoAmbiente,
   validarServidorPayGo,
   type ConfiguracaoServidorPayGo,
@@ -242,9 +244,11 @@ test("migration separa os servidores e o fluxo habilitado não inventa endereço
   assert.doesNotMatch(ui, /Servidor novo/);
   assert.doesNotMatch(ui, /pos-transac-sb|117473/);
   const autorizar = persistencia.slice(persistencia.indexOf("export async function autorizarPareamentoTef"));
-  const habilitado = autorizar.indexOf("if (!habilitado)");
-  const consultaServidor = autorizar.indexOf('select("ambiente, servidor_homologacao, servidor_producao")');
-  assert.ok(habilitado >= 0 && consultaServidor > habilitado);
+  const fimAutorizar = autorizar.indexOf("export async function concluirPareamentoTef");
+  const corpoAutorizar = autorizar.slice(0, fimAutorizar);
+  assert.match(corpoAutorizar, /credencialPayGoDoAmbiente/);
+  assert.doesNotMatch(corpoAutorizar, /from\("empresas"\)/);
+  assert.doesNotMatch(corpoAutorizar, /servidor_homologacao \|\| [\s\S]{0,80}servidor_producao/);
   const salvar = sessao.slice(sessao.indexOf("export async function salvarRascunhoAssistenteSessao"));
   const decide = salvar.indexOf("decidirGravacaoServidor");
   const confirma = salvar.indexOf("confirmarServidorPersistido");
@@ -254,4 +258,37 @@ test("migration separa os servidores e o fluxo habilitado não inventa endereço
   const ramo = gravar.slice(gravar.indexOf("habilitado === true"), gravar.indexOf("if (!atual.data)"));
   assert.match(ramo, /servidor_producao/);
   assert.doesNotMatch(ramo, /ponto_captura/);
+});
+
+test("ponto instalado conserva ambiente, ponto e servidor", () => {
+  const partes = separarServidorPayGo(SERVIDOR_A);
+  assert.equal(partes.host, "tef.loja-a.example");
+  assert.equal(partes.porta, "31735");
+  const troca = decidirAssociacaoPontoServidor({
+    pontoGravado: "6696546",
+    ambienteGravado: "homologacao",
+    servidorGravado: SERVIDOR_A,
+    pontoNovo: "117473",
+    ambienteNovo: "producao",
+    servidorNovo: SERVIDOR_B,
+  });
+  assert.equal(troca.efeito, "recusar");
+  const igual = decidirAssociacaoPontoServidor({
+    pontoGravado: "6696546",
+    ambienteGravado: "homologacao",
+    servidorGravado: SERVIDOR_A,
+    pontoNovo: "6696546",
+    ambienteNovo: "homologacao",
+    servidorNovo: SERVIDOR_A,
+  });
+  assert.equal(igual.efeito, "preservar");
+  const primeira = decidirAssociacaoPontoServidor({
+    pontoGravado: "",
+    ambienteGravado: "",
+    servidorGravado: "",
+    pontoNovo: "6696546",
+    ambienteNovo: "homologacao",
+    servidorNovo: SERVIDOR_A,
+  });
+  assert.deepEqual(primeira, { efeito: "gravar", servidor: SERVIDOR_A });
 });

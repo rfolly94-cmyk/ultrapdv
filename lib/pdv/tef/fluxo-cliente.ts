@@ -2,7 +2,6 @@ import type {
   EtapaFinalizacao,
   MedidorFinalizacao,
 } from "@/lib/pdv/desempenho/cronometro-finalizacao";
-import { sanitizarParaLog } from "./regras";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<{
   ok: boolean;
@@ -12,7 +11,7 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<{
 
 export type ParcelaTefCliente = {
   formaPagamentoId: string;
-  modalidade: "debito" | "credito";
+  modalidade: "debito" | "credito" | "pix";
   valorCentavos: number;
 };
 
@@ -136,6 +135,9 @@ async function lerJson(resposta: { json: () => Promise<unknown> }) {
   }
 }
 
+const COBRANCA_TEF_DESATIVADA =
+  "A cobrança TEF foi desativada. Nenhuma cobrança PayGoWeb foi iniciada. O histórico financeiro permanece.";
+
 export async function executarCobrancasTef(
   input: {
     parcelas: ParcelaTefCliente[];
@@ -144,304 +146,25 @@ export async function executarCobrancasTef(
     idempotencyKey: (indice: number) => string;
     grupoVenda?: string;
     estabelecimento?: string;
+    ambiente?: "homologacao" | "producao" | "";
     medicao?: MedidorFinalizacao | null;
   },
   deps: { fetchImpl?: FetchLike } = {}
 ) {
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const prontas: CobrancaTefPronta[] = [];
-
-  const status = await medirCliente(input.medicao, "tef_status", async () =>
-    lerJson(await fetchImpl(`${input.origem}/tef/status`, { cache: "no-store" }))
-  );
-  let tef = (status.tef ?? {}) as {
-    inicializado?: boolean;
-    agente?: { compativel?: boolean; nome?: string; versao?: string };
-    biblioteca?: { cobrancaPermitida?: boolean; motivo?: string };
+  void input;
+  void deps;
+  return {
+    ok: false as const,
+    erro: COBRANCA_TEF_DESATIVADA,
+    operacoes: [] as CobrancaTefPronta[],
+    pagamentoRecebido: false as const,
+    podeFinalizar: false as const,
+    simulado: false as const,
+    comandoEnviado: false as const,
+    estados: [] as string[],
   };
-  if (tef.inicializado !== true) {
-    const inicio = await medirCliente(input.medicao, "tef_inicializar", async () =>
-      lerJson(
-        await fetchImpl(`${input.origem}/tef/inicializar`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ acao: "inicializar" }),
-        })
-      )
-    );
-    if (inicio.ok !== true) {
-      return {
-        ok: false as const,
-        erro: texto(inicio.erro) || "O Connector TEF não está pronto.",
-        operacoes: prontas,
-      };
-    }
-    tef = (inicio.tef ?? tef) as typeof tef;
-  }
-  if (tef.agente?.compativel !== true) {
-    return {
-      ok: false as const,
-      erro: tef.agente?.nome
-        ? `O Connector não carregou ${tef.agente.nome}. A cobrança não foi iniciada.`
-        : "O Connector não carregou o agente TEF desta versão. A cobrança não foi iniciada.",
-      operacoes: prontas,
-    };
-  }
-  if (tef.biblioteca?.cobrancaPermitida !== true) {
-    return {
-      ok: false as const,
-      erro:
-        texto(tef.biblioteca?.motivo) ||
-        "A PGWebLib não comprovou o ponto e o servidor de produção. A cobrança não foi iniciada.",
-      operacoes: prontas,
-    };
-  }
-
-  const identidade = await medirCliente(input.medicao, "tef_identidade", async () =>
-    lerJson(await fetchImpl(`${input.origem}/tef/identidade`, { cache: "no-store" }))
-  );
-  if (identidade.ok !== true || !texto(identidade.chavePublica) || !texto(identidade.assinatura)) {
-    return {
-      ok: false as const,
-      erro: "O Connector não apresentou a identidade do terminal TEF.",
-      operacoes: prontas,
-    };
-  }
-  const dispositivoId = texto(identidade.dispositivoId) || input.dispositivoId;
-
-  for (const [indice, parcela] of input.parcelas.entries()) {
-    const criado = (await medirCliente(input.medicao, "tef_iniciar", async () =>
-      lerJson(
-        await fetchImpl("/api/pdv/tef/iniciar", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            formaPagamentoId: parcela.formaPagamentoId,
-            modalidade: parcela.modalidade,
-            valorCentavos: parcela.valorCentavos,
-            dispositivoId,
-            idempotencyKey: input.idempotencyKey(indice),
-            grupoVenda: input.grupoVenda,
-            chavePublica: identidade.chavePublica,
-            assinaturaIdentidade: identidade.assinatura,
-          }),
-        })
-      )
-    )) as InicioTef;
-
-    if (!criado.ok || !criado.operacaoId || !criado.identificador) {
-      await desfazerCobrancasTef(
-        { operacoes: prontas, origem: input.origem, idempotencyKeyVenda: null, medicao: input.medicao },
-        { fetchImpl }
-      );
-      return {
-        ok: false as const,
-        erro: criado.erro || "Não foi possível iniciar o TEF.",
-        operacoes: prontas,
-      };
-    }
-    if (criado.emAndamento) {
-      return {
-        ok: false as const,
-        erro: "Já existe uma cobrança TEF em andamento nesta venda.",
-        operacoes: prontas,
-      };
-    }
-    if (criado.cobrarDeNovo === false && !criado.jaAutorizada) {
-      return {
-        ok: false as const,
-        erro: mensagemOperacaoExistente(criado),
-        operacoes: prontas,
-      };
-    }
-    if (criado.cobrarDeNovo === false && criado.jaAutorizada && !texto(criado.vinculoSegredo)) {
-      return {
-        ok: false as const,
-        erro: mensagemOperacaoExistente(criado),
-        operacoes: prontas,
-      };
-    }
-
-    const headers = cabecalhosTef({
-      empresaId: texto(criado.empresaId),
-      terminalCodigo: texto(criado.terminalCodigo),
-      desafio: texto(criado.desafio),
-      identificador: texto(criado.identificador),
-      valorCentavos: parcela.valorCentavos,
-      estabelecimento: input.estabelecimento,
-    });
-
-    let registro: ResultadoApi = {};
-    if (!criado.jaAutorizada) {
-      const corpoPagamento = {
-        acao: "pagamento",
-        identificador: criado.identificador,
-        valor: criado.valor,
-        preferencia: parcela.modalidade,
-      };
-      const pagamento = await medirCliente(input.medicao, "tef_pagamento", async () => {
-        const respostaPagamento = await fetchImpl(`${input.origem}/tef/pagamento`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(corpoPagamento),
-        });
-        let corpo = await lerJson(respostaPagamento);
-        if (respostaPagamento.status === 400 && texto(corpo.erro) === "Payload recusado.") {
-          corpo = await lerJson(
-            await fetchImpl(`${input.origem}/tef/pagamento`, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                acao: "pagamento",
-                identificador: criado.identificador,
-                valor: criado.valor,
-              }),
-            })
-          );
-        }
-        return corpo;
-      });
-      const resultado = (pagamento.resultado ?? {}) as Record<string, unknown>;
-      registro = (await medirCliente(input.medicao, "tef_resultado", async () =>
-        lerJson(
-          await fetchImpl("/api/pdv/tef/resultado", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(
-              sanitizarParaLog({
-                operacaoId: criado.operacaoId,
-                sucessoTransacao: resultado.sucessoTransacao,
-                nsu: resultado.nsu,
-                autorizacao: resultado.codigoAutorizacao ?? resultado.autorizacao,
-                rede: resultado.rede,
-                finalizacao: resultado.codigoFinalizacao ?? resultado.finalizacao,
-                valor: resultado.valor,
-                confirmar: resultado.confirmar,
-                precisaConfirmacao: resultado.precisaConfirmacao,
-                transacaoPendenteConfirmacao: resultado.transacaoPendenteConfirmacao,
-                cancelada: resultado.cancelada,
-                canceladoOperador: resultado.canceladoOperador,
-                codigo: pagamento.codigo,
-                teste: resultado.teste,
-                nomeBandeiraPadrao: resultado.nomeBandeiraPadrao,
-                nomeCartao: resultado.nomeCartao,
-                bandeira: resultado.bandeira,
-                cnpjCredenciadora: resultado.cnpjCredenciadora,
-                cnpjRecebedor: resultado.cnpjRecebedor,
-                instituicao: resultado.instituicao,
-                prova: pagamento.prova,
-                provaAmbiente: pagamento.provaAmbiente,
-                comprovante1Via: resultado.comprovante1Via,
-                comprovante2Via: resultado.comprovante2Via,
-                host: resultado.host ?? resultado.servidor,
-                pontoCaptura: resultado.pontoCaptura,
-                tipoCartao: resultado.tipoCartao,
-                provaModalidade: pagamento.provaModalidade,
-              })
-            ),
-          })
-        )
-      )) as ResultadoApi;
-      if (
-        registro.status === "reconciliacao" ||
-        registro.proibirDesfazimento === true ||
-        registro.teste === true
-      ) {
-        return {
-          ok: false as const,
-          erro:
-            texto(registro.diagnostico) ||
-            texto(registro.erro) ||
-            "O ambiente desta transação TEF não foi comprovado como produção. A venda não foi finalizada. Não cobre novamente. Abra Configurações, Financeiro, TEF para o diagnóstico do terminal.",
-          operacoes: prontas,
-        };
-      }
-      if (!registro.ok || registro.status !== "autorizada") {
-        await desfazerCobrancasTef(
-          {
-            operacoes: prontas,
-            origem: input.origem,
-            idempotencyKeyVenda: null,
-            medicao: input.medicao,
-          },
-          { fetchImpl }
-        );
-        const desconhecido =
-          registro.status === "desconhecida" || registro.status === "timeout";
-        let desfezAtual = 0;
-        if (registro.status === "desconhecida") {
-          const pedido = await desfazerCobrancasTef(
-            {
-              operacoes: [
-                {
-                  formaPagamentoId: parcela.formaPagamentoId,
-                  operacaoId: criado.operacaoId,
-                  valorCentavos: parcela.valorCentavos,
-                  identificador: texto(criado.identificador),
-                  empresaId: texto(criado.empresaId),
-                  terminalCodigo: texto(criado.terminalCodigo),
-                  desafio: texto(criado.desafio),
-                  vinculoSegredo: texto(criado.vinculoSegredo),
-                  autorizacao: "",
-                  estabelecimento: input.estabelecimento,
-                },
-              ],
-              origem: input.origem,
-              idempotencyKeyVenda: null,
-              proibirConfirmacao: true,
-              medicao: input.medicao,
-            },
-            { fetchImpl }
-          );
-          desfezAtual = pedido.desfez;
-        }
-        return {
-          ok: false as const,
-          erro: desconhecido
-            ? desfezAtual > 0
-              ? "A cobrança TEF foi desfeita porque a venda não foi registrada. Não cobre novamente."
-              : "O resultado do TEF ficou desconhecido. Não cobre novamente até a reconciliação."
-            : registro.erro ||
-              texto(pagamento.erro) ||
-              "O TEF não autorizou este pagamento.",
-          operacoes: prontas,
-        };
-      }
-    }
-
-    if (!texto(criado.vinculoSegredo)) {
-      return {
-        ok: false as const,
-        erro: "A autorização TEF não pode ser reaproveitada. Recupere a pendência neste terminal.",
-        operacoes: prontas,
-      };
-    }
-
-    prontas.push({
-      formaPagamentoId: parcela.formaPagamentoId,
-      operacaoId: criado.operacaoId,
-      valorCentavos: parcela.valorCentavos,
-      identificador: criado.identificador,
-      empresaId: texto(criado.empresaId),
-      terminalCodigo: texto(criado.terminalCodigo),
-      desafio: texto(criado.desafio),
-      vinculoSegredo: texto(criado.vinculoSegredo),
-      autorizacao: "",
-      estabelecimento: input.estabelecimento,
-      modalidadeSolicitada:
-        registro.modalidadeSolicitada === "credito" || registro.modalidadeSolicitada === "debito"
-          ? registro.modalidadeSolicitada
-          : parcela.modalidade,
-      modalidadeEfetiva:
-        registro.modalidadeEfetiva === "credito" || registro.modalidadeEfetiva === "debito"
-          ? registro.modalidadeEfetiva
-          : null,
-      avisoModalidade: texto(registro.avisoModalidade) || null,
-    });
-  }
-
-  return { ok: true as const, operacoes: prontas, origem: input.origem };
 }
+
 
 export async function confirmarTefAposVenda(
   input: {
@@ -452,70 +175,11 @@ export async function confirmarTefAposVenda(
   },
   deps: { fetchImpl?: FetchLike } = {}
 ) {
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  for (const operacao of input.operacoes) {
-    const liberada = (await medirCliente(input.medicao, "tef_liberar_confirmacao", async () =>
-      lerJson(
-        await fetchImpl("/api/pdv/tef/liberar-confirmacao", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            operacaoId: operacao.operacaoId,
-            vendaId: input.vendaId,
-          }),
-        })
-      )
-    )) as ResultadoApi;
-    if (!liberada.ok || liberada.confirmar !== true) {
-      return {
-        ok: false as const,
-        erro:
-          liberada.erro ||
-          "A venda foi registrada, mas a confirmação TEF não foi liberada. Não cobre novamente.",
-      };
-    }
-    const confirmado = await medirCliente(input.medicao, "tef_confirmar_conector", async () =>
-      lerJson(
-        await fetchImpl(`${input.origem}/tef/confirmar`, {
-        method: "POST",
-        headers: cabecalhosTef({
-          ...operacao,
-          desafio: texto(liberada.desafio) || operacao.desafio,
-          identificador: texto(liberada.identificador) || operacao.identificador,
-          valorCentavos: liberada.valorCentavos ?? operacao.valorCentavos,
-          autorizacao: texto(liberada.autorizacao) || operacao.autorizacao,
-        }),
-        body: JSON.stringify({
-          acao: "confirmar",
-          rede: liberada.rede,
-          nsu: liberada.nsu,
-          finalizacao: liberada.finalizacao,
-        }),
-      })
-      )
-    );
-    const registrada = (await medirCliente(input.medicao, "tef_registrar_confirmacao", async () =>
-      lerJson(
-        await fetchImpl("/api/pdv/tef/registrar-confirmacao", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            operacaoId: operacao.operacaoId,
-            prova: confirmado.prova,
-          }),
-        })
-      )
-    )) as ResultadoApi;
-    if (confirmado.ok !== true || registrada.ok !== true || registrada.status !== "confirmada") {
-      return {
-        ok: false as const,
-        erro:
-          "A venda foi registrada, mas a confirmação TEF falhou. Não cobre novamente.",
-      };
-    }
-  }
-  return { ok: true as const };
+  void input;
+  void deps;
+  return { ok: false as const, erro: COBRANCA_TEF_DESATIVADA };
 }
+
 
 export async function desfazerCobrancasTef(
   input: {
@@ -527,91 +191,9 @@ export async function desfazerCobrancasTef(
   },
   deps: { fetchImpl?: FetchLike } = {}
 ): Promise<{ desfez: number }> {
-  if (input.medicao) {
-    const { medicao } = input;
-    return medicao.medir("tef_desfazimento", "tef", () =>
-      desfazerCobrancasTef({ ...input, medicao: undefined }, deps)
-    );
-  }
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  let desfez = 0;
-  for (const operacao of input.operacoes) {
-    const pedido = (await lerJson(
-      await fetchImpl("/api/pdv/tef/desfazer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operacaoId: operacao.operacaoId,
-          idempotencyKeyVenda: input.idempotencyKeyVenda,
-        }),
-      })
-    )) as ResultadoApi;
-    if (pedido.executar === "confirmar") {
-      if (input.proibirConfirmacao) {
-        continue;
-      }
-      const confirmado = await lerJson(
-        await fetchImpl(`${input.origem}/tef/confirmar`, {
-          method: "POST",
-          headers: cabecalhosTef({
-            ...operacao,
-            desafio: texto(pedido.desafio),
-            identificador: texto(pedido.identificador),
-            valorCentavos: pedido.valorCentavos,
-            autorizacao: texto(pedido.autorizacao),
-          }),
-          body: JSON.stringify({
-            acao: "confirmar",
-            rede: pedido.rede,
-            nsu: pedido.nsu,
-            finalizacao: pedido.finalizacao,
-          }),
-        })
-      );
-      await fetchImpl("/api/pdv/tef/registrar-confirmacao", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operacaoId: operacao.operacaoId,
-          prova: confirmado.prova,
-        }),
-      });
-      continue;
-    }
-    if (pedido.executar !== "desfazer") {
-      continue;
-    }
-    const desfeito = await lerJson(
-      await fetchImpl(`${input.origem}/tef/desfazer`, {
-        method: "POST",
-        headers: cabecalhosTef({
-          ...operacao,
-          desafio: texto(pedido.desafio),
-          identificador: texto(pedido.identificador),
-          valorCentavos: pedido.valorCentavos,
-          autorizacao: texto(pedido.autorizacao),
-        }),
-        body: JSON.stringify({
-          acao: "desfazer",
-          rede: pedido.rede,
-          nsu: pedido.nsu,
-          finalizacao: pedido.finalizacao,
-        }),
-      })
-    );
-    await fetchImpl("/api/pdv/tef/registrar-desfazimento", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        operacaoId: operacao.operacaoId,
-        prova: desfeito.prova,
-      }),
-    });
-    if (desfeito.ok === true) {
-      desfez += 1;
-    }
-  }
-  return { desfez };
+  void input;
+  void deps;
+  return { desfez: 0 };
 }
 
 export async function reenviarProvaLocal(
@@ -624,64 +206,31 @@ export async function reenviarProvaLocal(
   },
   deps: { fetchImpl?: FetchLike } = {}
 ) {
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const candidatas = input.pendencias.filter(
-    (item) => item.status === "iniciada" || item.status === "desconhecida"
-  );
-  if (candidatas.length === 0) {
-    return { ok: true as const, reenviadas: 0 };
-  }
-  const resposta = await lerJson(
-    await fetchImpl(`${input.origem}/tef/recuperacao`, {
-      cache: "no-store",
-      headers: cabecalhosTef({
-        empresaId: input.empresaId,
-        terminalCodigo: input.terminalCodigo,
-        estabelecimento: input.estabelecimento,
-      }),
-    })
-  );
-  const recuperacao = (resposta.recuperacao ?? null) as Record<string, unknown> | null;
-  if (!recuperacao || resposta.ok !== true) {
-    return { ok: true as const, reenviadas: 0 };
-  }
-  const pendencia = candidatas.find(
-    (item) => item.identificador && item.identificador === texto(recuperacao.identificador)
-  );
-  if (!pendencia) {
-    return { ok: true as const, reenviadas: 0 };
-  }
-  const registro = (await lerJson(
-    await fetchImpl("/api/pdv/tef/resultado", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        operacaoId: pendencia.id,
-        prova: recuperacao.prova,
-        sucessoTransacao: recuperacao.sucessoTransacao,
-        nsu: recuperacao.nsu,
-        autorizacao: recuperacao.autorizacao,
-        rede: recuperacao.rede,
-        finalizacao: recuperacao.finalizacao,
-        valor: recuperacao.valor,
-        confirmar: recuperacao.confirmar,
-        precisaConfirmacao: recuperacao.precisaConfirmacao,
-        transacaoPendenteConfirmacao: recuperacao.transacaoPendenteConfirmacao,
-        cancelada: recuperacao.cancelada,
-        codigo: recuperacao.codigo,
-        nomeBandeiraPadrao: recuperacao.nomeBandeiraPadrao || recuperacao.bandeira,
-        cnpjCredenciadora: recuperacao.cnpjCredenciadora,
-        cnpjRecebedor: recuperacao.cnpjRecebedor,
-        instituicao: recuperacao.instituicao,
-        tipoCartao: recuperacao.tipoCartao,
-        provaModalidade: recuperacao.provaModalidade,
-        provaAmbiente: recuperacao.provaAmbiente,
-        host: recuperacao.host,
-        pontoCaptura: recuperacao.pontoCaptura,
-        comprovante1Via: recuperacao.comprovante1Via,
-        comprovante2Via: recuperacao.comprovante2Via,
-      }),
-    })
-  )) as ResultadoApi;
-  return { ok: registro.ok === true, reenviadas: registro.ok === true ? 1 : 0, status: registro.status };
+  void input;
+  void deps;
+  return { ok: true as const, reenviadas: 0 };
 }
+
+
+export async function executarVendaPinpad(
+  input: {
+    parcelas: ParcelaTefCliente[];
+    dispositivoId: string;
+    origem: string;
+    idempotencyKey: (indice: number) => string;
+    buscar?: FetchLike;
+  }
+) {
+  void input;
+  return {
+    ok: false as boolean,
+    comandoEnviado: false as boolean,
+    pagamentoRecebido: false as boolean,
+    erro: COBRANCA_TEF_DESATIVADA,
+    codigo: "TEF_DESATIVADO",
+    captura: false as boolean,
+    fase: "menu" as "menu" | "pinpad",
+    menu: null as { capturaId?: number; prompt?: string; opcoes?: Array<{ texto?: string; valor?: string }> } | null,
+  };
+}
+

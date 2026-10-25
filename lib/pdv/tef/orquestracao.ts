@@ -6,6 +6,7 @@ import {
   MENSAGEM_MODALIDADE_INDETERMINADA,
 } from "@/lib/pdv/tef/modalidade-efetiva";
 import {
+  classificarPendenciaTef,
   decidirRecuperacao,
   interpretarResultadoConector,
   resultadoPixPayGo,
@@ -744,6 +745,15 @@ export function pedirDesfazimento(
     operacao,
     existeVenda,
   });
+  if (operacao.status === "desconhecida" && (!operacao.rede || !operacao.nsu || !operacao.finalizacao)) {
+    return {
+      ok: true as const,
+      executar: "nenhum" as const,
+      erro: operacao.teste
+        ? "Pendência de simulação sem autorização. Nenhuma confirmação ou desfazimento foi executado."
+        : "Resultado desconhecido do Connector, sem autorização comprovada. Nenhuma confirmação, desfazimento ou alteração foi feita.",
+    };
+  }
   if (
     recuperacao.acao === "confirmar" &&
     operacao.rede &&
@@ -823,6 +833,45 @@ export function pedirDesfazimento(
   };
 }
 
+export function recuperarSimulacao(
+  memoria: MemoriaTef,
+  input: { empresaId: string; operacaoId: string }
+) {
+  const operacao = acharDaEmpresa(memoria, input.empresaId, input.operacaoId);
+  if (!operacao) {
+    return erro("NAO_ENCONTRADA", "Operação TEF não encontrada.");
+  }
+  if (!operacao.teste) {
+    return erro(
+      "NAO_SIMULADA",
+      "Esta pendência não é simulação. O registro financeiro não foi alterado."
+    );
+  }
+  if (operacao.status === "cancelada") {
+    return {
+      ok: true as const,
+      repetida: true,
+      status: "cancelada" as const,
+      idempotencyKey: operacao.idempotencyKey,
+    };
+  }
+  if (operacao.status !== "desconhecida" && operacao.status !== "iniciada") {
+    return erro(
+      "RECUPERACAO_BLOQUEADA",
+      "Esta simulação não admite recuperação automática. O registro não foi alterado."
+    );
+  }
+  operacao.status = "cancelada";
+  operacao.motivoAmbiente =
+    "Recuperação da simulação. Histórico e idempotência preservados. Nenhuma cobrança foi confirmada ou desfeita.";
+  return {
+    ok: true as const,
+    repetida: false,
+    status: "cancelada" as const,
+    idempotencyKey: operacao.idempotencyKey,
+  };
+}
+
 export function marcarDesfeita(
   memoria: MemoriaTef,
   input: {
@@ -896,6 +945,7 @@ export function listarPendencias(memoria: MemoriaTef, empresaId: string) {
       diagnostico: item.motivoAmbiente || "",
       vendaIdempotencyKey: item.vendaIdempotencyKey,
       proibirDesfazimento: item.status === "reconciliacao" || item.teste === true,
+      ...classificarPendenciaTef(item),
       vendaId: item.vendaId,
       identificador: item.identificador,
       terminalId: item.terminalId,

@@ -18,6 +18,14 @@ Não guarda certificado A1, senha, token Geranet nem `SUPABASE_SECRET_KEY`. A co
 
 A porta usada fica em `%ProgramData%\UltraPDV\print-agent.json` e sobrevive a reinício do Windows e a atualização do agente.
 
+## TEF em computador novo
+
+O Connector 1.3.41 cobra pela PGWebLib.dll x64 4.1.50.924 carregada com Koffi. O pacote não distribui o agente Pascal. Não usa o PayGo Windows, o Warsaw nem a variável `PathPGWebLib_x64`.
+
+A instalação chega sem ponto de captura, credencial ou servidor. Homologação permanece ao lado do agente. O credenciamento de produção continua no perfil já associado em `%ProgramData%\UltraPDV\TEF\Producao\perfis`. Arquivos gravados pela biblioteca nesse perfil não autorizam cobrança. `PW_iSetEnvironment = 0` configura o ambiente solicitado e `PW_iInit = 0` só confirma a inicialização. As pastas já existentes `C:\UltraPDV-TEF` e `%ProgramData%\UltraPDV\TEF\Producao\PGWeb` não são abertas, copiadas nem apagadas.
+
+No UltraPDV, em Configurações TEF, o estabelecimento escolhe o ambiente, conclui o credenciamento oficial, informa o ponto de captura, identifica o PinPad e só então ativa os pagamentos. Um perfil antigo em `C:\UltraPDV-TEF` ou `%ProgramData%\PayGo` permanece no disco e não é aberto por esta biblioteca.
+
 ## Desenvolvimento
 
 ```bat

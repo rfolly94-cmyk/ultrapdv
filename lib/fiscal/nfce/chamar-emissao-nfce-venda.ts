@@ -39,6 +39,7 @@ export async function chamarEmissaoNfceVenda(input: {
             : "EMITIR_NFCE_VENDA_HOMOLOGACAO",
         venda_id: vendaId,
       }),
+      signal: AbortSignal.timeout(20000),
     });
 
     const data = (await response.json()) as Record<string, unknown>;

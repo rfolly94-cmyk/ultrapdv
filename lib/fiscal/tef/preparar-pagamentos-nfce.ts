@@ -5,7 +5,7 @@ import {
   avaliarPagamentosFiscaisTef,
   type PagamentoFiscalCartao,
 } from "@/lib/fiscal/tef/dados-fiscais-cartao";
-import { listarDadosFiscaisTefDaVenda } from "@/lib/pdv/tef/persistencia";
+import { listarDadosFiscaisTefDaVenda, listarFiscaisMotorDaVenda } from "@/lib/pdv/tef/persistencia";
 
 export async function prepararPagamentosNfceTef<T extends PagamentoFiscalCartao>(
   empresaId: string,
@@ -17,6 +17,13 @@ export async function prepararPagamentosNfceTef<T extends PagamentoFiscalCartao>
     operacoes = await listarDadosFiscaisTefDaVenda(empresaId, vendaId);
   } catch {
     operacoes = [];
+  }
+  if (operacoes.length === 0) {
+    try {
+      operacoes = await listarFiscaisMotorDaVenda(empresaId, vendaId);
+    } catch {
+      operacoes = [];
+    }
   }
   return avaliarPagamentosFiscaisTef({
     pagamentos,

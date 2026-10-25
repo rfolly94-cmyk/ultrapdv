@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
@@ -7,8 +7,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   arquivoConfigAtual,
   carregarConfigLocal,
+  pastaConfigMaquina,
   salvarConfigLocal,
 } from "./config-local.mjs";
+import { pastaConectorHomologacao } from "./tef-perfil-conector.mjs";
+import { continuarCaptura, normalizarRespostaMotor, pedidoLocalDoMotor } from "./tef-csharp-ponte.mjs";
 import {
   escolherImpressora,
   imprimirPdfComSumatra,
@@ -47,11 +50,31 @@ import {
   mensagemPortaForaDaFaixa,
   PORTA_PADRAO,
 } from "./portas.mjs";
+import {
+  CODIGO_SAIDA_REINICIO,
+  montarDiagnosticoConector,
+  planejarAlteracaoPorta,
+  planejarEncerramento,
+  planejarReinicio,
+  planejarRollbackPorta,
+} from "./conector-ciclo.mjs";
 import { gerarPdfTesteConector } from "./pdf-teste.mjs";
 import { pastaDados, resolverRaizAgente } from "./raiz.mjs";
 import {
+  abrirDiagnosticoNativo,
+  criarAgendadorOciosidadeHomologacao,
+  executarDiagnosticoHomologacao,
+  pinpadEmOperacaoFinanceira,
+  pontoHomologacaoInstalado,
+  transacaoHomologacaoAtiva,
+} from "./tef-diagnostico-homologacao.mjs";
+import { liberarHomologacao, ocupacaoHomologacao, reservarHomologacao } from "./tef-homologacao-ocupacao.mjs";
+import { arquivoPortaPinpad, gravarPortaPinpad, lerPortaPinpad, listarPortasSeriaisWindows } from "./tef-porta-computador.mjs";
+import { abrirInstalacaoNativa, encerrarInstalacaoSemConfirmacao, executarInstalacaoIsolada, instalacaoHomologacaoConcluida } from "./tef-instalacao-homologacao.mjs";
+import { verificarDllPgWeb } from "./tef-dll.mjs";
+import {
   MENSAGEM_TEF_NAO_INSTALADO,
-  GerenciadorTefNativo,
+  GerenciadorPgWeb,
   apresentarStatusTef,
   autorizacaoDoVinculo,
   pedidoHttpInstalacao,
@@ -100,6 +123,18 @@ import { arquivoPendenciaTef, lerPendenciaTef } from "./tef-pendencia.mjs";
 import { criarServicoPastaTef } from "./tef-pasta.mjs";
 import { iniciarTray } from "./tray.mjs";
 import { APP_CONECTOR, carregarVersao, NOME_CONECTOR, SERVICO_CONECTOR } from "./versao.mjs";
+
+function pedidoHomologacaoIsolado(pathname) {
+  return (
+    pathname === "/tef/homologacao/pinpad" ||
+    pathname === "/tef/homologacao/instalacao" ||
+    pathname === "/tef/homologacao/identidade" ||
+    pathname === "/tef/homologacao/identidade/apresentar" ||
+    pathname === "/tef/homologacao/menu" ||
+    pathname === "/tef/homologacao/comprovacao" ||
+    pathname === "/tef/venda"
+  );
+}
 
 const HOST = HOST_LOCAL;
 const MAX_BODY = 8 * 1024 * 1024;
@@ -322,7 +357,7 @@ export function criarServidor(deps = {}) {
     }));
   const gerenciadorTef =
     deps.gerenciadorTef ??
-    new GerenciadorTefNativo({
+    new GerenciadorPgWeb({
       localizar: deps.localizarTefNativo,
       spawn: deps.spawnTef,
       registrarLog: deps.registrarLogTef,
@@ -337,6 +372,78 @@ export function criarServidor(deps = {}) {
   const diagnosticarPinpadTef =
     deps.diagnosticarPinpadTef ??
     ((testar) => gerenciadorTef.diagnosticarPinpad(testar));
+  const modoHomologacao = deps.diagnosticoHomologacao === true;
+  async function bloqueioCiclo() {
+    if (typeof deps.bloqueioCiclo === "function") return deps.bloqueioCiclo();
+    if (pinpadEmOperacaoFinanceira(gerenciadorTef) || gerenciadorTef?.pendente) {
+      return { permitido: false, motivo: "transacao" };
+    }
+    if (ocupacaoHomologacao()) return { permitido: false, motivo: "ocupacao" };
+    const ativa = await transacaoHomologacaoAtiva({
+      raiz: pastaConectorHomologacao(),
+      gerenciador: gerenciadorTef,
+    });
+    if (ativa) return { permitido: false, motivo: "transacao" };
+    return { permitido: true, motivo: "ocioso" };
+  }
+  let instanciaPinpadHomologacao = null;
+  const agendadorOciosidade = criarAgendadorOciosidadeHomologacao({
+        lerBiblioteca: () => instanciaPinpadHomologacao,
+        bloqueado: async () =>
+          ocupacaoHomologacao() != null ||
+          (await transacaoHomologacaoAtiva({
+            raiz: pastaConectorHomologacao(),
+            gerenciador: gerenciadorTef,
+          })),
+        agendar(fn, ms) {
+          const timer = setTimeout(fn, ms);
+          timer.unref?.();
+          return timer;
+        },
+      });
+  const executarDiagnosticoHomologacaoTef =
+    deps.executarDiagnosticoHomologacao ??
+    (async (pedido, opcoes = {}) => {
+      const producao = opcoes.ambiente === "producao";
+      const { diretorioProducaoPgWeb } = await import("./tef-diretorio.mjs");
+      const diretorioProducao = producao ? diretorioProducaoPgWeb() : "";
+      const diretorioDll = path.join(resolverRaizAgente(), "bin", "tef");
+      const arquivoPorta = arquivoPortaPinpad();
+      const portaSalva = await lerPortaPinpad(arquivoPorta);
+      const resultado = await executarDiagnosticoHomologacao(pedido, {
+        executar: true,
+        ambiente: producao ? "producao" : "homologacao",
+        diretorio: diretorioProducao,
+        raiz: producao ? "" : pastaConectorHomologacao(),
+        portaSalva: portaSalva?.porta ?? null,
+        persistirPorta: (entrada) => gravarPortaPinpad(arquivoPorta, entrada),
+        versaoPinpad: VERSAO_INFO.version,
+        pinpadOcupado: pinpadEmOperacaoFinanceira(gerenciadorTef),
+        verificarDll: async () => ({
+          ...(await verificarDllPgWeb(diretorioDll)),
+          arquivo: path.join(diretorioDll, "PGWebLib.dll"),
+        }),
+        abrir: abrirDiagnosticoNativo,
+        encerrarInstalacaoSemConfirmacao: async () => {
+          const encerrada = await encerrarInstalacaoSemConfirmacao();
+          if (encerrada.ok) instanciaPinpadHomologacao = null;
+          return encerrada;
+        },
+        pontoInstalado: producao ? await pontoHomologacaoInstalado(diretorioProducao) : instalacaoHomologacaoConcluida(),
+        instancia: instanciaPinpadHomologacao,
+        guardarInstancia(biblioteca) {
+          instanciaPinpadHomologacao = biblioteca;
+        },
+        sincronizarOciosidade: (valor) => agendadorOciosidade?.sincronizar(valor),
+      });
+      const portasDisponiveis = await listarPortasSeriaisWindows();
+      if (resultado && typeof resultado === "object") {
+        const publico = { ...resultado, portasDisponiveis };
+        delete publico.diretorio;
+        return publico;
+      }
+      return resultado;
+    });
   const executarInicializacaoTef =
     deps.inicializarTef ??
     (async () => {
@@ -346,7 +453,7 @@ export function criarServidor(deps = {}) {
     });
   const executarInstalacaoTef =
     deps.instalarTef ??
-    (async (credencial) => {
+    (async (credencial, opcoes = {}) => {
       const vinculo = await lerVinculo();
       const dispositivoLocal = String(await obterId());
       const chave = await lerChave();
@@ -354,7 +461,11 @@ export function criarServidor(deps = {}) {
       if (!autorizado) {
         return gerenciadorTef.instalar(null);
       }
-      return gerenciadorTef.instalar({ ...autorizado, credencial });
+      return gerenciadorTef.instalar({
+        ...autorizado,
+        credencial,
+        provisionarNovo: opcoes?.provisionarNovo === true,
+      });
     });
   const executarPagamentoTef =
     deps.pagarTef ?? ((dados) => gerenciadorTef.pagar(dados));
@@ -537,6 +648,243 @@ export function criarServidor(deps = {}) {
     return { ok: true, impressora, papel };
   });
 
+  const sessoesMotorCsharp = new Map();
+
+  function caminhoMotorCsharp() {
+    const candidatos = [
+      process.env.ULTRAPDV_TEF_HOST,
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../UltraPDV.TEF/src/UltraPDV.TEF.Host/bin/Release/net8.0/UltraPDV.TEF.Host.exe"),
+      "C:\\ultrapdv\\UltraPDV.TEF\\src\\UltraPDV.TEF.Host\\bin\\Release\\net8.0\\UltraPDV.TEF.Host.exe",
+    ].filter(Boolean);
+    for (const candidato of candidatos) {
+      try {
+        readFileSync(candidato);
+        return candidato;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function terminalDaEmpresa(raiz, empresaId) {
+    const pasta = path.resolve(raiz, String(empresaId).replace(/-/g, ""));
+    const arquivo = path.join(pasta, "terminal.json");
+    try {
+      const salvo = JSON.parse(readFileSync(arquivo, "utf8"));
+      if (/^[0-9a-f-]{36}$/i.test(salvo.terminalId ?? "")) {
+        return salvo.terminalId;
+      }
+    } catch {
+      /* o primeiro uso deste computador cria o terminal da empresa */
+    }
+    const terminalId = crypto.randomUUID();
+    mkdirSync(pasta, { recursive: true });
+    writeFileSync(arquivo, JSON.stringify({ terminalId }));
+    return terminalId;
+  }
+
+  function abrirSessaoMotor(exe) {
+    const child = spawn(exe, [], { windowsHide: true });
+    const sessao = {
+      id: crypto.randomUUID(),
+      child,
+      pendentes: [],
+      espera: [],
+      buffer: "",
+    };
+    const entregar = (linha) => {
+      const resolver = sessao.espera.shift();
+      if (resolver) {
+        resolver(linha);
+      } else {
+        sessao.pendentes.push(linha);
+      }
+    };
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (parte) => {
+      sessao.buffer += parte;
+      let quebra = sessao.buffer.indexOf("\n");
+      while (quebra >= 0) {
+        const linha = sessao.buffer.slice(0, quebra).replace(/\r$/, "");
+        sessao.buffer = sessao.buffer.slice(quebra + 1);
+        if (linha.trim()) {
+          entregar(linha);
+        }
+        quebra = sessao.buffer.indexOf("\n");
+      }
+    });
+    child.stdout.on("end", () => {
+      if (sessao.buffer.trim()) {
+        entregar(sessao.buffer.trim());
+        sessao.buffer = "";
+      }
+    });
+    child.on("error", () => entregar(null));
+    child.on("close", () => {
+      sessoesMotorCsharp.delete(sessao.id);
+      entregar(null);
+    });
+    sessoesMotorCsharp.set(sessao.id, sessao);
+    return sessao;
+  }
+
+  function proximaLinhaMotor(sessao, timeoutMs) {
+    if (sessao.pendentes.length > 0) {
+      return Promise.resolve(sessao.pendentes.shift());
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), timeoutMs);
+      sessao.espera.push((linha) => {
+        clearTimeout(timer);
+        resolve(linha);
+      });
+    });
+  }
+
+  async function lerLinhaProtocolo(sessao, prazo) {
+    while (Date.now() < prazo) {
+      const linha = await proximaLinhaMotor(sessao, Math.max(1, prazo - Date.now()));
+      if (!linha) {
+        return null;
+      }
+      try {
+        const bruto = JSON.parse(linha);
+        if (bruto && typeof bruto === "object" && (bruto.tipo === "captura" || bruto.tipo === "resultado")) {
+          return bruto;
+        }
+      } catch {
+        /* a DLL pode escrever texto fora do protocolo; a próxima linha segue a instalação */
+      }
+    }
+    return null;
+  }
+
+  async function lerResultadoMotor(sessao) {
+    const prazo = Date.now() + 180000;
+    while (Date.now() < prazo) {
+      const bruto = await lerLinhaProtocolo(sessao, prazo);
+      if (!bruto) {
+        break;
+      }
+      const normalizada = normalizarRespostaMotor(bruto, sessao.id);
+      if (normalizada.fase !== "captura") {
+        sessao.child.kill();
+        sessoesMotorCsharp.delete(sessao.id);
+      }
+      return normalizada;
+    }
+    return {
+      ok: false,
+      fase: "resultado",
+      pagamentoRecebido: false,
+      confirmada: false,
+      nativo: false,
+      codigo: "MOTOR_TIMEOUT",
+      erro: "O motor C# não respondeu. Nenhuma cobrança foi confirmada.",
+    };
+  }
+
+  async function executarMotorCsharp(corpo) {
+    const exe = caminhoMotorCsharp();
+    if (!exe) {
+      return {
+        ok: false,
+        pagamentoRecebido: false,
+        confirmada: false,
+        nativo: false,
+        codigo: "MOTOR_LOCAL_AUSENTE",
+        erro: "O motor C# não está disponível neste Connector. Nenhuma cobrança foi iniciada.",
+      };
+    }
+    if (corpo?.comando === "responder") {
+      const sessao = sessoesMotorCsharp.get(corpo.sessao);
+      const continuacao = continuarCaptura(sessao, corpo);
+      if (!continuacao.continuar) {
+        return {
+          ok: false,
+          pagamentoRecebido: false,
+          confirmada: false,
+          nativo: false,
+          codigo: continuacao.codigo,
+          erro: continuacao.erro,
+        };
+      }
+      sessao.child.stdin.write(`${JSON.stringify({ valor: continuacao.valor, cancelar: continuacao.cancelar })}\n`);
+      return comIdentidadeMotor(await lerResultadoMotor(sessao), sessao.terminalId);
+    }
+
+    const raiz = process.env.ULTRAPDV_TEF_RAIZ || "C:\\ProgramData\\UltraPDV\\tef-empresas";
+    const empresaId = typeof corpo?.empresaId === "string" ? corpo.empresaId : "";
+    const comando = corpo?.comando === "status" || !corpo?.comando ? "status" : corpo.comando;
+    let preparado;
+    try {
+      if (comando !== "status" && !/^[0-9a-f-]{36}$/i.test(empresaId)) {
+        throw new Error("EMPRESA_INVALIDA");
+      }
+      const terminalId = comando === "status" ? null : terminalDaEmpresa(raiz, empresaId);
+      preparado = pedidoLocalDoMotor({ ...(corpo ?? {}), comando, terminalId }, { raiz });
+    } catch {
+      return {
+        ok: false,
+        pagamentoRecebido: false,
+        confirmada: false,
+        nativo: false,
+        codigo: "EMPRESA_INVALIDA",
+        erro: "A empresa ativa não pôde ser isolada. Nenhuma cobrança foi iniciada.",
+      };
+    }
+    if (preparado.bloqueado) {
+      return {
+        ok: false,
+        pagamentoRecebido: false,
+        confirmada: false,
+        nativo: false,
+        codigo: "PRODUCAO_NAO_AUTORIZADA",
+        erro: "Produção não está autorizada. Nenhuma cobrança foi iniciada.",
+      };
+    }
+    if (preparado.pedido.diretorio) {
+      mkdirSync(preparado.pedido.diretorio, { recursive: true });
+    }
+    const sessao = abrirSessaoMotor(exe);
+    sessao.comando = preparado.pedido.comando;
+    sessao.operacaoNativa = preparado.pedido.operacaoNativa || "";
+    sessao.chave = preparado.pedido.chave || "";
+    sessao.terminalId = preparado.pedido.terminalId || "";
+    sessao.child.stdin.write(`${JSON.stringify(preparado.pedido)}\n`);
+    return comIdentidadeMotor(await lerResultadoMotor(sessao), sessao.terminalId);
+  }
+
+  async function comIdentidadeMotor(resultado, terminalId) {
+    let dispositivoId = "";
+    try {
+      dispositivoId = String(await obterId());
+    } catch {
+      dispositivoId = "";
+    }
+    return {
+      ...resultado,
+      terminalId: terminalId || null,
+      dispositivoId,
+    };
+  }
+
+  function lerCorpoJson(req) {
+    return new Promise((resolve) => {
+      const partes = [];
+      req.on("data", (parte) => partes.push(parte));
+      req.on("end", () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(partes).toString("utf8") || "{}"));
+        } catch {
+          resolve({});
+        }
+      });
+      req.on("error", () => resolve({}));
+    });
+  }
+
   return http.createServer(async (req, res) => {
     const portaReq = portaDoHost(req, estado.porta);
     const origens = [
@@ -577,6 +925,40 @@ export function criarServidor(deps = {}) {
     }
 
     const url = new URL(req.url || "/", `http://${HOST}:${portaReq}`);
+    if (url.pathname === "/tef/csharp") {
+      const corpo = req.method === "POST" ? await lerCorpoJson(req) : { comando: "status" };
+      const resultado = await executarMotorCsharp(corpo);
+      json(res, 200, resultado, origemCheck.origem, origens);
+      return;
+    }
+    if (url.pathname === "/tef" || url.pathname.startsWith("/tef/")) {
+      json(
+        res,
+        410,
+        {
+          ok: false,
+          codigo: "TEF_DESATIVADO",
+          erro: "A integração operacional do TEF foi desativada neste Connector. Impressão e gaveta permanecem. Nenhuma cobrança, instalação ou comunicação com PinPad foi iniciada.",
+        },
+        origemCheck.origem,
+        origens
+      );
+      return;
+    }
+    if (
+      modoHomologacao &&
+      url.pathname.startsWith("/tef/") &&
+      !pedidoHomologacaoIsolado(url.pathname)
+    ) {
+      json(
+        res,
+        403,
+        { ok: false, erro: "Este Connector de homologação não executa operação financeira." },
+        origemCheck.origem,
+        origens
+      );
+      return;
+    }
 
     try {
       if (req.method === "GET" && url.pathname === "/") {
@@ -615,6 +997,7 @@ export function criarServidor(deps = {}) {
             drawerEnabled: sanitizarGavetaHabilitada(cfg.drawerEnabled),
             drawerPin: sanitizarPinoGaveta(cfg.drawerPin),
             motorImpressao: motorParaHealth(motor),
+            ...(modoHomologacao ? { diagnosticoHomologacao: true, financeiro: false } : {}),
           },
           origemCheck.origem,
           origens
@@ -639,7 +1022,20 @@ export function criarServidor(deps = {}) {
           );
           return;
         }
-        json(res, 200, { ok: true }, origemCheck.origem, origens);
+        const brutoSaida = await lerBody(req);
+        let modoSaida = "aplicativo";
+        try {
+          const pedidoSaida = JSON.parse(brutoSaida.toString("utf8") || "{}");
+          if (pedidoSaida?.modo) modoSaida = String(pedidoSaida.modo);
+        } catch {
+          modoSaida = "aplicativo";
+        }
+        const saida = planejarEncerramento(modoSaida, await bloqueioCiclo());
+        if (!saida.encerraProcesso) {
+          json(res, saida.status || 200, saida, origemCheck.origem, origens);
+          return;
+        }
+        json(res, 200, { ok: true, status: "encerrando", concluido: false }, origemCheck.origem, origens);
         setTimeout(() => encerrar(), 50);
         return;
       }
@@ -655,10 +1051,17 @@ export function criarServidor(deps = {}) {
           );
           return;
         }
-        json(res, 200, { ok: true, status: "reiniciando" }, origemCheck.origem, origens);
+        const reinicio = planejarReinicio(await bloqueioCiclo(), {
+          supervisor: process.env.ULTRAPDV_SUPERVISOR === "1",
+        });
+        if (!reinicio.ok) {
+          json(res, 409, reinicio, origemCheck.origem, origens);
+          return;
+        }
+        json(res, 200, reinicio, origemCheck.origem, origens);
         if (aoReiniciar) {
           setTimeout(() => {
-            void aoReiniciar();
+            void aoReiniciar(reinicio);
           }, 80);
         }
         return;
@@ -688,6 +1091,21 @@ export function criarServidor(deps = {}) {
             res,
             400,
             { ok: false, erro: mensagemPortaForaDaFaixa() },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const bloqueioPorta = await bloqueioCiclo();
+        if (bloqueioPorta.permitido !== true) {
+          json(
+            res,
+            409,
+            planejarAlteracaoPorta({
+              porta: payload.porta,
+              portaAtual: portaReq,
+              bloqueio: bloqueioPorta,
+            }),
             origemCheck.origem,
             origens
           );
@@ -799,8 +1217,30 @@ export function criarServidor(deps = {}) {
         } catch {
           payload = {};
         }
-        const resultado = await aoTestarImpressao(payload);
-        json(res, 200, { ok: true, ...resultado }, origemCheck.origem, origens);
+        let resultadoTeste;
+        try {
+          resultadoTeste = await aoTestarImpressao(payload);
+        } catch (erroTeste) {
+          json(
+            res,
+            409,
+            { ok: false, impresso: false, erro: erroTeste instanceof Error ? erroTeste.message : "Falha no teste." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (resultadoTeste?.ok !== true || !resultadoTeste.impressora) {
+          json(
+            res,
+            409,
+            { ok: false, impresso: false, erro: resultadoTeste?.erro || "A impressão de teste não foi confirmada." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        json(res, 200, { ok: true, impresso: true, ...resultadoTeste }, origemCheck.origem, origens);
         return;
       }
 
@@ -971,7 +1411,12 @@ export function criarServidor(deps = {}) {
 
       if (req.method === "GET" && url.pathname === "/tef/status") {
         const tef = apresentarStatusTef(await consultarStatusTef());
-        const vinculo = apresentarVinculoTef(await lerVinculo());
+        const vinculoBruto = await lerVinculo();
+        const vinculo = apresentarVinculoTef(vinculoBruto);
+        const perfil = await gerenciadorTef.descreverPerfilAutonomo(vinculoBruto);
+        if (perfil?.efetivo) {
+          tef.perfilAutonomo = perfil;
+        }
         json(res, 200, { ok: true, tef, vinculo }, origemCheck.origem, origens);
         return;
       }
@@ -1266,6 +1711,830 @@ export function criarServidor(deps = {}) {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/tef/homologacao/comprovacao") {
+        const brutoProva = await lerBody(req);
+        let payloadProva;
+        try {
+          payloadProva = JSON.parse(brutoProva.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, pagamentoRecebido: false, podeFinalizar: false, nfcEEmitida: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const { readFile, writeFile, mkdir } = await import("node:fs/promises");
+        const {
+          auditarTiposSdk,
+          avaliarCapacidadeComprovacao,
+          avaliarComprovacaoFisica,
+          coletarRetornosComprovacao,
+          persistirEvidenciaComprovacao,
+          ARQUIVO_EVIDENCIA_COMPROVACAO,
+        } = await import("./tef-comprovacao-fisica.mjs");
+        const { bibliotecaResidenteDoConector, completarInstanciaResidente, avaliarJournalMenu, lerEvidenciaSessaoHomologacao } = await import("./tef-menu-conector.mjs");
+        if (instanciaPinpadHomologacao) {
+          const promovidaProva = completarInstanciaResidente(instanciaPinpadHomologacao);
+          if (promovidaProva) instanciaPinpadHomologacao = promovidaProva;
+        }
+        const raizProva = pastaConectorHomologacao();
+        const arquivoProva = path.join(raizProva, ARQUIVO_EVIDENCIA_COMPROVACAO);
+        const journalProva = await avaliarJournalMenu([
+          path.join(raizProva, "tef-journal-teste-nativo.json"),
+          path.join(raizProva, "tef-journal-venda-100.json"),
+          path.join(raizProva, "tef-journal-resultado-desconhecido.json"),
+        ]);
+        let evidenciaExistente = null;
+        try {
+          evidenciaExistente = JSON.parse(await readFile(arquivoProva, "utf8"));
+        } catch (erro) {
+          if (erro?.code !== "ENOENT") evidenciaExistente = { encerrado: false, ilegivel: true };
+        }
+        const evidenciaSessaoProva = lerEvidenciaSessaoHomologacao(payloadProva.empresaId, payloadProva.terminalCodigo);
+        const portaOcupadaProva = pinpadEmOperacaoFinanceira(gerenciadorTef) === true || ocupacaoHomologacao() != null;
+        let reservaProva = false;
+        if (payloadProva.executar === true && !portaOcupadaProva) {
+          reservaProva = reservarHomologacao("comprovacao").ok === true;
+        }
+        const entradaProva = {
+          ambiente: payloadProva.ambiente,
+          frase: payloadProva.frase,
+          empresaId: payloadProva.empresaId,
+          terminalCodigo: payloadProva.terminalCodigo,
+          dispositivoId: payloadProva.dispositivoId,
+          posid: payloadProva.posid,
+          valorCentavos: payloadProva.valorCentavos,
+          biblioteca: bibliotecaResidenteDoConector(instanciaPinpadHomologacao),
+          com7Exclusiva: payloadProva.executar === true ? reservaProva : !portaOcupadaProva,
+          portaPinpadOcupada: portaOcupadaProva,
+          journal: journalProva,
+          evidenciaExistente,
+          executar: payloadProva.executar === true,
+          simulado: false,
+          capturaEmCurso: evidenciaSessaoProva.capturaEmCurso,
+          referencias: evidenciaSessaoProva.referencias,
+          referenciasOrigem: evidenciaSessaoProva.referenciasOrigem,
+        };
+        const auditoriaProva = auditarTiposSdk({ kitPresente: false, headerLinux: "" });
+        let resultadoProva;
+        try {
+          resultadoProva = entradaProva.executar
+            ? await coletarRetornosComprovacao(entradaProva)
+            : avaliarComprovacaoFisica(entradaProva);
+        } finally {
+          if (reservaProva) liberarHomologacao("comprovacao");
+        }
+        if (resultadoProva.executado === true) {
+          await persistirEvidenciaComprovacao(arquivoProva, {
+            ...resultadoProva,
+            idempotencyKey: String(payloadProva.idempotencyKey ?? ""),
+            encerrado: false,
+          }, { readFile, writeFile, mkdir });
+        }
+        json(
+          res,
+          resultadoProva.ok === true ? 200 : 409,
+          {
+            ...resultadoProva,
+            auditoria: auditoriaProva,
+            capacidade: avaliarCapacidadeComprovacao(resultadoProva),
+            pagamentoRecebido: false,
+            podeFinalizar: false,
+            nfcEEmitida: false,
+            flagsAlteradas: false,
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/venda") {
+        const brutoVenda = await lerBody(req);
+        let payloadVenda;
+        try {
+          payloadVenda = JSON.parse(brutoVenda.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, pagamentoRecebido: false, comandoDll: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const {
+          atenderMenuConector,
+          bibliotecaResidenteDoConector,
+          completarInstanciaResidente,
+          executarTransacaoHomologacao,
+          seguirCapturaPinpad,
+          sessaoVendaEmMemoria,
+          FRASE_MENU_CONECTOR,
+          prepararTransporteHomologacao,
+          avaliarJournalMenu,
+          pontoHomologacaoNoDisco,
+          lerChavePublicaHomologacao,
+          recuperarSessaoAbertaSemExecucao,
+          transacaoLocalAbertaSemExecucao,
+        } = await import("./tef-menu-conector.mjs");
+        const { verificarDllPgWeb } = await import("./tef-dll.mjs");
+        const { diretorioProducaoPgWeb } = await import("./tef-diretorio.mjs");
+        const { PGWEB2_PRODUCAO } = await import("./tef-pgweb.mjs");
+        const { arquivoEtapaDaVenda, decidirPerfilExecucao, journalsDoPerfil, perfilSessaoAtiva } = await import("./tef-perfil-execucao.mjs");
+        const ambienteVenda = payloadVenda.ambiente === "producao" ? "producao" : payloadVenda.ambiente === "homologacao" ? "homologacao" : "";
+        if (!ambienteVenda || payloadVenda.frase !== FRASE_MENU_CONECTOR) {
+          json(
+            res,
+            409,
+            {
+              ok: false,
+              pagamentoRecebido: false,
+              podeFinalizar: false,
+              nfcEEmitida: false,
+              comandoDll: false,
+              codigo: "perfil",
+              mensagem: "A venda precisa do ambiente gravado e da autorização do servidor. Nenhum comando foi enviado.",
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (instanciaPinpadHomologacao) {
+          const promovidaVenda = completarInstanciaResidente(instanciaPinpadHomologacao);
+          if (promovidaVenda) instanciaPinpadHomologacao = promovidaVenda;
+        }
+        let bibliotecaVenda = bibliotecaResidenteDoConector(instanciaPinpadHomologacao);
+        const vinculoVenda = await lerVinculo();
+        const decisaoPerfil = decidirPerfilExecucao({
+          ambiente: ambienteVenda,
+          vinculoAmbiente: vinculoVenda?.ambiente,
+          sessao: perfilSessaoAtiva(bibliotecaVenda),
+          producaoHabilitada: PGWEB2_PRODUCAO === true,
+        });
+        if (!decisaoPerfil.ok) {
+          json(
+            res,
+            409,
+            {
+              ok: false,
+              pagamentoRecebido: false,
+              podeFinalizar: false,
+              nfcEEmitida: false,
+              comandoDll: false,
+              novaCobranca: false,
+              codigo: decisaoPerfil.codigo,
+              mensagem: decisaoPerfil.mensagem,
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (!bibliotecaVenda || perfilSessaoAtiva(bibliotecaVenda) !== decisaoPerfil.ambiente) {
+          if (payloadVenda.acao === "responder") {
+            json(
+              res,
+              409,
+              {
+                ok: false,
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                comandoDll: false,
+                novaCobranca: false,
+                codigo: "sessao",
+                mensagem: "A captura desta venda não está mais nesta sessão. Nenhuma nova cobrança foi iniciada.",
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          const diretorioInicial =
+            decisaoPerfil.ambiente === "producao"
+              ? diretorioProducaoPgWeb()
+              : path.join(pastaConectorHomologacao(), "TEF", "Homologacao", "PGWeb");
+          const escopoVenda = {
+            empresaId: payloadVenda.empresaId,
+            terminalCodigo: payloadVenda.terminalCodigo,
+            dispositivoId: payloadVenda.dispositivoId,
+            ambiente: decisaoPerfil.ambiente,
+          };
+          const journalInicial = await avaliarJournalMenu(
+            journalsDoPerfil(pastaConectorHomologacao(), diretorioInicial, decisaoPerfil.ambiente, escopoVenda),
+            undefined,
+            escopoVenda
+          );
+          const { garantirSessaoVenda } = await import("./tef-sessao-venda.mjs");
+          const portaInicial = await lerPortaPinpad(arquivoPortaPinpad());
+          const garantia = await garantirSessaoVenda(
+            {
+              ambiente: decisaoPerfil.ambiente,
+              empresaId: payloadVenda.empresaId,
+              posid: payloadVenda.posid,
+              diretorio: diretorioInicial,
+              biblioteca: instanciaPinpadHomologacao,
+              pontoInstalado: await pontoHomologacaoNoDisco(diretorioInicial),
+              portaSalva: portaInicial?.porta ?? null,
+              transacaoAtiva:
+                pinpadEmOperacaoFinanceira(gerenciadorTef) === true ||
+                (await transacaoHomologacaoAtiva({
+                  raiz: pastaConectorHomologacao(),
+                  gerenciador: gerenciadorTef,
+                })),
+              pendencia:
+                journalInicial.seguir === false && journalInicial.recuperavel !== true ? journalInicial : null,
+              ocupacao: ocupacaoHomologacao(),
+            },
+            {
+              arquivoDll: path.join(resolverRaizAgente(), "bin", "tef", "PGWebLib.dll"),
+              abrir: abrirDiagnosticoNativo,
+              persistirPorta: (entrada) => gravarPortaPinpad(arquivoPortaPinpad(), entrada),
+              promover(biblioteca, diretorio) {
+                biblioteca.arquitetura = "x64";
+                biblioteca.diretorio = diretorio;
+                const promovida = completarInstanciaResidente(biblioteca);
+                if (promovida) instanciaPinpadHomologacao = promovida;
+                return promovida;
+              },
+            }
+          );
+          if (garantia.ok !== true || !garantia.biblioteca) {
+            json(
+              res,
+              409,
+              {
+                ok: false,
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                comandoDll: false,
+                novaCobranca: false,
+                codigo: garantia.codigo,
+                mensagem: garantia.mensagem,
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          instanciaPinpadHomologacao = garantia.biblioteca;
+          bibliotecaVenda = bibliotecaResidenteDoConector(instanciaPinpadHomologacao);
+          if (!bibliotecaVenda) {
+            json(
+              res,
+              409,
+              {
+                ok: false,
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                comandoDll: false,
+                novaCobranca: false,
+                codigo: "sessao",
+                mensagem: "A PGWebLib iniciou, mas a sessão da venda não ficou disponível. Nenhuma cobrança foi iniciada.",
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+        }
+        if (payloadVenda.acao === "responder") {
+          const raizResposta = pastaConectorHomologacao();
+          const diretorioResposta =
+            ambienteVenda === "producao"
+              ? diretorioProducaoPgWeb()
+              : path.join(raizResposta, "TEF", "Homologacao", "PGWeb");
+          const arquivoResposta = arquivoEtapaDaVenda(
+            ambienteVenda === "producao" ? diretorioResposta : raizResposta,
+            {
+              empresaId: payloadVenda.empresaId,
+              terminalCodigo: payloadVenda.terminalCodigo,
+              dispositivoId: payloadVenda.dispositivoId,
+              ambiente: decisaoPerfil.ambiente,
+            }
+          );
+          const capturaId = Number(payloadVenda.capturaId);
+          const valorResposta = String(payloadVenda.valor ?? "").trim();
+          if (!Number.isInteger(capturaId) || capturaId < 0 || !valorResposta || "indice" in payloadVenda) {
+            json(
+              res,
+              400,
+              {
+                ok: false,
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                comandoDll: false,
+                novaCobranca: false,
+                mensagem: "A resposta precisa ser um vszValorMenu devolvido pela biblioteca. Nenhuma nova cobrança foi iniciada.",
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          const continuacao = await atenderMenuConector({
+            ambiente: ambienteVenda,
+            acao: "responder",
+            empresaId: payloadVenda.empresaId,
+            terminalCodigo: payloadVenda.terminalCodigo,
+            frase: payloadVenda.frase,
+            capturaId,
+            valor: valorResposta,
+            journal: { seguir: true, codigo: "journal" },
+            transporte: bibliotecaVenda,
+            sessaoResidenteAutorizada: true,
+            arquivoEtapa: arquivoResposta,
+            dispositivoId: payloadVenda.dispositivoId,
+          });
+          const pinpadContinuacao = await seguirCapturaPinpad(payloadVenda.empresaId, payloadVenda.terminalCodigo);
+          const resultadoContinuacao = pinpadContinuacao ? { ...continuacao, ...pinpadContinuacao } : continuacao;
+          json(
+            res,
+            resultadoContinuacao.ok === true ? 200 : 409,
+            {
+              ...resultadoContinuacao,
+              comandoDll: continuacao.comandoDll === true || Number(continuacao.novas) === 1 || resultadoContinuacao.comandoDll === true,
+              pagamentoRecebido: resultadoContinuacao.pagamentoRecebido === true,
+              podeFinalizar: resultadoContinuacao.pagamentoRecebido === true && ambienteVenda === "producao",
+              nfcEEmitida: false,
+              novaCobranca: false,
+              journalApagado: false,
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const memoriaVenda = sessaoVendaEmMemoria(payloadVenda.empresaId, payloadVenda.terminalCodigo);
+        if (memoriaVenda.ativa) {
+          if (memoriaVenda.pinpad) {
+            const pinpadMemoria = await seguirCapturaPinpad(payloadVenda.empresaId, payloadVenda.terminalCodigo);
+            json(
+              res,
+              pinpadMemoria?.ok === true ? 200 : 409,
+              {
+                ...pinpadMemoria,
+                novaCobranca: false,
+                journalApagado: false,
+                pagamentoRecebido: pinpadMemoria?.pagamentoRecebido === true,
+                podeFinalizar: pinpadMemoria?.pagamentoRecebido === true && ambienteVenda === "producao",
+                nfcEEmitida: false,
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          json(
+            res,
+            409,
+            {
+              ok: false,
+              codigo: "ocupada",
+              pagamentoRecebido: false,
+              podeFinalizar: false,
+              nfcEEmitida: false,
+              comandoDll: false,
+              novaCobranca: false,
+              journalApagado: false,
+              mensagem: "Há captura em andamento nesta sessão. Nenhuma nova cobrança foi iniciada.",
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const raizVenda = pastaConectorHomologacao();
+        const diretorioVenda =
+          ambienteVenda === "producao"
+            ? diretorioProducaoPgWeb()
+            : path.join(raizVenda, "TEF", "Homologacao", "PGWeb");
+        const escopoVenda = {
+          empresaId: payloadVenda.empresaId,
+          terminalCodigo: payloadVenda.terminalCodigo,
+          dispositivoId: payloadVenda.dispositivoId,
+          ambiente: decisaoPerfil.ambiente,
+        };
+        const arquivoEtapaVenda = arquivoEtapaDaVenda(
+          decisaoPerfil.ambiente === "producao" ? diretorioVenda : raizVenda,
+          escopoVenda
+        );
+        let journalVenda = await avaliarJournalMenu(
+          journalsDoPerfil(raizVenda, diretorioVenda, decisaoPerfil.ambiente, escopoVenda),
+          undefined,
+          escopoVenda
+        );
+        const sessaoLocalVenda = transacaoLocalAbertaSemExecucao(payloadVenda.empresaId, payloadVenda.terminalCodigo);
+        const pendenciaRecuperavel =
+          journalVenda.codigo === "sessao_aberta" ||
+          journalVenda.codigo === "reconciliacao" ||
+          sessaoLocalVenda === true;
+        if (pendenciaRecuperavel) {
+          if (journalVenda.codigo === "sessao_aberta" && journalVenda.recuperavel !== true) {
+            json(
+              res,
+              409,
+              {
+                ok: false,
+                codigo: "ocupada",
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                comandoDll: false,
+                novaCobranca: false,
+                journalApagado: false,
+                mensagem: "Há captura em andamento nesta sessão. Nenhuma nova cobrança foi iniciada.",
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          const recuperacaoVenda = await recuperarSessaoAbertaSemExecucao({
+            journal: journalVenda.journalAberto ?? { retornoNewTransac: 0, executada: false },
+            transporte: bibliotecaVenda,
+            transacaoLocalAberta: sessaoLocalVenda,
+            arquivo: journalVenda.arquivo || arquivoEtapaVenda,
+            empresaId: payloadVenda.empresaId,
+            terminalCodigo: payloadVenda.terminalCodigo,
+          });
+          if (recuperacaoVenda.ok !== true) {
+            json(
+              res,
+              409,
+              {
+                ...recuperacaoVenda,
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                comandoDll: false,
+                novaCobranca: false,
+                journalApagado: false,
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          journalVenda = { seguir: true, codigo: "journal", mensagem: "" };
+        }
+        const dllVenda = await verificarDllPgWeb(path.join(resolverRaizAgente(), "bin", "tef"));
+        const pedidoVenda = {
+          ambiente: ambienteVenda,
+          empresaId: payloadVenda.empresaId,
+          dispositivoId: payloadVenda.dispositivoId,
+          terminalCodigo: payloadVenda.terminalCodigo,
+          posid: payloadVenda.posid,
+          valorCentavos: payloadVenda.valorCentavos,
+          idempotencyKey: payloadVenda.idempotencyKey,
+          expiraEm: payloadVenda.expiraEm,
+        };
+        const entradaVenda = {
+          journal: journalVenda,
+          pontoInstalado: await pontoHomologacaoNoDisco(diretorioVenda),
+          dllOk: dllVenda.ok === true,
+          biblioteca: instanciaPinpadHomologacao,
+          arquivoEtapa: arquivoEtapaVenda,
+        };
+        const preparoVenda = prepararTransporteHomologacao({
+          pedido: pedidoVenda,
+          assinatura: payloadVenda.assinatura,
+          chavePublicaPem: await lerChavePublicaHomologacao(),
+          entrada: entradaVenda,
+        });
+        if (preparoVenda.ok !== true) {
+          json(res, 409, { ...preparoVenda, comandoDll: false, pagamentoRecebido: false, podeFinalizar: false, nfcEEmitida: false }, origemCheck.origem, origens);
+          return;
+        }
+        const execucaoVenda = await executarTransacaoHomologacao({
+          pedido: pedidoVenda,
+          assinatura: payloadVenda.assinatura,
+          chavePublicaPem: await lerChavePublicaHomologacao(),
+          frase: payloadVenda.frase,
+          entrada: entradaVenda,
+        });
+        const pinpadVenda = await seguirCapturaPinpad(pedidoVenda.empresaId, pedidoVenda.terminalCodigo);
+        const resultadoVenda = pinpadVenda ? { ...execucaoVenda, ...pinpadVenda } : execucaoVenda;
+        json(
+          res,
+          resultadoVenda.ok === true ? 200 : 409,
+          {
+            ...resultadoVenda,
+            comandoDll: execucaoVenda.comandoDll === true || execucaoVenda.transacaoIniciada === true || resultadoVenda.comandoDll === true,
+            pagamentoRecebido: resultadoVenda.pagamentoRecebido === true,
+            podeFinalizar: resultadoVenda.pagamentoRecebido === true && ambienteVenda === "producao",
+            nfcEEmitida: false,
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/homologacao/menu") {
+        const brutoMenu = await lerBody(req);
+        let payloadMenu;
+        try {
+          payloadMenu = JSON.parse(brutoMenu.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const chavesMenu = Object.keys(payloadMenu ?? {});
+        const permitidasMenu = new Set([
+          "acao",
+          "empresaId",
+          "terminalCodigo",
+          "frase",
+          "capturaId",
+          "valor",
+          "idempotencyKey",
+          "valorCentavos",
+          "dispositivoId",
+          "posid",
+          "expiraEm",
+          "assinatura",
+        ]);
+        if (chavesMenu.some((chave) => !permitidasMenu.has(chave)) || payloadMenu?.execucaoFisica === true) {
+          json(
+            res,
+            400,
+            { ok: false, pagamentoRecebido: false, podeFinalizar: false, erro: "Payload recusado. Nenhum comando foi enviado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const {
+          atenderMenuConector,
+          avaliarJournalMenu,
+          bibliotecaResidenteDoConector,
+          completarInstanciaResidente,
+          exclusivaCom7,
+          lerChavePublicaHomologacao,
+          liberarReservaSemSessao,
+          pontoHomologacaoNoDisco,
+          acompanharCapturaPinpad,
+          executarTransacaoHomologacao,
+          FRASE_MENU_CONECTOR,
+          prepararTransporteHomologacao,
+          resolverTransporteMenu,
+        } = await import("./tef-menu-conector.mjs");
+        const { verificarDllPgWeb } = await import("./tef-dll.mjs");
+        const raizMenu = pastaConectorHomologacao();
+        const arquivoResultadoDesconhecido = path.join(raizMenu, "tef-journal-resultado-desconhecido.json");
+        const journalMenu = await avaliarJournalMenu([
+          path.join(raizMenu, "tef-journal-teste-nativo.json"),
+          path.join(raizMenu, "tef-journal-venda-100.json"),
+          arquivoResultadoDesconhecido,
+        ]);
+        if (instanciaPinpadHomologacao) {
+          const promovidaMenu = completarInstanciaResidente(instanciaPinpadHomologacao);
+          if (promovidaMenu) instanciaPinpadHomologacao = promovidaMenu;
+        }
+        const bibliotecaMenu = bibliotecaResidenteDoConector(instanciaPinpadHomologacao);
+        const dllMenu = await verificarDllPgWeb(path.join(resolverRaizAgente(), "bin", "tef"));
+        const entradaMenu = {
+          ambiente: "homologacao",
+          servidor: "homologacao",
+          journal: journalMenu,
+          pontoInstalado: await pontoHomologacaoNoDisco(path.join(raizMenu, "TEF", "Homologacao", "PGWeb")),
+          dllOk: dllMenu.ok === true,
+          com7Exclusiva: exclusivaCom7(payloadMenu.empresaId, payloadMenu.terminalCodigo),
+          portaPinpadOcupada: pinpadEmOperacaoFinanceira(gerenciadorTef) === true,
+          sessaoNativaDisponivel: bibliotecaMenu != null,
+          biblioteca: bibliotecaMenu,
+          autorizacaoOperacao: null,
+        };
+        if (payloadMenu.acao === "iniciar") {
+          const preparo = prepararTransporteHomologacao({
+            pedido: {
+              ambiente: "homologacao",
+              empresaId: payloadMenu.empresaId,
+              dispositivoId: payloadMenu.dispositivoId,
+              terminalCodigo: payloadMenu.terminalCodigo,
+              posid: payloadMenu.posid,
+              valorCentavos: payloadMenu.valorCentavos,
+              idempotencyKey: payloadMenu.idempotencyKey,
+              expiraEm: payloadMenu.expiraEm,
+            },
+            assinatura: payloadMenu.assinatura,
+            chavePublicaPem: await lerChavePublicaHomologacao(),
+            entrada: {
+              journal: journalMenu,
+              pontoInstalado: entradaMenu.pontoInstalado,
+              dllOk: entradaMenu.dllOk,
+              biblioteca: instanciaPinpadHomologacao,
+            },
+          });
+          json(
+            res,
+            preparo.ok === true ? 200 : 409,
+            {
+              ...preparo,
+              transacaoIniciada: false,
+              execucaoFisica: false,
+              comandoDll: false,
+              pagamentoRecebido: false,
+              podeFinalizar: false,
+              nfcEEmitida: false,
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (payloadMenu.acao === "executar" || payloadMenu.acao === "confirmar" || payloadMenu.acao === "desfazer") {
+          if (payloadMenu.frase !== FRASE_MENU_CONECTOR) {
+            json(
+              res,
+              409,
+              {
+                ok: false,
+                pagamentoRecebido: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                execucaoFisica: false,
+                comandoDll: false,
+                mensagem: "O teste financeiro de homologação não foi autorizado. Nenhum comando foi enviado.",
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          if (payloadMenu.acao === "confirmar" || payloadMenu.acao === "desfazer") {
+            const { decidirNaSessaoResidente } = await import("./tef-menu-conector.mjs");
+            const decisaoMenu = await decidirNaSessaoResidente(
+              payloadMenu.empresaId,
+              payloadMenu.terminalCodigo,
+              payloadMenu.acao
+            );
+            json(
+              res,
+              decisaoMenu.ok === true ? 200 : 409,
+              {
+                ...decisaoMenu,
+                execucaoFisica: false,
+                podeFinalizar: false,
+                nfcEEmitida: false,
+                journalApagado: false,
+              },
+              origemCheck.origem,
+              origens
+            );
+            return;
+          }
+          const execucaoMenu = await executarTransacaoHomologacao({
+            pedido: {
+              ambiente: "homologacao",
+              empresaId: payloadMenu.empresaId,
+              dispositivoId: payloadMenu.dispositivoId,
+              terminalCodigo: payloadMenu.terminalCodigo,
+              posid: payloadMenu.posid,
+              valorCentavos: payloadMenu.valorCentavos,
+              idempotencyKey: payloadMenu.idempotencyKey,
+              expiraEm: payloadMenu.expiraEm,
+            },
+            assinatura: payloadMenu.assinatura,
+            chavePublicaPem: await lerChavePublicaHomologacao(),
+            frase: payloadMenu.frase,
+            entrada: {
+              journal: journalMenu,
+              pontoInstalado: entradaMenu.pontoInstalado,
+              dllOk: entradaMenu.dllOk,
+              biblioteca: instanciaPinpadHomologacao,
+              portaPinpadOcupada: entradaMenu.portaPinpadOcupada,
+              arquivoJournal: arquivoResultadoDesconhecido,
+            },
+          });
+          json(
+            res,
+            execucaoMenu.ok === true ? 200 : 409,
+            {
+              ...execucaoMenu,
+              execucaoFisica: false,
+              podeFinalizar: false,
+              nfcEEmitida: false,
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (payloadMenu.acao === "acompanhar") {
+          const acompanhamento = await acompanharCapturaPinpad(payloadMenu.empresaId, payloadMenu.terminalCodigo);
+          json(
+            res,
+            acompanhamento.ok === true ? 200 : 409,
+            {
+              ...acompanhamento,
+              pagamentoRecebido: false,
+              podeFinalizar: false,
+              nfcEEmitida: false,
+              execucaoFisica: false,
+            },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        const escolhaMenu = resolverTransporteMenu(entradaMenu);
+        let resultadoMenu;
+        try {
+        resultadoMenu = await atenderMenuConector({
+          ambiente: "homologacao",
+          acao: payloadMenu.acao,
+          empresaId: payloadMenu.empresaId,
+          terminalCodigo: payloadMenu.terminalCodigo,
+          frase: payloadMenu.frase,
+          capturaId: payloadMenu.capturaId,
+          valor: payloadMenu.valor,
+          journal: journalMenu,
+          simulacao: escolhaMenu.simulacao,
+          transporte: escolhaMenu.transporte,
+          ensaioNativo: false,
+          sessaoResidenteAutorizada: escolhaMenu.nativo === true,
+          portaPinpadOcupada: entradaMenu.portaPinpadOcupada,
+          arquivoJournal: arquivoResultadoDesconhecido,
+          idempotencyKey: payloadMenu.idempotencyKey,
+          valorCentavos: payloadMenu.valorCentavos,
+        });
+        } finally {
+          liberarReservaSemSessao();
+        }
+        resultadoMenu.journalCodigo = journalMenu.codigo;
+        resultadoMenu.comandoDll = false;
+        resultadoMenu.execucaoFisica = false;
+        resultadoMenu.nativo = escolhaMenu.nativo === true && resultadoMenu.nativo === true;
+        resultadoMenu.pagamentoRecebido = false;
+        resultadoMenu.motivoFisico = escolhaMenu.motivo;
+        resultadoMenu.ligacaoResidente = escolhaMenu.nativo === true;
+        json(res, resultadoMenu.ok === true ? 200 : 409, resultadoMenu, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/homologacao/pinpad") {
+        const brutoHomologacao = await lerBody(req);
+        let payloadHomologacao;
+        try {
+          payloadHomologacao = JSON.parse(brutoHomologacao.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const acaoHomologacao = payloadHomologacao?.acao;
+        const chavesHomologacao = Object.keys(payloadHomologacao ?? {});
+        if (
+          (acaoHomologacao !== "identificar" && acaoHomologacao !== "testar") ||
+          chavesHomologacao.some((chave) => chave !== "acao")
+        ) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const resultadoHomologacao = await executarDiagnosticoHomologacaoTef({
+          acao: acaoHomologacao,
+        });
+        json(
+          res,
+          resultadoHomologacao.ok === true ? 200 : 409,
+          resultadoHomologacao,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/pinpad/comunicacao") {
+        const brutoComunicacao = await lerBody(req);
+        let payloadComunicacao;
+        try {
+          payloadComunicacao = JSON.parse(brutoComunicacao.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const acaoComunicacao = payloadComunicacao?.acao;
+        const chavesComunicacao = Object.keys(payloadComunicacao ?? {});
+        if (
+          payloadComunicacao?.ambiente !== "producao" ||
+          (acaoComunicacao !== "identificar" && acaoComunicacao !== "testar") ||
+          chavesComunicacao.some((chave) => chave !== "acao" && chave !== "ambiente")
+        ) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const resultadoComunicacao = await executarDiagnosticoHomologacaoTef(
+          { acao: acaoComunicacao },
+          { ambiente: "producao" }
+        );
+        json(
+          res,
+          resultadoComunicacao.ok === true ? 200 : 409,
+          resultadoComunicacao,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
       if (
         (req.method === "GET" && url.pathname === "/tef/pinpad/diagnostico") ||
         (req.method === "POST" && url.pathname === "/tef/pinpad/testar-comunicacao")
@@ -1308,6 +2577,166 @@ export function criarServidor(deps = {}) {
         return;
       }
 
+      if (
+        (req.method === "GET" && url.pathname === "/tef/homologacao/identidade") ||
+        (req.method === "POST" && url.pathname === "/tef/homologacao/identidade/apresentar")
+      ) {
+        const { apresentarIdentidadeHomologacao, emitirIdentidadeHomologacao } = await import(
+          "./tef-identidade-homologacao.mjs"
+        );
+        if (req.method === "GET") {
+          const emitida = await emitirIdentidadeHomologacao();
+          json(res, emitida.ok ? 200 : 409, emitida, origemCheck.origem, origens);
+          return;
+        }
+        const brutoIdentidade = await lerBody(req);
+        let payloadIdentidade;
+        try {
+          payloadIdentidade = JSON.parse(brutoIdentidade.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const chavesIdentidade = Object.keys(payloadIdentidade ?? {});
+        if (chavesIdentidade.some((chave) => chave !== "codigo" && chave !== "dispositivoId")) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const apresentada = await apresentarIdentidadeHomologacao(payloadIdentidade);
+        json(res, apresentada.ok ? 200 : 409, apresentada, origemCheck.origem, origens);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/homologacao/instalacao") {
+        const brutoInstalacao = await lerBody(req);
+        let payloadInstalacao;
+        try {
+          payloadInstalacao = JSON.parse(brutoInstalacao.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const acaoInstalacao = payloadInstalacao?.acao;
+        const chavesInstalacao = Object.keys(payloadInstalacao ?? {});
+        const permitidas = new Set([
+          "acao",
+          "confirmacao",
+          "ponto",
+          "servidor",
+          "cnpj",
+          "respostas",
+          "execucaoId",
+          "empresaId",
+          "dispositivoId",
+          "terminalId",
+          "estabelecimento",
+        ]);
+        const acoesInstalacao = ["resumo", "executar", "responder", "confirmar", "desfazer", "assinar", "consultar"];
+        if (
+          !acoesInstalacao.includes(acaoInstalacao) ||
+          chavesInstalacao.some((chave) => !permitidas.has(chave))
+        ) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const diretorioDllInstalacao = path.join(resolverRaizAgente(), "bin", "tef");
+        const resultadoInstalacaoIsolada = await executarInstalacaoIsolada(payloadInstalacao, {
+          raiz: pastaConectorHomologacao(),
+          pinpadOcupado: pinpadEmOperacaoFinanceira(gerenciadorTef),
+          gerenciador: gerenciadorTef,
+          verificarDll: async () => ({
+            ...(await verificarDllPgWeb(diretorioDllInstalacao)),
+            arquivo: path.join(diretorioDllInstalacao, "PGWebLib.dll"),
+          }),
+          abrir: abrirInstalacaoNativa,
+          lerChave: async () => {
+            try {
+              const { arquivoChaveHomologacao } = await import("./tef-identidade-homologacao.mjs");
+              const arquivo = arquivoChaveHomologacao();
+              if (!arquivo) return null;
+              const fsChave = await import("node:fs/promises");
+              const bruto = JSON.parse(await fsChave.readFile(arquivo, "utf8"));
+              if (!bruto?.publica || !bruto?.privada) return null;
+              return { id: bruto.id, publica: bruto.publica, privada: bruto.privada };
+            } catch {
+              return null;
+            }
+          },
+        });
+        json(
+          res,
+          resultadoInstalacaoIsolada.ok === true ? 200 : 409,
+          resultadoInstalacaoIsolada,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/tef/producao/instalacao") {
+        const brutoInstalacaoProducao = await lerBody(req);
+        let payloadInstalacaoProducao;
+        try {
+          payloadInstalacaoProducao = JSON.parse(brutoInstalacaoProducao.toString("utf8") || "{}");
+        } catch {
+          json(res, 400, { ok: false, erro: "Payload inválido." }, origemCheck.origem, origens);
+          return;
+        }
+        const acaoInstalacaoProducao = payloadInstalacaoProducao?.acao;
+        const chavesInstalacaoProducao = Object.keys(payloadInstalacaoProducao ?? {});
+        const permitidasProducao = new Set([
+          "acao",
+          "confirmacao",
+          "ponto",
+          "servidor",
+          "cnpj",
+          "respostas",
+          "execucaoId",
+          "empresaId",
+          "dispositivoId",
+          "terminalId",
+          "estabelecimento",
+          "reinstalar",
+        ]);
+        const acoesInstalacaoProducao = ["resumo", "executar", "responder", "confirmar", "desfazer", "consultar", "precondicoes"];
+        if (
+          !acoesInstalacaoProducao.includes(acaoInstalacaoProducao) ||
+          chavesInstalacaoProducao.some((chave) => !permitidasProducao.has(chave))
+        ) {
+          json(res, 400, { ok: false, erro: "Payload recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const { diretorioProducaoPgWeb } = await import("./tef-diretorio.mjs");
+        const diretorioDllProducao = path.join(resolverRaizAgente(), "bin", "tef");
+        const resultadoInstalacaoProducao = await executarInstalacaoIsolada(payloadInstalacaoProducao, {
+          ambiente: "producao",
+          diretorio: diretorioProducaoPgWeb(),
+          pinpadOcupado: pinpadEmOperacaoFinanceira(gerenciadorTef),
+          gerenciador: gerenciadorTef,
+          verificarDll: async () => ({
+            ...(await verificarDllPgWeb(diretorioDllProducao)),
+            arquivo: path.join(diretorioDllProducao, "PGWebLib.dll"),
+          }),
+          abrir: abrirInstalacaoNativa,
+          porta: portaReq,
+          ouvintes: 1,
+          encerrarResidente: async () => {
+            if (typeof instanciaPinpadHomologacao?.end === "function") {
+              await instanciaPinpadHomologacao.end();
+            }
+            instanciaPinpadHomologacao = null;
+          },
+        });
+        json(
+          res,
+          resultadoInstalacaoProducao.ok === true ? 200 : 409,
+          resultadoInstalacaoProducao,
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/tef/inicializar") {
         const brutoInicio = await lerBody(req);
         let payloadInicio;
@@ -1335,9 +2764,21 @@ export function criarServidor(deps = {}) {
           return;
         }
 
-        const resultadoInicio = await executarInicializacaoTef();
-        const httpInicio = respostaOperacaoTef(resultadoInicio);
-        json(res, httpInicio.status, httpInicio.corpo, origemCheck.origem, origens);
+        json(
+          res,
+          409,
+          {
+            ok: false,
+            pagamentoRecebido: false,
+            podeFinalizar: false,
+            nfcEEmitida: false,
+            comandoDll: false,
+            codigo: "nativo",
+            mensagem: "A inicialização TEF usa a sessão residente da PGWebLib. O agente Pascal não foi chamado.",
+          },
+          origemCheck.origem,
+          origens
+        );
         return;
       }
 
@@ -1384,7 +2825,26 @@ export function criarServidor(deps = {}) {
           return;
         }
 
-        const resultadoInstalacao = await executarInstalacaoTef(pedidoInstalacao.credencial);
+        json(
+          res,
+          409,
+          {
+            ok: false,
+            pagamentoRecebido: false,
+            podeFinalizar: false,
+            nfcEEmitida: false,
+            comandoDll: false,
+            evidencia: null,
+            codigo: "nativo",
+            mensagem: "A instalação do ponto usa PWOPER_INSTALL na PGWebLib, com autorização explícita. O agente Pascal não foi chamado.",
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
+        const resultadoInstalacao = await executarInstalacaoTef(pedidoInstalacao.credencial, {
+          provisionarNovo: pedidoInstalacao.provisionarNovo === true,
+        });
         const httpInstalacao = respostaOperacaoTef(resultadoInstalacao);
         json(
           res,
@@ -1435,6 +2895,16 @@ export function criarServidor(deps = {}) {
             res,
             400,
             { ok: false, erro: "Payload recusado." },
+            origemCheck.origem,
+            origens
+          );
+          return;
+        }
+        if (!String(payloadPagamento.identificador ?? "").trim() || !(Number(payloadPagamento.valor) > 0)) {
+          json(
+            res,
+            400,
+            { ok: false, codigo: "TEF_DADOS_INVALIDOS", erro: "Dados do pagamento inválidos." },
             origemCheck.origem,
             origens
           );
@@ -1517,6 +2987,22 @@ export function criarServidor(deps = {}) {
           return;
         }
 
+        json(
+          res,
+          409,
+          {
+            ok: false,
+            pagamentoRecebido: false,
+            podeFinalizar: false,
+            nfcEEmitida: false,
+            comandoDll: false,
+            codigo: "nativo",
+            mensagem: "O pagamento TEF usa a PGWebLib em /tef/venda. O agente Pascal não foi chamado.",
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
         const resultadoPagamento = await executarPagamentoTef({
           identificador: payloadPagamento.identificador,
           valor: payloadPagamento.valor,
@@ -1908,6 +3394,37 @@ export function criarServidor(deps = {}) {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/diagnostico") {
+        if (!podeAdministrar(origemCheck.origem, portaReq)) {
+          json(res, 403, { ok: false, erro: "Diagnóstico recusado." }, origemCheck.origem, origens);
+          return;
+        }
+        const dllDiag = await verificarDllPgWeb(path.join(resolverRaizAgente(), "bin", "tef"));
+        const tefDiag = apresentarStatusTef(await consultarStatusTef());
+        const bibliotecaDiag = instanciaPinpadHomologacao;
+        json(
+          res,
+          200,
+          {
+            ok: true,
+            ...montarDiagnosticoConector({
+              nome,
+              versao,
+              pgwebLib: tefDiag?.pgwebLib,
+              dll: dllDiag,
+              ambiente: modoHomologacao ? "homologacao" : "producao",
+              porta: estado.porta,
+              pinpadOcupado: pinpadEmOperacaoFinanceira(gerenciadorTef),
+              bibliotecaInicializada: bibliotecaDiag?.inicializada === true,
+              ultimaFalha: estado.ultimaFalha || "",
+            }),
+          },
+          origemCheck.origem,
+          origens
+        );
+        return;
+      }
+
       json(
         res,
         404,
@@ -1975,7 +3492,7 @@ async function iniciar() {
   let servidorAtual = null;
   let trayProc = null;
   let mutexSrv = null;
-  const gerenciadorTef = new GerenciadorTefNativo({
+  const gerenciadorTef = new GerenciadorPgWeb({
     registrarLog: (evento, detalhe, opcoes) =>
       registrarLog(evento, detalhe, opcoes),
   });
@@ -1988,9 +3505,9 @@ async function iniciar() {
       estado,
       gerenciadorTef,
       obterDispositivoId: () => obterOuCriarDispositivoId({ pasta: dados }),
-      encerrarProcesso: () => {
+      encerrarProcesso: (codigo = 0) => {
         estado.status = "erro";
-        void registrarLog("encerrar", `porta=${estado.porta}`);
+        void registrarLog("encerrar", `porta=${estado.porta} codigo=${codigo}`);
         if (trayProc && !trayProc.killed) {
           try {
             trayProc.kill();
@@ -2003,8 +3520,8 @@ async function iniciar() {
             if (mutexSrv) {
               mutexSrv.close();
             }
-            void fecharServidor(servidorAtual).finally(() => process.exit(0));
-            setTimeout(() => process.exit(0), 1500);
+            void fecharServidor(servidorAtual).finally(() => process.exit(codigo));
+            setTimeout(() => process.exit(codigo), 1500);
           });
         });
       },
@@ -2063,16 +3580,35 @@ async function iniciar() {
         await salvarConfigLocal({ lastPrinter: impressora, lastPaper: papel });
         return { ok: true, impressora, papel };
       },
-      aoReiniciar: async () => {
+      aoReiniciar: async (plano) => {
+        if (plano?.supervisor === true) {
+          await registrarLog("reinicio-supervisor", `porta=${estado.porta}`);
+          montarDeps().encerrarProcesso(CODIGO_SAIDA_REINICIO);
+          return;
+        }
         await gerenciadorTef.encerrar();
         await registrarLog("reinicio", `porta=${estado.porta}`);
         estado.status = "reiniciando";
+        estado.ultimaFalha = "";
         const porta = estado.porta;
-        await fecharServidor(servidorAtual);
-        servidorAtual = criarServidor(montarDeps());
-        await escutar(servidorAtual, porta);
-        estado.status = "conectado";
-        await registrarLog("reinicio-ok", `porta=${porta}`);
+        try {
+          await fecharServidor(servidorAtual);
+          servidorAtual = criarServidor(montarDeps());
+          await escutar(servidorAtual, porta);
+          const saude = await consultarSaudeLocal(porta);
+          if (!saude?.ok || Number(saude.port) !== porta) {
+            estado.status = "erro";
+            estado.ultimaFalha = "O Connector não voltou a responder.";
+            await registrarLog("reinicio-falha", `porta=${porta}`);
+            return;
+          }
+          estado.status = "conectado";
+          await registrarLog("reinicio-ok", `porta=${porta}`);
+        } catch (erroReinicio) {
+          estado.status = "erro";
+          estado.ultimaFalha = erroReinicio instanceof Error ? erroReinicio.message : "Falha ao reiniciar.";
+          await registrarLog("reinicio-falha", estado.ultimaFalha);
+        }
       },
       aoAlterarPorta: async (payload, portaAtual) => {
         const usarProxima = payload.usarProxima === true;
@@ -2137,6 +3673,7 @@ async function iniciar() {
         }
 
         const nova = escolha.porta;
+        const anterior = { preferredPort: portaAtual, activePort: portaAtual };
         await registrarLog(
           "alterar-porta",
           `de=${portaAtual} para=${nova}`
@@ -2144,12 +3681,24 @@ async function iniciar() {
         const novoServidor = criarServidor(montarDeps());
         try {
           await escutar(novoServidor, nova);
+          const saudeNova = await consultarSaudeLocal(nova);
+          if (!saudeNova?.ok || Number(saudeNova.port) !== nova) {
+            novoServidor.close();
+            return {
+              ok: false,
+              status: 409,
+              erro: "A nova porta não respondeu. A porta anterior foi mantida.",
+              rollback: planejarRollbackPorta(anterior),
+              podeUsarProxima: true,
+            };
+          }
         } catch {
           novoServidor.close();
           return {
             ok: false,
             status: 409,
             erro: mensagemPortaOcupada(nova),
+            rollback: planejarRollbackPorta(anterior),
             podeUsarProxima: true,
           };
         }
@@ -2213,10 +3762,14 @@ async function iniciar() {
   estado.porta = escolha.porta;
   servidorAtual = criarServidor(montarDeps());
   await escutar(servidorAtual, estado.porta);
-  await salvarConfigLocal({
-    preferredPort: configInicial.preferredPort || PORTA_PADRAO,
-    activePort: estado.porta,
-  });
+  try {
+    await salvarConfigLocal({
+      preferredPort: configInicial.preferredPort || PORTA_PADRAO,
+      activePort: estado.porta,
+    });
+  } catch (erroConfig) {
+    await registrarLog("config", erroConfig instanceof Error ? erroConfig.message : "falha ao gravar a porta ativa");
+  }
   await gravarPid({ pasta: dados });
   trayProc = iniciarTray({
     configPath: arquivoConfigAtual(),

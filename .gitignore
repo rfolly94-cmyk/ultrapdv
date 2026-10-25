@@ -40,6 +40,8 @@ yarn-error.log*
 /print-agent/node_modules
 /print-agent/data
 /print-agent/dist/
+/print-agent/dist-homologacao/
+/print-agent/dist-homologacao-rebuild/
 /print-agent/runtime/node.exe
 /print-agent/runtime/LICENSE
 /print-agent/bin/*.exe
@@ -108,3 +110,6 @@ assinatura.sig
 # Certificados e logs locais
 *.crt
 *.sig
+
+# Credenciais locais de homologacao PayGo. O perfil versionado nao as contem.
+/tef-2/diagnostico-dll/perfil-homologacao/credenciais.local.txt

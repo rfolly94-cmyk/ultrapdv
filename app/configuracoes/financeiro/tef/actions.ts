@@ -11,16 +11,50 @@ import {
   type ObservacaoAssistente,
 } from "@/lib/pdv/tef/assistente-sessao";
 import { validarProvaBibliotecaSessao } from "@/lib/pdv/tef/prova-biblioteca-sessao";
-import { ErroTef, salvarConfigTefSessao, autorizarPareamentoTefSessao, concluirPareamentoTefSessao, diagnosticarRecuperacaoTefSessao, prepararSincronizacaoVinculoTefSessao, recuperarAutorizacaoTefSessao, revogarTerminalTefSessao, verificarComputadorTefSessao } from "@/lib/pdv/tef/servico";
+import { montarServidorFormulario } from "@/lib/pdv/tef/configuracao-paygo";
+import { ErroTef, salvarConfigTefSessao, validarConfiguracaoTefSessao, autorizarPareamentoTefSessao, concluirPareamentoTefSessao, diagnosticarRecuperacaoTefSessao, prepararSincronizacaoVinculoTefSessao, recuperarAutorizacaoTefSessao, revogarTerminalTefSessao, verificarComputadorTefSessao } from "@/lib/pdv/tef/servico";
 
-export async function salvarTefEmpresa(formData: FormData) {
+function camposTef(formData: FormData) {
   const ambiente = formData.get("ambiente") === "producao" ? "producao" : "homologacao";
+  return {
+    habilitado: formData.get("habilitado") === "on",
+    ambiente,
+    estabelecimento: String(formData.get("estabelecimento") ?? ""),
+    cnpjInstalacao: String(formData.get("cnpjInstalacao") ?? ""),
+    pontoCaptura: String(formData.get("pontoCaptura") ?? ""),
+    servidor: montarServidorFormulario(
+      String(formData.get("servidorHost") ?? ""),
+      String(formData.get("servidorPorta") ?? "")
+    ),
+  } as const;
+}
+
+export async function validarConfiguracaoTef(formData: FormData): Promise<any>  {
+  try {
+    const validacao = await validarConfiguracaoTefSessao(camposTef(formData));
+    return {
+      ok: validacao.ok,
+      mensagens: validacao.ok
+        ? [`Ambiente ${validacao.ambienteBiblioteca} conferido. Nenhuma instalação foi executada.`]
+        : validacao.mensagens,
+      executaInstalacao: false as const,
+      executaTransacao: false as const,
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      mensagens: [error instanceof ErroTef ? error.message : "Não foi possível validar a configuração."],
+      executaInstalacao: false as const,
+      executaTransacao: false as const,
+    };
+  }
+}
+
+export async function salvarTefEmpresa(formData: FormData): Promise<any>  {
+  const campos = camposTef(formData);
   try {
     await salvarConfigTefSessao({
-      habilitado: formData.get("habilitado") === "on",
-      ambiente,
-      estabelecimento: String(formData.get("estabelecimento") ?? ""),
-      pontoCaptura: String(formData.get("pontoCaptura") ?? ""),
+      ...campos,
       permitirOperacaoManual:
         formData.get("permitir_operacao_manual_informada") === "1"
           ? formData.get("permitir_operacao_manual") === "on"
@@ -38,7 +72,7 @@ export async function prepararBibliotecaProducao(input: {
   confirmacaoExplicita: boolean;
   dispositivoId: string;
   credencialInformada: boolean;
-}) {
+}): Promise<any>  {
   try {
     return await prepararBibliotecaProducaoSessao(input);
   } catch (error) {
@@ -58,7 +92,7 @@ export async function prepararBibliotecaProducao(input: {
   }
 }
 
-export async function autorizarPareamentoEmpresa(codigo: string) {
+export async function autorizarPareamentoEmpresa(codigo: string): Promise<any>  {
   try {
     return await autorizarPareamentoTefSessao(codigo);
   } catch (error) {
@@ -72,7 +106,7 @@ export async function concluirPareamentoEmpresa(input: {
   chavePublica: string;
   chaveId: string;
   assinaturaPareamento: string;
-}) {
+}): Promise<any>  {
   try {
     return await concluirPareamentoTefSessao(input);
   } catch (error) {
@@ -85,7 +119,7 @@ export async function prepararSincronizacaoConnector(input: {
   dispositivoId: string;
   chavePublica: string;
   assinaturaPareamento: string;
-}) {
+}): Promise<any>  {
   try {
     return await prepararSincronizacaoVinculoTefSessao({
       codigo: input.codigo,
@@ -118,7 +152,7 @@ export async function diagnosticarRecuperacaoConnector(input: {
   chavePublica: string;
   chaveId: string;
   assinaturaIdentidade: string;
-}) {
+}): Promise<any>  {
   try {
     return await diagnosticarRecuperacaoTefSessao(input);
   } catch (error) {
@@ -135,7 +169,7 @@ export async function recuperarAutorizacaoConnector(input: {
   chaveId: string;
   assinaturaPareamento: string;
   perdaConfirmada: boolean;
-}) {
+}): Promise<any>  {
   try {
     return await recuperarAutorizacaoTefSessao(input);
   } catch (error) {
@@ -146,7 +180,7 @@ export async function recuperarAutorizacaoConnector(input: {
   }
 }
 
-export async function verificarComputadorTef(dispositivoId: string) {
+export async function verificarComputadorTef(dispositivoId: string): Promise<any>  {
   try {
     return await verificarComputadorTefSessao(dispositivoId);
   } catch (error) {
@@ -156,7 +190,7 @@ export async function verificarComputadorTef(dispositivoId: string) {
   }
 }
 
-export async function revogarTerminalEmpresa(terminalId: string) {
+export async function revogarTerminalEmpresa(terminalId: string): Promise<any>  {
   try {
     return await revogarTerminalTefSessao(terminalId);
   } catch (error) {
@@ -177,7 +211,7 @@ export async function salvarRascunhoAssistente(input: {
   servidorHomologacao: string;
   servidorProducao: string;
   servidorConfirmado: boolean;
-}) {
+}): Promise<any>  {
   try {
     return await salvarRascunhoAssistenteSessao(input);
   } catch (error) {
@@ -194,7 +228,7 @@ export async function validarProvaBiblioteca(input: {
   versao: number | null;
   campos: unknown;
   assinatura: string;
-}) {
+}): Promise<any>  {
   try {
     return await validarProvaBibliotecaSessao(input);
   } catch (error) {
@@ -211,7 +245,7 @@ export async function validarProvaBiblioteca(input: {
   }
 }
 
-export async function validarAssistente(observacao: ObservacaoAssistente) {
+export async function validarAssistente(observacao: ObservacaoAssistente): Promise<any>  {
   try {
     const avaliacao = await avaliarAssistenteTefSessao(observacao);
     return { ok: true as const, avaliacao };
@@ -229,7 +263,7 @@ export async function prepararInstalacaoAssistente(input: {
   credencialInformada: boolean;
   autorizacaoExplicitaReset: boolean;
   proposta: { pontoCaptura: string; ambiente: string; servidor: string } | null;
-}) {
+}): Promise<any>  {
   try {
     return await prepararInstalacaoAssistenteSessao({
       confirmacaoExplicita: input.confirmacaoExplicita === true,
@@ -248,7 +282,7 @@ export async function prepararInstalacaoAssistente(input: {
   }
 }
 
-export async function ativarAssistente(observacao: ObservacaoAssistente) {
+export async function ativarAssistente(observacao: ObservacaoAssistente): Promise<any>  {
   try {
     return await ativarAssistenteTefSessao(observacao);
   } catch (error) {

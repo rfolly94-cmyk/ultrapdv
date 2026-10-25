@@ -4,13 +4,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { resolverRaizAgente } from "./raiz.mjs";
 import {
   diagnosticarBibliotecaPayGo,
-  GerenciadorTefNativo,
+  GerenciadorPgWeb,
   localizarTefNativo,
   NOME_TEF_ANTIGO,
   NOME_TEF_NATIVO,
@@ -25,64 +25,44 @@ function ler(relativo) {
   return readFileSync(path.join(raizPacote, relativo), "utf8");
 }
 
-test("a versão 1.3.15 distribui somente UltraPDVTef_1313.exe e preserva as compilações anteriores", () => {
-  assert.equal(versao, "1.3.15");
-  assert.equal(nomeExecutavelTef(versao), "UltraPDVTef_1313.exe");
-  assert.equal(nomeExecutavelTef("1.3.13"), "UltraPDVTef_1313.exe");
-  assert.equal(nomeExecutavelTef("1.3.14"), "UltraPDVTef_1314.exe");
-  assert.equal(NOME_TEF_NATIVO, "UltraPDVTef_1313.exe");
-  assert.equal(nomeExecutavelTef("1.3.6"), "UltraPDVTef_136.exe");
-  assert.equal(nomeExecutavelTef("1.3.7"), "UltraPDVTef_137.exe");
-  assert.equal(nomeExecutavelTef("1.3.8"), "UltraPDVTef_138.exe");
-  assert.equal(nomeExecutavelTef("1.3.9"), "UltraPDVTef_139.exe");
-  assert.equal(nomeExecutavelTef("1.3.12"), "UltraPDVTef_1312.exe");
-  assert.equal(nomeExecutavelTef("1.4.0"), "UltraPDVTef_140.exe");
+test("a versão 1.3.40 distribui a PGWebLib x64 e não distribui o agente Pascal", () => {
+  assert.equal(versao, "1.3.40");
+  assert.equal(nomeExecutavelTef(versao), "");
+  assert.equal(nomeExecutavelTef("1.3.16"), "");
+  assert.equal(NOME_TEF_NATIVO, "");
   const pacote = JSON.parse(ler("tef-pacote.json"));
   const manifesto = JSON.parse(ler("version.json"));
-  assert.equal(pacote.executavel, "bin/tef/UltraPDVTef_1313.exe");
-  assert.equal(manifesto.agenteTef, "UltraPDVTef_1313.exe");
+  assert.equal(pacote.executavel, undefined);
+  assert.equal(pacote.dll, "bin/tef/PGWebLib.dll");
+  assert.equal(pacote.dllVersao, "4.1.50.924");
+  assert.equal(manifesto.agenteTef, "");
   assert.equal(pacote.pontoProducao, "6696546");
   assert.equal(pacote.terminalLogico, "117473");
   const build = ler("installer/build.ps1");
-  assert.match(build, /UltraPDVTef_1313\.exe/);
-  assert.match(build, /UltraPDVTef_139\.exe/);
+  assert.doesNotMatch(build, /UltraPDVTef_/);
   assert.doesNotMatch(build, /lazbuild/);
-  assert.match(build, /F1E32D1B339B07378B828A0076B088B83F18B1945E996D7B539090D8D4C4EA61/);
-  assert.match(build, /EE9909238404931649F98A7437C499D257BB3080E1D23F89DEA5A2CF60814904/);
-  assert.match(build, /UltraPDVTef_138\.exe/);
-  const agente = readFileSync(
-    fileURLToPath(new URL("../../tef-agent/UltraPDVTef.lpr", import.meta.url)),
-    "utf8"
-  );
-  assert.match(agente, /VersaoAplicacao := '1\.3\.13'/);
-  assert.match(agente, /PortaPinPad/);
-  assert.match(agente, /LIMITE_REPETICOES_PPCOMM/);
-  const chamada = agente.indexOf("if not AplicarDiretorioBiblioteca(");
-  const inicializar = agente.indexOf("TEF.Inicializar;");
-  assert.ok(chamada > 0 && chamada < inicializar);
-  const hashAnterior = "C51E326DC6B0FD4D6D91810C46F0132147D450E531C93B02366A14C2F6D12C56";
-  const hash139 = "EE9909238404931649F98A7437C499D257BB3080E1D23F89DEA5A2CF60814904";
+  assert.match(build, /PGWebLib\.dll/);
   const hashDe = (relativo) =>
     createHash("sha256").update(readFileSync(path.join(raizPacote, relativo))).digest("hex").toUpperCase();
-  assert.equal(hashDe("bin/tef/UltraPDVTef_138.exe"), hashAnterior);
-  assert.equal(hashDe("bin/tef/UltraPDVTef_137.exe"), hashAnterior);
-  assert.equal(hashDe("bin/tef/UltraPDVTef_139.exe"), hash139);
-  const binario = readFileSync(path.join(raizPacote, "bin/tef/UltraPDVTef_1313.exe")).toString("latin1");
-  for (const marca of ["diretorioPai", "diretorioPwInit", "retornoPwInit", "retornoPwInitNome", "1.3.13", "PW_iInit(", "PortaPinPad", "LIMITE_REPETICOES_PPCOMM"]) {
-    assert.equal(binario.includes(marca), true, marca);
-  }
-  for (const proibida of ["117473", "pos-transac-sb.tpgweb.io", "6696546", "pos-transac.pgweb.io", "COM7"]) {
-    assert.equal(binario.includes(proibida), false, proibida);
+  for (const legado of [
+    "bin/tef/UltraPDVTef.exe",
+    "bin/tef/UltraPDVTef_1313.exe",
+    "bin/tef/UltraPDVTef_1316.exe",
+    "bin/tef/UltraPDVTef_137.exe",
+    "bin/tef/UltraPDVTef_138.exe",
+    "bin/tef/UltraPDVTef_139.exe",
+    "bin/tef/UltraPDVTef_NOVO.exe",
+  ]) {
+    assert.equal(existsSync(path.join(raizPacote, legado)), false, legado);
   }
   assert.equal(
-    hashDe("bin/tef/UltraPDVTef_1313.exe"),
-    "F1E32D1B339B07378B828A0076B088B83F18B1945E996D7B539090D8D4C4EA61"
+    hashDe("bin/tef/PGWebLib.dll"),
+    "D17AC81323396AE172648935B0B797B74705B1CA01C9AE0CD3B2FF78119D4220"
   );
-  assert.equal(readFileSync(path.join(raizPacote, "bin/tef/UltraPDVTef_139.exe")).toString("latin1").includes("1.3.9"), true);
-  assert.equal(readFileSync(path.join(raizPacote, "bin/tef/UltraPDVTef_138.exe")).toString("latin1").includes("diretorioPai"), false);
   const nsi = ler("installer/ultrapdv-connector.nsi");
   const preparar = ler("src/tef-preparar-pasta.mjs");
   assert.equal(nsi.includes("UltraPDV-TEF"), false);
+  assert.match(nsi, /PGWebLib\.dll/);
   assert.equal(preparar.includes("UltraPDV-TEF"), false);
   assert.equal(nsi.includes("certificado.crt"), false);
   assert.doesNotMatch(nsi, /Delete\s+"[^"]*tef-pasta\.json"/);
@@ -128,7 +108,7 @@ test("o agente 1.3.5 e o executável antigo são rejeitados", async () => {
     assert.equal(sem136.antigoEncontrado, true);
 
     let spawnou = false;
-    const gerenciador = new GerenciadorTefNativo({
+    const gerenciador = new GerenciadorPgWeb({
       arquivoPendencia: path.join(raiz, "tef-pendencia.json"),
       versaoAgente: versao,
       localizar: async () => sem136,
@@ -140,14 +120,13 @@ test("o agente 1.3.5 e o executável antigo são rejeitados", async () => {
     });
     const bloqueado = await gerenciador.pagar({ identificador: "SIMULADO", valor: 1 });
     assert.equal(bloqueado.ok, false);
-    assert.equal(bloqueado.tef.agente.compativel, false);
-    assert.equal(bloqueado.tef.agente.nome, "UltraPDVTef_1313.exe");
+    assert.equal("agente" in bloqueado.tef, false);
     assert.equal(spawnou, false);
 
-    await fs.writeFile(path.join(pasta, NOME_TEF_NATIVO), "atual");
+    await fs.writeFile(path.join(pasta, "UltraPDVTef_1316.exe"), "atual");
     const achou = await localizarTefNativo(env, access, raiz, versao);
-    assert.equal(achou.encontrado, true);
-    assert.equal(path.basename(achou.caminho), "UltraPDVTef_1313.exe");
+    assert.equal(achou.encontrado, false);
+    assert.equal(achou.caminho, null);
   } finally {
     await fs.rm(raiz, { recursive: true, force: true });
   }
@@ -156,7 +135,7 @@ test("o agente 1.3.5 e o executável antigo são rejeitados", async () => {
 test("pagamento sem evidência válida não inicia o agente", async () => {
   let spawnou = false;
   const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "ultrapdv-sem-prova-"));
-  const gerenciador = new GerenciadorTefNativo({
+  const gerenciador = new GerenciadorPgWeb({
     arquivoPendencia: path.join(pasta, "tef-pendencia.json"),
     versaoAgente: versao,
     localizar: async () => ({
@@ -201,7 +180,8 @@ test("o instalador acrescenta o agente novo, guarda backup e não apaga PayGo ne
   const instalacao = nsi.split(/Section "Uninstall"/)[0];
   assert.match(instalacao, /Call StopConnector/);
   assert.match(instalacao, /Call BackupConnectorAnterior/);
-  assert.match(instalacao, /File "\$\{STAGING_DIR\}\\bin\\tef\\\$\{TEF_EXE_NAME\}"/);
+  assert.doesNotMatch(instalacao, /TEF_EXE_NAME/);
+  assert.match(instalacao, /File "\$\{STAGING_DIR\}\\bin\\tef\\PGWebLib\.dll"/);
   assert.equal(
     instalacao.match(/File "\$\{STAGING_DIR\}\\bin\\tef\\/g)?.length ?? 0,
     1

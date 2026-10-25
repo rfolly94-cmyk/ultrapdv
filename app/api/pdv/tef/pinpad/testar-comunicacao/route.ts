@@ -1,15 +1,18 @@
-import { lerCorpo, responderTef } from "@/app/api/pdv/tef/_shared";
-import { prepararAcessoPinpad } from "@/lib/pdv/tef/servico";
+function tefDesativado() {
+  return Response.json(
+    {
+      ok: false,
+      codigo: "TEF_DESATIVADO",
+      erro: "A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.",
+    },
+    { status: 410 }
+  );
+}
 
-export async function POST(request: Request) {
-  try {
-    const corpo = await lerCorpo(request);
-    const dispositivoId =
-      corpo && typeof corpo === "object" && "dispositivoId" in corpo
-        ? String((corpo as { dispositivoId?: unknown }).dispositivoId ?? "")
-        : "";
-    return Response.json(await prepararAcessoPinpad(dispositivoId));
-  } catch (error) {
-    return responderTef(error);
-  }
+export function GET() {
+  return tefDesativado();
+}
+
+export function POST() {
+  return tefDesativado();
 }

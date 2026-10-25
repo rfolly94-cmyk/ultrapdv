@@ -415,7 +415,7 @@ test("financeiro mostra PIX e TEF conforme a permissão já existente", () => {
   assert.match(menu, /href: "\/configuracoes\/financeiro"/);
   assert.match(abas, /ABAS_CONFIGURACOES_PERMISSAO/);
   assert.match(pagina, /TEF — PayGoWeb/);
-  assert.match(pagina, /Instalação, pinpad e terminais/);
+  assert.match(pagina, /Histórico preservado. Motor C# por empresa. Produção sem cobrança./);
   assert.match(pagina, /\/configuracoes\/financeiro\/tef/);
   assert.match(pagina, /\/configuracoes\/financeiro\/pix/);
   assert.doesNotMatch(pagina, /habilitado/);

@@ -19,6 +19,21 @@ pasta licenses do instalador e em C:\Program Files\UltraPDV Connector\licenses.
    O executável é redistribuído sem modificações e não é software
    proprietário da UltraPDV.
 
+3) koffi
+   Uso: carregador da PGWebLib no processo do Connector (app\node_modules\koffi).
+   Licença: MIT
+   Site: https://koffi.dev/
+   Arquivo: app\node_modules\koffi\LICENSE.txt
+
+4) PGWebLib.dll x64 4.1.50.924
+   Fornecedor: SETIS Automacao e Sistemas Ltda / Pay&Go Web.
+   A DLL é redistribuída sem modificação, com a assinatura Authenticode da SETIS,
+   ao lado de UltraPDVTef_1316.exe. Não acompanha certificado, ponto, journal,
+   senha técnica nem programa de teste da SETIS.
+   Componentes declarados pelo fabricante: OpenSSL (Eric Young, Tim Hudson e
+   OpenSSL Project), zlib (Jean-loup Gailly e Mark Adler) e ezXML
+   (Aaron Voisine). As licenças desses componentes permanecem as do kit SETIS.
+
 O instalador é gerado com NSIS (https://nsis.sourceforge.io), licenciado
 sob a zlib/libpng license. O NSIS não é necessário no computador do cliente.
 

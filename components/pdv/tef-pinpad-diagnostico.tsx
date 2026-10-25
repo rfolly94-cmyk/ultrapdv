@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { PageAlert } from "@/components/ui/page-alert";
 import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
 import {
-  mensagemDiagnosticoPinpad,
-  observacaoModeloPinpad,
-  portaPinpad,
-  type DiagnosticoPinpad,
-} from "@/lib/pdv/tef/pinpad-diagnostico";
+  combinarDiagnosticoHomologacao,
+  type MemoriaComunicacaoPinpad,
+} from "@/lib/pdv/tef/diagnostico-homologacao";
+import type { AmbientePayGo } from "@/lib/pdv/tef/configuracao-paygo";
+import { portaPinpad, type DiagnosticoPinpad } from "@/lib/pdv/tef/pinpad-diagnostico";
 
 type Acesso = {
   ok: true;
@@ -21,10 +21,20 @@ type Acesso = {
 
 type Exibicao = {
   mensagem: string;
+  identificacao: string;
   observacao: string;
   resultado: DiagnosticoPinpad | null;
   erro: boolean;
+  pontoInstalado: boolean | null;
+  dllInicializada: boolean | null;
+  pinpadConectado: boolean | null;
 };
+
+function rotuloComunicacao(valor: string | undefined) {
+  if (valor === "confirmada") return "comunicação confirmada";
+  if (valor === "nao_executada") return "não testada nesta consulta";
+  return valor || "não informada";
+}
 
 async function autorizar(caminho: string, init?: RequestInit) {
   const resposta = await fetch(caminho, init);
@@ -36,81 +46,150 @@ async function autorizar(caminho: string, init?: RequestInit) {
 }
 
 export function TefPinpadDiagnostico(props: {
+  ambiente?: AmbientePayGo;
   somenteQuandoDisponivel?: boolean;
   onResultado?: (resultado: DiagnosticoPinpad | null) => void;
 } = {}) {
   const [ocupado, setOcupado] = useState(false);
   const [exibicao, setExibicao] = useState<Exibicao | null>(null);
+  const comunicacaoConfirmada = useRef<MemoriaComunicacaoPinpad | null>(null);
 
   async function executar(testar: boolean) {
     setOcupado(true);
-    setExibicao(null);
+    if (props.ambiente !== "homologacao") {
+      setExibicao(null);
+    }
     try {
-      const descoberta = await descobrirUltraPdvConector();
-      if (!descoberta.ok) {
-        throw new Error("UltraPDV Connector não encontrado neste computador.");
-      }
-      let dispositivoId = descoberta.saude.dispositivoId ?? "";
-      if (!dispositivoId) {
-        const identidade = await fetch(`${descoberta.origem}/tef/identidade`, {
-          cache: "no-store",
+      if (props.ambiente === "homologacao" || props.ambiente === "producao") {
+        const producao = props.ambiente === "producao";
+        const descoberta = await descobrirUltraPdvConector();
+        if (!descoberta.ok) {
+          throw new Error("UltraPDV Connector não encontrado neste computador.");
+        }
+        let dispositivoId = descoberta.saude.dispositivoId ?? "";
+        if (!dispositivoId) {
+          const identidade = await fetch(`${descoberta.origem}/tef/identidade`, { cache: "no-store" });
+          const corpo = (await identidade.json()) as { dispositivoId?: string };
+          dispositivoId = corpo.dispositivoId ?? "";
+        }
+        if (!dispositivoId) {
+          throw new Error("Não foi possível identificar este computador.");
+        }
+        await autorizar(producao ? "/api/pdv/tef/pinpad/comunicacao" : "/api/pdv/tef/pinpad/homologacao", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dispositivoId }),
         });
-        const corpo = (await identidade.json()) as { dispositivoId?: string };
-        dispositivoId = corpo.dispositivoId ?? "";
-      }
-      if (!dispositivoId) {
-        throw new Error("Não foi possível identificar este computador.");
-      }
-      const acesso = testar
-        ? await autorizar("/api/pdv/tef/pinpad/testar-comunicacao", {
+        const resposta = await fetch(
+          producao ? `${descoberta.origem}/tef/pinpad/comunicacao` : `${descoberta.origem}/tef/homologacao/pinpad`,
+          {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dispositivoId }),
-          })
-        : await autorizar(
-            `/api/pdv/tef/pinpad/diagnostico?dispositivoId=${encodeURIComponent(dispositivoId)}`
+            body: JSON.stringify(
+              producao ? { acao: testar ? "testar" : "identificar", ambiente: "producao" } : { acao: testar ? "testar" : "identificar" }
+            ),
+          }
+        );
+        if (resposta.status === 404) {
+          throw new Error(
+            producao
+              ? "O Connector instalado ainda não testa a comunicação de produção. Atualize para 1.3.34. Nenhum teste foi enviado."
+              : "O Connector instalado ainda não tem o diagnóstico de homologação. Atualize o UltraPDV Connector. Nenhuma rota de produção foi chamada."
           );
-      const resposta = await fetch(
-        testar
-          ? `${descoberta.origem}/tef/pinpad/testar-comunicacao`
-          : `${descoberta.origem}/tef/pinpad/diagnostico`,
-        {
-          method: testar ? "POST" : "GET",
-          headers: {
-            ...(testar ? { "Content-Type": "application/json" } : {}),
-            "x-ultrapdv-empresa": acesso.empresaId,
-            "x-ultrapdv-terminal": acesso.terminalCodigo,
-            "x-ultrapdv-estabelecimento": acesso.estabelecimento,
-            "x-ultrapdv-desafio": acesso.desafio,
-          },
-          body: testar ? "{}" : undefined,
         }
-      );
-      const corpo = (await resposta.json()) as {
-        ok?: boolean;
-        erro?: string;
-        codigo?: string;
-        resultado?: DiagnosticoPinpad;
-      };
-      const resultado = corpo.resultado ?? null;
-      setExibicao({
-        mensagem: mensagemDiagnosticoPinpad({
+        const corpo = (await resposta.json()) as {
+          ok?: boolean;
+          codigo?: string;
+          mensagem?: string;
+          erro?: string;
+          porta?: number | null;
+          portaNome?: string;
+          comunicacao?: string;
+          codigoBiblioteca?: number | null;
+          fase?: string;
+          identificacao?: string;
+          pontoInstalado?: boolean;
+          dllInicializada?: boolean;
+          pinpadConectado?: boolean;
+        };
+        const codigoNumerico =
+          typeof corpo.codigoBiblioteca === "number" &&
+          !String(corpo.mensagem ?? "").includes(String(corpo.codigoBiblioteca))
+            ? ` Código ${corpo.codigoBiblioteca}.`
+            : "";
+        const combinado = combinarDiagnosticoHomologacao({
+          acao: testar ? "testar" : "identificar",
+          anterior: comunicacaoConfirmada.current,
+          retorno: {
+            ...corpo,
+            mensagem: corpo.mensagem
+              ? `${corpo.mensagem}${codigoNumerico}`
+              : corpo.mensagem,
+          },
+        });
+        comunicacaoConfirmada.current = combinado.memoria;
+        const resultado =
+          combinado.exibicao.comunicacao === "confirmada" || combinado.exibicao.comunicacao === "nao_executada"
+            ? {
+                comunicacao: combinado.exibicao.comunicacao,
+                portaUtilizada: combinado.exibicao.portaUtilizada,
+              }
+            : null;
+        setExibicao({
+          mensagem: combinado.exibicao.mensagem,
+          identificacao: corpo.identificacao || combinado.exibicao.identificacao,
+          observacao:
+            corpo.fase === "inicializacao"
+              ? "A falha ocorreu na inicialização da biblioteca."
+              : corpo.fase === "descoberta"
+                ? "A falha ocorreu na descoberta do PinPad. A porta configurada não foi trocada."
+                : corpo.fase === "comunicacao"
+                  ? "A falha ocorreu na comunicação com o PinPad."
+                  : corpo.fase === "biblioteca"
+                    ? "A biblioteca não está inicializada. Isso é diferente de PinPad desconectado."
+                    : corpo.fase === "transacao"
+                      ? "Há transação ativa. O diagnóstico não interferiu na sessão."
+                      : "",
           resultado,
-          codigo: corpo.codigo ?? resultado?.codigo,
-          erro: corpo.erro,
-        }),
-        observacao: observacaoModeloPinpad(resultado),
-        resultado,
-        erro: corpo.ok !== true,
-      });
-      props.onResultado?.(resultado);
-    } catch (error) {
+          erro: combinado.exibicao.erro,
+          pontoInstalado: corpo.pontoInstalado === true,
+          dllInicializada: corpo.dllInicializada === true,
+          pinpadConectado: corpo.pinpadConectado === true,
+        });
+        props.onResultado?.(resultado);
+        return;
+      }
       setExibicao({
-        mensagem: error instanceof Error ? error.message : "Não foi possível concluir o diagnóstico.",
+        mensagem: "Escolha Homologação ou Produção em Configurações, Financeiro, TEF. Nenhum teste foi enviado.",
+        identificacao: "",
         observacao: "",
         resultado: null,
         erro: true,
+        pontoInstalado: null,
+        dllInicializada: null,
+        pinpadConectado: null,
       });
+      props.onResultado?.(null);
+    } catch (error) {
+      const preservada = props.ambiente === "homologacao" || props.ambiente === "producao" ? comunicacaoConfirmada.current : null;
+      setExibicao({
+        mensagem: error instanceof Error ? error.message : "Não foi possível concluir o diagnóstico.",
+        identificacao: "",
+        observacao: "",
+        resultado: preservada
+          ? { comunicacao: "confirmada", portaUtilizada: preservada.portaUtilizada }
+          : null,
+        erro: true,
+        pontoInstalado: null,
+        dllInicializada: null,
+        pinpadConectado: preservada ? true : null,
+      });
+      if (preservada) {
+        props.onResultado?.({
+          comunicacao: "confirmada",
+          portaUtilizada: preservada.portaUtilizada,
+        });
+      }
     } finally {
       setOcupado(false);
     }
@@ -121,8 +200,8 @@ export function TefPinpadDiagnostico(props: {
       <div>
         <h2 className="text-base font-semibold text-zinc-900">Diagnóstico do Pinpad</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Consulta os dados disponíveis e testa a comunicação com o equipamento. Não inicia
-          pagamento, instalação nem manutenção.
+          Consulta os dados disponíveis e testa a comunicação com o equipamento. A porta
+          exibida é a que a PGWebLib devolveu. Não inicia pagamento, instalação nem manutenção.
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -153,9 +232,31 @@ export function TefPinpadDiagnostico(props: {
               {exibicao.observacao}
             </PageAlert>
           ) : null}
+          {exibicao.pontoInstalado !== null || exibicao.dllInicializada !== null || exibicao.pinpadConectado !== null ? (
+            <dl className="grid gap-2 text-sm sm:grid-cols-2">
+              {exibicao.pontoInstalado === null ? null : (
+                <Item rotulo="Ponto instalado" valor={exibicao.pontoInstalado ? "sim" : "não"} />
+              )}
+              {exibicao.dllInicializada === null ? null : (
+                <Item rotulo="DLL inicializada" valor={exibicao.dllInicializada ? "sim" : "não"} />
+              )}
+              {exibicao.pinpadConectado === null ? null : (
+                <Item rotulo="PinPad conectado" valor={exibicao.pinpadConectado ? "sim" : "não"} />
+              )}
+            </dl>
+          ) : null}
           {exibicao.resultado ? (
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
-              {campo("Estado", exibicao.resultado.comunicacao, props.somenteQuandoDisponivel)}
+              {exibicao.identificacao ? (
+                <Item rotulo="Identificação" valor={exibicao.identificacao} />
+              ) : null}
+              {campo(
+                props.ambiente === "homologacao" ? "Comunicação" : "Estado",
+                props.ambiente === "homologacao"
+                  ? rotuloComunicacao(exibicao.resultado.comunicacao)
+                  : exibicao.resultado.comunicacao,
+                props.somenteQuandoDisponivel
+              )}
               {typeof exibicao.resultado.paygoInicializado === "boolean" ? (
                 <Item
                   rotulo="PayGoWeb"

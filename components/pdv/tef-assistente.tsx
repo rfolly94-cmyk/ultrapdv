@@ -401,7 +401,7 @@ export function TefAssistente(props: {
       }
       setRequisitos(retorno.avaliacao.requisitos);
       setPodeAtivar(retorno.avaliacao.podeAtivar);
-      setMensagens(retorno.avaliacao.mensagens.filter((item) => item.trim()));
+      setMensagens(retorno.avaliacao.mensagens.filter((item: string) => item.trim()));
     } finally {
       setOcupado(false);
     }

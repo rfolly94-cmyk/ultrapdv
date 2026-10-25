@@ -1,0 +1,87 @@
+﻿comprovado_contra_dll 0
+sizeof Byte 1
+sizeof Word 2
+sizeof Uint32 8
+sizeof Int16 2
+sizeof Uint16 2
+sizeof Bool 4
+sizeof char 1
+alignof PW_GetData 8
+sizeof PW_GetData 12520
+alignof PW_Operations 1
+sizeof PW_Operations 43
+alignof PW_OperationsEx 4
+sizeof PW_OperationsEx 72
+offset PW_GetData wIdentificador 0 2
+offset PW_GetData bTipoDeDado 2 1
+offset PW_GetData szPrompt 3 84
+offset PW_GetData bNumOpcoesMenu 87 1
+offset PW_GetData vszTextoMenu 88 1640
+offset PW_GetData vszValorMenu 1728 10240
+offset PW_GetData szMascaraDeCaptura 11968 41
+offset PW_GetData bTiposEntradaPermitidos 12009 1
+offset PW_GetData bTamanhoMinimo 12010 1
+offset PW_GetData bTamanhoMaximo 12011 1
+offset PW_GetData ulValorMinimo 12016 8
+offset PW_GetData ulValorMaximo 12024 8
+offset PW_GetData bOcultarDadosDigitados 12032 1
+offset PW_GetData bValidacaoDado 12033 1
+offset PW_GetData bAceitaNulo 12034 1
+offset PW_GetData szValorInicial 12035 41
+offset PW_GetData bTeclasDeAtalho 12076 1
+offset PW_GetData szMsgValidacao 12077 84
+offset PW_GetData szMsgConfirmacao 12161 84
+offset PW_GetData szMsgDadoMaior 12245 84
+offset PW_GetData szMsgDadoMenor 12329 84
+offset PW_GetData bCapturarDataVencCartao 12413 1
+offset PW_GetData ulTipoEntradaCartao 12416 8
+offset PW_GetData bItemInicial 12424 1
+offset PW_GetData bNumeroCapturas 12425 1
+offset PW_GetData szMsgPrevia 12426 84
+offset PW_GetData bTipoEntradaCodigoBarras 12510 1
+offset PW_GetData bOmiteMsgAlerta 12511 1
+offset PW_GetData bIniciaPelaEsquerda 12512 1
+offset PW_GetData bNotificarCancelamento 12513 1
+offset PW_GetData bAlinhaPelaDireita 12514 1
+offset PW_Operations bOperType 0 1
+offset PW_Operations szText 1 21
+offset PW_Operations szValue 22 21
+offset PW_OperationsEx bOperType 0 1
+offset PW_OperationsEx szOperName 1 21
+offset PW_OperationsEx szAuthSyst 22 21
+offset PW_OperationsEx szValue 43 21
+offset PW_OperationsEx fAuthPreferential 64 4
+offset PW_OperationsEx bPaymentMode 68 1
+enum PWRET_OK 0
+enum PWRET_FROMHOSTPENDTRN -2599
+enum PWRET_FROMHOST -2596
+enum PWRET_INVPARAM -2499
+enum PWRET_NOTINST -2498
+enum PWRET_MOREDATA -2497
+enum PWRET_NODATA -2496
+enum PWRET_DISPLAY -2495
+enum PWRET_INVCALL -2494
+enum PWRET_NOTHING -2493
+enum PWRET_BUFOVFLW -2492
+enum PWRET_CANCEL -2491
+enum PWRET_TIMEOUT -2490
+enum PWRET_PPNOTFOUND -2489
+enum PWRET_TRNNOTINIT -2488
+enum PWRET_DLLNOTINIT -2487
+enum PWRET_FALLBACK -2486
+enum PWRET_WRITERR -2485
+enum PWRET_PPCOMERR -2484
+enum ENVRMNT_PROD 0
+enum ENVRMNT_TEST 1
+define PWMENU_MAXINTENS 40
+define PWOPER_INSTALL 1
+define PWOPER_ADMIN 32
+define PWOPER_SALE 33
+define PWOPER_SALEVOID 34
+define PWINFO_TOTAMNT 37
+define PWINFO_CURRENCY 38
+define PWINFO_CARDTYPE 41
+define PWINFO_REQNUM 50
+define PWINFO_CNFREQ 67
+define PWINFO_AUTHTECHUSER 246
+define PWDAT_USERAUTH 17

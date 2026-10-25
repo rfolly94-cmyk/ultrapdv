@@ -164,20 +164,41 @@ export function auditarInstaladorNsi(texto) {
   if (!instalacao.includes("${STAGING_DIR}\\app\\*.mjs")) {
     erros.push("O instalador nao copia todos os modulos de app.");
   }
-  if (!instalacao.includes("${TEF_EXE_NAME}")) {
-    erros.push("O instalador nao inclui o executavel TEF versionado.");
+  if (instalacao.includes("${TEF_EXE_NAME}") || instalacao.includes("UltraPDVTef")) {
+    erros.push("O instalador ainda inclui o agente Pascal.");
   }
-  if (fonte.includes("UltraPDVTef_NOVO.exe")) {
-    erros.push("O instalador ainda grava ou apaga o executavel TEF antigo.");
-  }
-  if (instalacao.includes("UltraPDVTef.exe")) {
-    erros.push("O instalador referencia o executavel TEF sem versao.");
-  }
-  if (/PGWeb|TSTKEY|certificado\.crt|\.pos\b/.test(instalacao)) {
+  if (/PGWeb(?!Lib)|TSTKEY|certificado\.crt|\.pos\b/.test(instalacao)) {
     erros.push("O instalador empacotaria dados locais do PayGo.");
+  }
+  if (!instalacao.includes("PGWebLib.dll")) {
+    erros.push("O instalador nao inclui a PGWebLib.dll distribuida com o agente.");
   }
   if (!instalacao.includes("BackupConnectorAnterior")) {
     erros.push("A atualizacao nao guarda a copia anterior do Connector.");
+  }
+  if (!instalacao.includes("supervisor.ps1")) {
+    erros.push("O instalador nao inicia pelo supervisor.");
+  }
+  if (!instalacao.includes("atualizacao-conector.mjs") || !instalacao.includes("--bloquear")) {
+    erros.push("A atualizacao nao confirma a ausencia de transacao pendente.");
+  }
+  if (!instalacao.includes("conector-ciclo.mjs") || !instalacao.includes("portas.mjs")) {
+    erros.push("A verificacao financeira nao leva os modulos necessarios para iniciar.");
+  }
+  const secao = instalacao.indexOf('Section "UltraPDV Connector"');
+  const bloqueio = instalacao.indexOf("--bloquear", secao);
+  const parada = instalacao.indexOf("Call StopConnector", secao);
+  if (bloqueio < 0 || parada < 0 || bloqueio > parada) {
+    erros.push("A confirmacao financeira precisa ocorrer antes de encerrar o Connector.");
+  }
+  if (!instalacao.includes("backup-connector\\anterior\\launcher")) {
+    erros.push("O rollback nao restaura o supervisor anterior.");
+  }
+  if (!instalacao.includes("koffi-win32-x64")) {
+    erros.push("O instalador nao inclui o carregador nativo x64.");
+  }
+  if (/koffi-(linux|darwin|android)/.test(instalacao)) {
+    erros.push("O instalador incluiria binario nativo de outra plataforma.");
   }
   if (!instalacao.includes("tef-pacote.json")) {
     erros.push("O instalador nao publica o inventario do pacote TEF.");

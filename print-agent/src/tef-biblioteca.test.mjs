@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 
-import { diagnosticarBibliotecaPayGo, GerenciadorTefNativo } from "./tef.mjs";
+import { diagnosticarBibliotecaPayGo, apresentarStatusTef, GerenciadorTefNativo } from "./tef.mjs";
 import { assinarBibliotecaTef, verificarBibliotecaTef } from "./tef-prova.mjs";
 
 const PRODUCAO = {
@@ -36,8 +36,70 @@ test("diagnóstico bloqueia biblioteca ausente, sandbox e ponto já instalado", 
     }).cobrancaPermitida,
     false
   );
-  assert.equal(diagnosticarBibliotecaPayGo(PRODUCAO).cobrancaPermitida, true);
-  assert.equal(diagnosticarBibliotecaPayGo(PRODUCAO).origemComprovacao, "set_environment");
+  const configurado = diagnosticarBibliotecaPayGo({
+    ...PRODUCAO,
+    instalacaoConcluida: false,
+  });
+  assert.equal(configurado.cobrancaPermitida, false);
+  assert.equal(configurado.ambienteConfigurado, true);
+  assert.equal(configurado.instalacaoPontoComprovada, false);
+  assert.equal(configurado.origemComprovacao, "ambiente_configurado");
+});
+
+test("PW_iSetEnvironment com instalação contraditória não autoriza pagamento", () => {
+  const observado = diagnosticarBibliotecaPayGo(PRODUCAO);
+  assert.equal(observado.bibliotecaInstalada, false);
+  assert.equal(observado.instalacaoConcluida, true);
+  assert.equal(observado.retornoSetEnvironment, 0);
+  assert.equal(observado.cobrancaPermitida, false);
+  assert.equal(observado.instalacaoPontoComprovada, false);
+  assert.equal(observado.origemComprovacao, "inconsistente");
+  assert.match(observado.motivo, /não foi autorizada/);
+  const status = apresentarStatusTef({
+    processo: "executando",
+    inicializado: true,
+    retornoPwInit: 0,
+    retornoPwInitNome: "PWRET_OK",
+    biblioteca: observado,
+    perfilAutonomo: {
+      id: "37c66c30-5c40-4c6b-8346-3df3b8a68bcd",
+      efetivo:
+        "C:\\ProgramData\\UltraPDV\\TEF\\Producao\\perfis\\37c66c30-5c40-4c6b-8346-3df3b8a68bcd\\PGWeb",
+      estado: "ocupado",
+      reutilizado: true,
+      titularidade: "vinculo",
+    },
+    pgwebLib: { pronta: true, simulada: false, versao: "4.1.50.924" },
+  });
+  assert.equal("inicializado" in status, false);
+  assert.equal("agente" in status, false);
+  assert.equal(status.retornoPwInit, 0);
+  assert.equal(status.biblioteca.setEnvironmentExecutado, true);
+  assert.equal(status.biblioteca.retornoSetEnvironment, 0);
+  assert.equal(status.biblioteca.cobrancaPermitida, false);
+  assert.equal(status.ambienteEfetivo, null);
+  assert.equal(status.situacaoAmbiente, "inconsistente");
+  assert.equal(status.prontoParaPagamento, false);
+  assert.equal(
+    status.perfilAutonomo.efetivo.endsWith("37c66c30-5c40-4c6b-8346-3df3b8a68bcd\\PGWeb"),
+    true
+  );
+  const soInicializacao = apresentarStatusTef({
+    processo: "executando",
+    inicializado: true,
+    retornoPwInit: 0,
+    retornoPwInitNome: "PWRET_OK",
+    pgwebLib: { pronta: true, simulada: false, versao: "4.1.50.924" },
+  });
+  assert.equal(soInicializacao.retornoPwInit, 0);
+  assert.equal(soInicializacao.prontoParaPagamento, false);
+  const contraditorio = diagnosticarBibliotecaPayGo({
+    ...PRODUCAO,
+    bibliotecaInstalada: true,
+    instalacaoConcluida: false,
+  });
+  assert.equal(contraditorio.origemComprovacao, "inconsistente");
+  assert.equal(contraditorio.cobrancaPermitida, false);
 });
 
 test("instalação assinada libera a cobrança sem repetir PW_iSetEnvironment", () => {
@@ -67,7 +129,18 @@ test("instalação assinada libera a cobrança sem repetir PW_iSetEnvironment", 
     evidenciaConfirmada: true,
   });
   assert.equal(liberado.cobrancaPermitida, true);
+  assert.equal(liberado.instalacaoPontoComprovada, true);
   assert.equal(liberado.origemComprovacao, "instalacao_assinada");
+  const status = apresentarStatusTef({
+    processo: "executando",
+    inicializado: true,
+    retornoPwInit: 0,
+    biblioteca: liberado,
+    pgwebLib: { pronta: true, simulada: false },
+  });
+  assert.equal(status.ambienteEfetivo, null);
+  assert.equal(status.situacaoAmbiente, "instalacao_comprovada");
+  assert.equal(status.prontoParaPagamento, true);
 });
 
 test("a consulta da prova lê somente o arquivo público", async () => {

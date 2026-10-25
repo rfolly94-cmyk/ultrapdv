@@ -703,6 +703,16 @@ function pedidoPreparado(registro, ambiente) {
   return null;
 }
 
+export function pastaLegadaPayGo(caminho) {
+  const normal = path.win32.normalize(String(caminho ?? "")).replace(/[\\/]+$/u, "").toLowerCase();
+  return (
+    normal === "c:\\ultrapdv-tef" ||
+    normal.startsWith("c:\\ultrapdv-tef\\") ||
+    normal.includes("\\programdata\\paygo\\") ||
+    normal.endsWith("\\programdata\\paygo")
+  );
+}
+
 export async function planejarDiretorioInicial({
   arquivo,
   fsApi = fs,
@@ -724,6 +734,18 @@ export async function planejarDiretorioInicial({
     confirmado && !(paiPadrao && mesmaPasta(confirmado, paiPadrao)) ? confirmado : "";
   const pedido = pedidoPreparado(registro, ambiente);
   const efetivoRegistrado = texto(registro?.[chaveAmbiente(ambiente)]?.efetivo);
+  if (pastaLegadaPayGo(diretorioConfirmado) || pastaLegadaPayGo(pedido?.pai)) {
+    return {
+      ok: true,
+      pronto: false,
+      diretorioPai: "",
+      efetivoEsperado: "",
+      efetivoRegistrado,
+      tentativa: false,
+      legadoPreservado: true,
+      adiada: true,
+    };
+  }
   if (!pedido) {
     return {
       ok: true,

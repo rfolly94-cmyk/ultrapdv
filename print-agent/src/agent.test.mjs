@@ -998,10 +998,10 @@ test("log de impressão registra motor, exit code e apaga o temporário", async 
   assert.equal(removidos.length, 1);
 });
 
-test("versão 1.3.15 e faixa de portas 18181–18190 permanecem", () => {
+test("versão 1.3.41 e faixa de portas 18181–18190 permanecem", () => {
   const versao = JSON.parse(fonte("../version.json"));
-  assert.equal(versao.version, "1.3.15");
-  assert.equal(versao.agenteTef, "UltraPDVTef_1313.exe");
+  assert.equal(versao.version, "1.3.41");
+  assert.equal(versao.agenteTef, "");
   const pagina = fonte("pagina-status.html");
   assert.match(pagina, /id="rodapeConector"/);
   assert.match(pagina, /data\.version \|\| data\.versao/);

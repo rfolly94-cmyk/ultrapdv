@@ -38,6 +38,64 @@ export function validarServidorPayGo(valor: unknown):
   return { ok: true, servidor: texto };
 }
 
+export function comporServidorPayGo(host: string, porta: string) {
+  const endereco = host.trim();
+  const numero = porta.trim();
+  if (!endereco) return { ok: false as const, servidor: "" };
+  if (!numero || endereco.includes(":")) return { ok: true as const, servidor: endereco };
+  return { ok: true as const, servidor: `${endereco}:${numero}` };
+}
+
+export function separarServidorPayGo(valor: string): { host: string; porta: string } {
+  const validado = validarServidorPayGo(valor);
+  if (!validado.ok) return { host: "", porta: "" };
+  const separador = validado.servidor.lastIndexOf(":");
+  return {
+    host: validado.servidor.slice(0, separador),
+    porta: validado.servidor.slice(separador + 1),
+  };
+}
+
+export function decidirAssociacaoPontoServidor(input: {
+  pontoGravado: string;
+  ambienteGravado: AmbienteServidorPayGo | "";
+  servidorGravado: string;
+  pontoNovo: string;
+  ambienteNovo: AmbienteServidorPayGo;
+  servidorNovo: string;
+}): { efeito: "gravar"; servidor: string } | { efeito: "preservar" } | { efeito: "recusar"; motivo: string } {
+  const pontoAtual = input.pontoGravado.trim();
+  const servidorAtual = validarServidorPayGo(input.servidorGravado);
+  const instalado = Boolean(pontoAtual) && servidorAtual.ok && Boolean(input.ambienteGravado);
+  const pontoNovo = input.pontoNovo.trim();
+  const servidorNovo = validarServidorPayGo(input.servidorNovo);
+  if (instalado && servidorAtual.ok) {
+    if (
+      input.ambienteNovo !== input.ambienteGravado ||
+      pontoNovo !== pontoAtual ||
+      !servidorNovo.ok ||
+      servidorNovo.servidor !== servidorAtual.servidor
+    ) {
+      return {
+        efeito: "recusar",
+        motivo:
+          "Este ponto já está instalado. O ambiente, o ponto de captura e o servidor PayGo permanecem associados.",
+      };
+    }
+    return { efeito: "preservar" };
+  }
+  if (!pontoNovo && !String(input.servidorNovo ?? "").trim()) {
+    return { efeito: "preservar" };
+  }
+  if (!pontoNovo) {
+    return { efeito: "recusar", motivo: "Informe o ponto de captura." };
+  }
+  if (!servidorNovo.ok) {
+    return { efeito: "recusar", motivo: servidorNovo.motivo };
+  }
+  return { efeito: "gravar", servidor: servidorNovo.servidor };
+}
+
 export function servidorDoAmbiente(
   config: ConfiguracaoServidorPayGo,
   ambiente: AmbienteServidorPayGo | ""

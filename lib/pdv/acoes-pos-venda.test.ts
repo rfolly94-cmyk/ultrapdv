@@ -198,11 +198,73 @@ test("7. configuração desligada mantém fluxo comercial normal", () => {
 
   const shell = fonte("components/pdv/pdv-shell.tsx");
   assert.match(shell, /resolverAcoesPosVendaPdv/);
-  assert.match(shell, /if \(!emitirNfceAutomaticoPdv\)/);
+  assert.match(shell, /if \(!emissaoFiscal\.emitir\)/);
   assert.match(shell, /imprimirApos/);
   assert.match(shell, /rotuloBotaoRecibo/);
   assert.match(shell, /não substitui NF-e, NFC-e ou DANFE/);
   assert.doesNotMatch(shell, /window\.open/);
   assert.match(fonte("lib/pdv/acoes-pos-venda.ts"), /Imprimir recibo normal/);
   assert.doesNotMatch(shell, /setUltimaVenda\(null\).*chamarEmissaoNfceVenda/);
+});
+
+test("TEF homologado confirmado não deixa a tela em Emitindo NFC-e", () => {
+  const acoes = resolverAcoesPosVendaPdv(
+    entrada({
+      emitirNfceAutomatico: true,
+      imprimirApos: false,
+      fiscal: null,
+    })
+  );
+
+  assert.equal(acoes.mostrarStatusFiscal, false);
+  assert.equal(acoes.detalheFiscal, null);
+  assert.equal(acoes.podeReenviarNfce, false);
+  assert.notEqual(acoes.detalheFiscal, "Emitindo NFC-e...");
+
+  const shell = fonte("components/pdv/pdv-shell.tsx");
+  assert.match(shell, /suprimirNfceTef = true/);
+  assert.match(shell, /A NFC-e comercial não foi emitida/);
+  assert.match(shell, /if \(emissaoFiscal\.emitir\)/);
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
+  const posEmitir = shell.indexOf("chamarEmissaoNfceVenda(");
+  const posPlano = shell.indexOf("planejarPosVenda(", posEmitir);
+  assert.ok(shell.slice(posFinalizar, posEmitir).includes("suprimirNfce"));
+  assert.match(shell.slice(posEmitir, posPlano), /decidirFalhaFiscalMotor/);
+  assert.doesNotMatch(shell.slice(posEmitir, posPlano), /cobrarPeloMotorCsharp|executarVendaPinpad/);
+});
+
+test("resultado fiscal desconhecido não libera retransmissão", () => {
+  const acoes = resolverAcoesPosVendaPdv(
+    entrada({
+      fiscal: fiscal({
+        emitindo: false,
+        kind: "aguardando_reconciliacao",
+        status: "aguardando_reconciliacao",
+        mensagem: "Resultado fiscal desconhecido",
+      }),
+    })
+  );
+
+  assert.equal(acoes.podeReenviarNfce, false);
+  assert.equal(acoes.mostrarImprimirNfce, false);
+  assert.notEqual(acoes.detalheFiscal, "Emitindo NFC-e...");
+  assert.match(fonte("lib/fiscal/nfce/chamar-emissao-nfce-venda.ts"), /AbortSignal\.timeout/);
+});
+
+test("falha na finalização preserva a chave e a confirmação TEF", () => {
+  const shell = fonte("components/pdv/pdv-shell.tsx");
+  const posFinalizar = shell.indexOf("finalizarVendaPdv(");
+  const posFalha = shell.indexOf("if (!resultado.ok)", posFinalizar);
+  const posSucesso = shell.lastIndexOf("pagamentoTefConfirmadoRef.current = false;");
+  assert.ok(posFalha > posFinalizar);
+  assert.ok(posSucesso > posFalha);
+  assert.match(shell, /if \(\s*!idempotencyRef\.current\s*\)/);
+});
+
+test("venda já existente reutiliza a mesma chave de idempotência", () => {
+  const shell = fonte("components/pdv/pdv-shell.tsx");
+  const acao = fonte("app/pdv/actions.ts");
+  assert.match(shell, /let idempotencyKey =\s*idempotencyRef\.current/);
+  assert.match(acao, /idempotencyKey/);
+  assert.equal(shell.split("finalizarVendaPdv(").length - 1, 1);
 });

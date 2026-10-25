@@ -17,6 +17,11 @@ type StatusAgente = {
   diretorioProducao?: string;
 };
 
+type PerfilAutonomo = {
+  efetivo?: string;
+  estado?: string;
+};
+
 type StatusVinculo = {
   vinculado?: boolean;
   ambiente?: string;
@@ -38,6 +43,7 @@ export function TefProducaoIsolada(props: {
   const [ocupado, setOcupado] = useState(false);
   const [mensagens, setMensagens] = useState<string[]>([]);
   const [agente, setAgente] = useState<StatusAgente | null>(null);
+  const [perfil, setPerfil] = useState<PerfilAutonomo | null>(null);
   const [vinculo, setVinculo] = useState<StatusVinculo | null>(null);
 
   async function consultar() {
@@ -49,13 +55,18 @@ export function TefProducaoIsolada(props: {
     const corpo = (await resposta.json()) as {
       ok?: boolean;
       erro?: string;
-      tef?: { agente?: StatusAgente; biblioteca?: { cobrancaPermitida?: boolean; motivo?: string } };
+      tef?: {
+        agente?: StatusAgente;
+        biblioteca?: { cobrancaPermitida?: boolean; motivo?: string };
+        perfilAutonomo?: PerfilAutonomo;
+      };
       vinculo?: StatusVinculo;
     };
     if (!resposta.ok || corpo.ok === false) {
       throw new Error(corpo.erro || "O Connector não respondeu o status do agente.");
     }
     setAgente(corpo.tef?.agente ?? null);
+    setPerfil(corpo.tef?.perfilAutonomo ?? null);
     setVinculo(corpo.vinculo ?? null);
     return { origem: descoberta.origem, corpo };
   }
@@ -86,9 +97,9 @@ export function TefProducaoIsolada(props: {
         ]);
         return;
       }
-      if (!atual.corpo.tef?.agente?.diretorioProducao || !atual.corpo.tef?.agente?.diretorioSandbox) {
+      if (!atual.corpo.tef?.agente?.diretorioSandbox) {
         setMensagens([
-          "O Connector ainda não informa a pasta de produção. Atualize o agente antes de instalar. A pasta de homologação não foi aberta.",
+          "O Connector ainda não informa a pasta de homologação. Atualize o agente antes de instalar.",
         ]);
         return;
       }
@@ -128,6 +139,7 @@ export function TefProducaoIsolada(props: {
           acao: "instalar",
           confirmacao: true,
           credencial: senha,
+          ...(perfil?.estado === "ocupado" ? { provisionarNovo: true } : {}),
         }),
       });
       const corpo = (await resposta.json()) as { erro?: string; resultado?: { mensagem?: string } };
@@ -151,8 +163,8 @@ export function TefProducaoIsolada(props: {
       <div>
         <h2 className="text-sm font-semibold text-zinc-900">PGWebLib de produção</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          A instalação usa uma pasta nova, ao lado da homologação. O ponto, o servidor e o CNPJ
-          saem do cadastro desta empresa. A chave, o vínculo, o journal e a pasta atual permanecem.
+        A instalação usa um perfil vazio escolhido neste computador. O ponto, o servidor e o CNPJ
+        saem do cadastro desta empresa. A chave, o vínculo, o journal e as pastas anteriores permanecem.
         </p>
       </div>
       <dl className="grid gap-2 text-sm text-zinc-800 sm:grid-cols-2">
@@ -177,8 +189,14 @@ export function TefProducaoIsolada(props: {
           <dd>{agente?.diretorioSandbox || "bin/tef/TEF/PGWeb"}</dd>
         </div>
         <div className="sm:col-span-2">
-          <dt className="text-xs font-medium text-zinc-500">Pasta de produção</dt>
-          <dd>{agente?.diretorioProducao || "C:\\ProgramData\\UltraPDV\\TEF\\Producao\\PGWeb"}</dd>
+          <dt className="text-xs font-medium text-zinc-500">Perfil novo de produção</dt>
+          <dd>
+            {perfil?.efetivo ||
+              "Será criado em ProgramData\\UltraPDV\\TEF\\Producao\\perfis. As pastas anteriores não serão abertas."}
+            {perfil?.estado === "ocupado"
+              ? " Este perfil já tem dados e permanece preservado. A confirmação cria outro perfil vazio."
+              : ""}
+          </dd>
         </div>
         <div>
           <dt className="text-xs font-medium text-zinc-500">Agente selecionado</dt>

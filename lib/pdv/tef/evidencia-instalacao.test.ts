@@ -298,6 +298,83 @@ test("reset, reinstalação e revogação invalidam a evidência antiga", () => 
   assert.equal(classificacaoSemEvidencia("homologacao").ambienteEfetivo, null);
 });
 
+test("homologação e produção conferem o ponto do próprio ambiente", () => {
+  const chaveHomologacao = par();
+  const chaveProducao = par();
+  const mesmoPonto = "200001";
+  const homologacao = assinarEvidenciaInstalacao(chaveHomologacao.privada, observacao({ pontoCaptura: mesmoPonto, pontoInstalado: mesmoPonto }));
+  const producao = assinarEvidenciaInstalacao(
+    chaveProducao.privada,
+    observacao({ ambienteSolicitado: "producao", pontoCaptura: mesmoPonto, pontoInstalado: mesmoPonto, instalacaoId: instalacaoB })
+  );
+  assert.ok(homologacao);
+  assert.ok(producao);
+  const mesmaHomologacao = consultaDe(homologacao.assinatura, observacao({ pontoCaptura: mesmoPonto, pontoInstalado: mesmoPonto }), {
+    chavePublicaPem: chaveHomologacao.publica,
+    pontoTerminal: mesmoPonto,
+    pontoHomologacao: mesmoPonto,
+  });
+  const mesmaProducao = consultaDe(
+    producao.assinatura,
+    observacao({ ambienteSolicitado: "producao", pontoCaptura: mesmoPonto, pontoInstalado: mesmoPonto, instalacaoId: instalacaoB }),
+    {
+      chavePublicaPem: chaveProducao.publica,
+      pontoTerminal: mesmoPonto,
+      pontoHomologacao: mesmoPonto,
+    }
+  );
+  assert.equal(mesmaHomologacao.situacao, "comprovado");
+  assert.equal(mesmaHomologacao.deveRevogar, false);
+  assert.equal(mesmaProducao.situacao, "comprovado");
+  assert.equal(mesmaProducao.deveRevogar, false);
+
+  const distinta = assinarEvidenciaInstalacao(
+    chaveHomologacao.privada,
+    observacao({ pontoCaptura: "300001", pontoInstalado: "300001" })
+  );
+  assert.ok(distinta);
+  const pontosDistintos = consultaDe(distinta.assinatura, observacao({ pontoCaptura: "300001", pontoInstalado: "300001" }), {
+    chavePublicaPem: chaveHomologacao.publica,
+    pontoTerminal: "117473",
+    pontoHomologacao: "300001",
+  });
+  assert.equal(pontosDistintos.situacao, "comprovado");
+  assert.equal(pontosDistintos.deveRevogar, false);
+
+  const divergeProducao = consultaDe(distinta.assinatura, observacao({ pontoCaptura: "300001", pontoInstalado: "300001" }), {
+    chavePublicaPem: chaveHomologacao.publica,
+    pontoTerminal: "300001",
+    pontoHomologacao: "400001",
+  });
+  assert.equal(divergeProducao.deveRevogar, true);
+  assert.match(divergeProducao.motivo, /ponto de homologação/);
+
+  const semPar = consultaDe(homologacao.assinatura, observacao(), { chavePublicaPem: "", pontoHomologacao: "200001" });
+  assert.equal(semPar.situacao, "declarado");
+  assert.equal(semPar.deveRevogar, false);
+  assert.match(semPar.motivo, /não está vinculada/);
+
+  const assinaturaInvalida = consultaDe(homologacao.assinatura.replace(/^./, homologacao.assinatura.startsWith("A") ? "B" : "A"), observacao(), {
+    chavePublicaPem: chaveHomologacao.publica,
+    pontoHomologacao: "200001",
+  });
+  assert.equal(assinaturaInvalida.situacao, "declarado");
+  assert.match(assinaturaInvalida.motivo, /chave/);
+
+  const outraEmpresa = consultaDe(homologacao.assinatura, observacao(), {
+    chavePublicaPem: chaveHomologacao.publica,
+    empresaSessaoId: empresaB,
+    pontoHomologacao: "200001",
+  });
+  assert.match(outraEmpresa.motivo, /outra empresa/);
+  const outroTerminal = consultaDe(homologacao.assinatura, observacao(), {
+    chavePublicaPem: chaveHomologacao.publica,
+    terminalAutorizadoId: terminalB,
+    pontoHomologacao: "200001",
+  });
+  assert.match(outroTerminal.motivo, /terminal autorizado/);
+});
+
 test("migration da evidência isola por empresa e não guarda segredo", () => {
   const sql = fonte("supabase/migrations/20261011180000_tef_evidencia_instalacao.sql");
   const conector = fonte("print-agent/src/tef-prova.mjs");

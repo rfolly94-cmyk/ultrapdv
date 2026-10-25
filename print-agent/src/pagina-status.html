@@ -153,7 +153,39 @@
       <section class="secao" id="secaoDiagnostico">
         <h2>Diagnóstico</h2>
         <div class="row">
-          <span class="muted">Agente TEF</span>
+          <span class="muted">Connector</span>
+          <span id="diagConector">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Módulo TEF</span>
+          <span id="diagTef">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">PGWebLib</span>
+          <span id="diagPgweb">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Biblioteca</span>
+          <span id="diagBiblioteca">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Ambiente</span>
+          <span id="diagAmbiente">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">PinPad</span>
+          <span id="diagPinpad">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Porta HTTP</span>
+          <span id="diagPorta">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Última falha</span>
+          <span id="diagFalha">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">PGWebLib</span>
           <span id="agenteTef">—</span>
         </div>
       </section>
@@ -301,7 +333,9 @@
             gavetaPino: Number(selPino.value) === 1 ? 1 : 0,
           }),
         });
-        msg.textContent = data.ok ? "Configuração salva." : (data.erro || "Não foi possível salvar.");
+        msg.textContent = data.ok
+          ? "Configuração salva. A impressora não exige reinício."
+          : (data.erro || "Não foi possível salvar.");
         if (data.ok) {
           atualizar(true);
         }
@@ -319,7 +353,9 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ impressora, papel: selPapel.value }),
         });
-        msg.textContent = data.ok ? "Teste enviado à impressora." : (data.erro || "Falha no teste.");
+        msg.textContent = data.ok && data.impresso
+          ? "Teste impresso em " + (data.impressora || impressora) + "."
+          : (data.erro || "A impressão de teste não foi confirmada.");
       };
 
       document.getElementById("btnGaveta").onclick = async () => {
@@ -343,30 +379,70 @@
       };
 
       document.getElementById("btnReiniciar").onclick = async () => {
+        const botao = document.getElementById("btnReiniciar");
+        botao.disabled = true;
         pintarStatus("Reiniciando", "warn");
         msg.textContent = "Reiniciando…";
-        await api("/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-        setTimeout(function () { atualizar(true); }, 700);
+        const pedido = await api("/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        if (!pedido.res.ok || pedido.data.ok !== true) {
+          pintarStatus("Erro", "err");
+          msg.textContent = pedido.data.erro || "A reinicialização foi recusada.";
+          botao.disabled = false;
+          return;
+        }
+        const portaEsperada = Number(document.getElementById("inputPorta").value);
+        const limite = Date.now() + 8000;
+        let confirmado = false;
+        while (Date.now() < limite) {
+          await new Promise(function (resolve) { setTimeout(resolve, 400); });
+          try {
+            const saude = await api("/health");
+            if (saude.res.ok && saude.data.ok === true && Number(saude.data.port) === portaEsperada) {
+              confirmado = true;
+              break;
+            }
+          } catch {
+            confirmado = false;
+          }
+        }
+        if (confirmado) {
+          pintarStatus("Reiniciado com sucesso", "ok");
+          msg.textContent = "Reiniciado com sucesso";
+          atualizar(true);
+        } else {
+          pintarStatus("Erro", "err");
+          msg.textContent = "O Connector não voltou a responder.";
+        }
+        botao.disabled = false;
       };
 
       document.getElementById("btnSair").onclick = async () => {
-        await api("/shutdown", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const pedido = await api("/shutdown", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ modo: "aplicativo" }),
+        });
+        if (!pedido.res.ok || pedido.data.ok !== true) {
+          pintarStatus("Erro", "err");
+          msg.textContent = pedido.data.erro || "O Connector não foi encerrado.";
+          return;
+        }
         pintarStatus("Erro", "err");
-        msg.textContent = "Conector encerrado.";
+        msg.textContent = "Encerrando o Connector.";
       };
 
       async function atualizarAgente() {
         const destino = document.getElementById("agenteTef");
         try {
           const { res, data } = await api("/tef/status");
-          const agente = data && data.tef && data.tef.agente;
-          if (!res.ok || !agente || !agente.nome) {
+          const biblioteca = data && data.tef && data.tef.pgwebLib;
+          if (!res.ok || !biblioteca) {
             destino.textContent = "indisponível";
             return;
           }
-          var texto = agente.compativel && agente.versao
-            ? agente.nome + " · v" + agente.versao
-            : agente.nome + " · não selecionado";
+          var texto = biblioteca.pronta
+            ? "PGWebLib.dll" + (biblioteca.versao ? " · v" + biblioteca.versao : "")
+            : "PGWebLib.dll · não pronta";
           if (data.tef.diretorioTrabalho) {
             texto += " · " + data.tef.diretorioTrabalho;
           }
@@ -408,8 +484,37 @@
         atualizarPareamento();
       };
 
+      async function atualizarDiagnostico() {
+        try {
+          const { res, data } = await api("/diagnostico");
+          if (!res.ok || !data.ok) {
+            document.getElementById("diagFalha").textContent =
+              (data && data.erro) || "Diagnóstico indisponível";
+            return;
+          }
+          document.getElementById("diagConector").textContent =
+            (data.conector && data.conector.versao) || "—";
+          const modulo = data.tef || {};
+          document.getElementById("diagTef").textContent = modulo.modulo
+            ? modulo.modulo + (modulo.versao ? " · v" + modulo.versao : "")
+            : "—";
+          const pgweb = data.pgweb || {};
+          document.getElementById("diagPgweb").textContent = pgweb.versao
+            ? pgweb.versao + " · " + (pgweb.estado || "")
+            : "—";
+          document.getElementById("diagBiblioteca").textContent = data.biblioteca || "—";
+          document.getElementById("diagAmbiente").textContent = data.ambiente || "—";
+          document.getElementById("diagPinpad").textContent = data.pinpad || "—";
+          document.getElementById("diagPorta").textContent = data.portaHttp || "—";
+          document.getElementById("diagFalha").textContent = data.ultimaFalha || "—";
+        } catch {
+          document.getElementById("diagFalha").textContent = "indisponível";
+        }
+      }
+
       atualizar(true);
       atualizarPareamento();
+      atualizarDiagnostico();
       setInterval(function () { atualizar(); atualizarPareamento(); }, 8000);
     </script>
   </body>

@@ -46,7 +46,7 @@ export default async function ConfiguracoesFinanceiroPage() {
             <FinanceiroAtalho
               href="/configuracoes/financeiro/tef"
               titulo="TEF — PayGoWeb"
-              descricao="Instalação, pinpad e terminais"
+              descricao="Histórico preservado. Motor C# por empresa. Produção sem cobrança."
               icone="tef"
             />
           ) : null}

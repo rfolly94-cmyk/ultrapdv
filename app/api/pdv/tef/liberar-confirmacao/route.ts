@@ -1,11 +1,18 @@
-import { liberarConfirmacaoTefSessao } from "@/lib/pdv/tef/servico";
+function tefDesativado() {
+  return Response.json(
+    {
+      ok: false,
+      codigo: "TEF_DESATIVADO",
+      erro: "A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.",
+    },
+    { status: 410 }
+  );
+}
 
-import { lerCorpo, responderTef } from "../_shared";
+export function GET() {
+  return tefDesativado();
+}
 
-export async function POST(request: Request) {
-  try {
-    return Response.json(await liberarConfirmacaoTefSessao(await lerCorpo(request)));
-  } catch (error) {
-    return responderTef(error);
-  }
+export function POST() {
+  return tefDesativado();
 }

@@ -253,7 +253,7 @@ test("agente local escuta só 127.0.0.1 e o web descobre a porta", () => {
   const cliente = fonte("lib/impressao/agente.ts");
   const versao = JSON.parse(fonte("print-agent/version.json"));
   assert.equal(versao.name, "UltraPDV Connector");
-  assert.equal(versao.version, "1.3.15");
+  assert.equal(versao.version, "1.3.19");
   assert.match(agente, /127\.0\.0\.1/);
   assert.match(agente, /PORTA_PADRAO/);
   assert.match(portas, /PORTA_PADRAO = 18181/);

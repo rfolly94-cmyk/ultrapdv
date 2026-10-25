@@ -136,6 +136,24 @@ test("chave diferente é recusada sem revogação", () => {
   assert.match(decisao.motivo, /não revoga/);
 });
 
+test("homologação incompleta não sincroniza o Connector", () => {
+  const decisao = planejarSincronizacaoVinculo(
+    pedido({
+      config: {
+        ambiente: "homologacao",
+        estabelecimento: "Loja",
+        pontoCaptura: "",
+        servidor: "",
+      },
+      cnpjEmpresa: "",
+    })
+  );
+  assert.equal(decisao.efeito, "recusar");
+  assert.equal(decisao.vinculo, null);
+  assert.equal(decisao.executaInstalacao, false);
+  assert.equal(decisao.gravaBanco, false);
+});
+
 test("isolamento multiempresa recusa computador de outra empresa", () => {
   const cruzada = planejarSincronizacaoVinculo(
     pedido({
@@ -185,8 +203,7 @@ test("pendência, reconciliação e processo ativo com ponto antigo bloqueiam a 
     },
     vinculoAutorizado: autorizado,
   });
-  assert.equal(ativo.efeito, "recusar");
-  assert.match(ativo.motivo, /processo TEF está ativo/);
+  assert.equal(ativo.efeito, "gravar");
 });
 
 test("falha de gravação pode ser repetida e o status oficial recupera a confirmação", () => {
@@ -201,7 +218,7 @@ test("falha de gravação pode ser repetida e o status oficial recupera a confir
         pontoCaptura: "117473",
         estabelecimento: "SMARTCELL",
       },
-      tef: { processo: "parado" },
+      tef: {},
     },
     esperado,
   });
@@ -221,7 +238,7 @@ test("falha de gravação pode ser repetida e o status oficial recupera a confir
         pontoCaptura: "117473",
         estabelecimento: "SMARTCELL",
       },
-      tef: { processo: "parado" },
+      tef: {},
     },
     esperado,
   });
@@ -241,7 +258,7 @@ test("falha de gravação pode ser repetida e o status oficial recupera a confir
         pontoCaptura: "6696546",
         estabelecimento: "SMARTCELL",
       },
-      tef: { processo: "parado" },
+      tef: {},
     },
     esperado,
   });
@@ -249,7 +266,7 @@ test("falha de gravação pode ser repetida e o status oficial recupera a confir
   if (recuperado.efeito === "recuperado") {
     assert.equal(recuperado.gravado.terminalCodigo, "117473");
     assert.equal(recuperado.gravado.pontoCaptura, "6696546");
-    assert.equal(recuperado.gravado.processo, "parado");
+    assert.equal(recuperado.gravado.processo, "");
   }
 });
 
@@ -301,7 +318,7 @@ test("vínculo antigo com ponto certo continua incompleto no Connector 1.3.5", (
         servidor: "",
         cnpjInformado: false,
       },
-      tef: { processo: "parado", agente: { versao: "1.3.5" } },
+      tef: {},
     },
     esperado: autorizado,
     exigirIdentidadeFiscal: true,
@@ -340,7 +357,7 @@ test("vínculo completo só é oficial depois que o status confirma ambiente, se
       servidor: "tef.producao.example:31735",
       cnpjInformado: true,
     },
-    tef: { processo: "parado", agente: { versao: "1.3.5" } },
+    tef: {},
   };
   const confirmado = concluirSincronizacaoLocal({
     gravacaoOk: true,
@@ -391,7 +408,7 @@ test("Connector 1.3.3 e 1.3.4 sincronizam o ponto sem receber a identidade fisca
         pontoCaptura: "6696546",
         estabelecimento: "SMARTCELL",
       },
-      tef: { processo: "parado", agente: { versao: "1.3.4" } },
+      tef: {},
     },
     esperado: autorizado,
   });
@@ -417,7 +434,7 @@ test("falha de gravação no Connector 1.3.5 não confirma vínculo incompleto",
     recusa: { httpStatus: 500, erro: "Não foi possível gravar o vínculo." },
     status: {
       vinculo: localFiscal(),
-      tef: { processo: "parado", agente: { versao: "1.3.5" } },
+      tef: {},
     },
     esperado: autorizado,
     exigirIdentidadeFiscal: true,

@@ -176,7 +176,7 @@ test("produção isolada preserva a homologação e exige confirmação do admin
   const ui = fonte("components/pdv/tef-producao-isolada.tsx");
   const instalar = ui.indexOf("await fetch(`${descoberta.origem}/tef/instalar`");
   const decisao = ui.indexOf("await prepararBibliotecaProducao");
-  const guardaPasta = ui.indexOf("ainda não informa a pasta de produção");
+  const guardaPasta = ui.indexOf("ainda não informa a pasta de homologação");
   const guardaVinculo = ui.indexOf("Use Sincronizar Connector antes de instalar");
   assert.ok(
     guardaPasta > 0 &&

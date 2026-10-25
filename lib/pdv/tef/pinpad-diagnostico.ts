@@ -19,6 +19,22 @@ export type DiagnosticoPinpad = {
   chamadaNativaEmExecucao?: boolean;
 };
 
+export function simularDiagnosticoPinpad(roteiro: string) {
+  const mensagens: Record<string, string> = {
+    confirmado: "Pinpad conectado e comunicação confirmada.",
+    conector_ausente: "Connector não encontrado.",
+    ausente: "Pinpad ausente.",
+    timeout: "Tempo esgotado.",
+    ocupado: "Pinpad ocupado.",
+  };
+  return {
+    cobrancaIniciada: false,
+    dllCarregada: false,
+    bibliotecaChamada: false,
+    mensagem: mensagens[roteiro] ?? "Diagnóstico indisponível.",
+  };
+}
+
 export function mensagemDiagnosticoPinpad(input: {
   resultado?: DiagnosticoPinpad | null;
   codigo?: string | null;

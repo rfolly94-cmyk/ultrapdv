@@ -1,22 +1,15 @@
+import { redirect } from "next/navigation";
+
 import { ConfiguracoesModuleTabs } from "@/components/configuracoes/configuracoes-module-tabs";
 import { PageShell } from "@/components/layout/page-shell";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
-import { PageAlert } from "@/components/ui/page-alert";
-import { TefAssistente } from "@/components/pdv/tef-assistente";
-import { TefPareamentoForm } from "@/components/pdv/tef-pareamento-form";
-import { TefBibliotecaDiagnostico } from "@/components/pdv/tef-biblioteca-diagnostico";
-import { TefProducaoIsolada } from "@/components/pdv/tef-producao-isolada";
-import { TefInicializacaoBiblioteca } from "@/components/pdv/tef-inicializacao-biblioteca";
-import { TefInstalacaoResumo } from "@/components/pdv/tef-instalacao-resumo";
-import { TefPastaForm } from "@/components/pdv/tef-pasta-form";
-import { TefPinpadDiagnostico } from "@/components/pdv/tef-pinpad-diagnostico";
-import { etapaInicial } from "@/lib/pdv/tef/assistente-instalacao";
-import { lerPaginaAssistenteTef } from "@/lib/pdv/tef/assistente-sessao";
-import { ErroTef, lerConfigTefAdministrativa } from "@/lib/pdv/tef/servico";
+import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
+import { TefConfiguracaoEmpresa } from "@/components/pdv/tef-configuracao-empresa";
+import { TefMotorCsharpPainel } from "@/components/pdv/tef-motor-csharp";
+import { formatarCnpj } from "@/lib/pdv/tef/assistente-instalacao";
+import { carregarConfiguracaoMotor, identidadeEmpresaSessao } from "@/lib/pdv/tef/politica-empresa-servidor";
 import { planoPermiteRecursoEmpresa } from "@/lib/plataforma/entitlements/exigir-recurso";
 import { carregarEntitlementsEmpresa } from "@/lib/plataforma/recursos/carregar";
-
-import { salvarTefEmpresa } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -24,47 +17,29 @@ export const metadata = {
   title: "TEF",
 };
 
-type PageProps = {
-  searchParams: Promise<{ erro?: string; sucesso?: string; assistente?: string }>;
-};
+const PRESERVADO = [
+  "Vendas e pagamentos já lançados",
+  "NFC-e emitida",
+  "Operações TEF já registradas",
+];
 
-export default async function ConfiguracaoTefPage({ searchParams }: PageProps) {
-  const params = await searchParams;
-  let config: Awaited<ReturnType<typeof lerConfigTefAdministrativa>> | null = null;
-  let assistente: Awaited<ReturnType<typeof lerPaginaAssistenteTef>> | null = null;
-  let erroLeitura: string | null = null;
-  try {
-    config = await lerConfigTefAdministrativa();
-  } catch (error) {
-    erroLeitura =
-      error instanceof ErroTef
-        ? error.message
-        : "Não foi possível carregar a configuração TEF.";
+export default async function ConfiguracaoTefPage() {
+  const sessao = await obterPermissoesSessao();
+  if (!sessao) {
+    redirect("/login");
   }
-  try {
-    assistente = config ? await lerPaginaAssistenteTef() : null;
-  } catch (error) {
-    erroLeitura =
-      error instanceof ErroTef
-        ? error.message
-        : "Não foi possível carregar o assistente TEF.";
-  }
-  const abrirAssistente = params.assistente === "1";
-  let planoPdv = true;
-  let planoNome: string | null = null;
-  if (config?.empresaId) {
-    const [plano, entitlements] = await Promise.all([
-      planoPermiteRecursoEmpresa(config.empresaId, "pdv"),
-      carregarEntitlementsEmpresa(config.empresaId),
-    ]);
-    planoPdv = plano.permitido;
-    planoNome = entitlements.planoNome;
-  }
+
+  const [plano, entitlements, identidade, motor] = await Promise.all([
+    planoPermiteRecursoEmpresa(sessao.empresaId, "pdv"),
+    carregarEntitlementsEmpresa(sessao.empresaId),
+    identidadeEmpresaSessao(),
+    carregarConfiguracaoMotor(sessao.empresaId),
+  ]);
 
   return (
     <PageShell
-      title="TEF — PayGoWeb"
-      description="Instalação, pinpad e terminais."
+      title="TEF"
+      description="Histórico financeiro preservado. A cobrança operacional está desativada."
       breadcrumb={[
         { label: "Configurações", href: "/configuracoes" },
         { label: "Financeiro", href: "/configuracoes/financeiro" },
@@ -72,201 +47,92 @@ export default async function ConfiguracaoTefPage({ searchParams }: PageProps) {
       ]}
       tabs={<ConfiguracoesModuleTabs />}
     >
-    <div className="updv-config space-y-6">
-      {planoPdv ? null : (
-        <RecursoNaoContratado
-          titulo="TEF — PayGoWeb"
-          descricao="O TEF acompanha o PDV. O plano atual da empresa não inclui o PDV, então a instalação, o pinpad e os terminais ficam indisponíveis."
-          planoNome={planoNome}
-          voltarHref="/configuracoes/financeiro"
-          voltarLabel="Voltar ao financeiro"
-        />
-      )}
-      {planoPdv ? (
-      <>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-sm text-zinc-500">
-          Configuração desta empresa. O terminal físico é vinculado ao Connector
-          da máquina e não pode ser compartilhado com outra empresa.
+      <div className="updv-config space-y-4">
+        {plano.permitido ? null : (
+          <RecursoNaoContratado
+            titulo="TEF"
+            descricao="O histórico do TEF acompanha o PDV. O plano atual da empresa não inclui o PDV."
+            planoNome={entitlements.planoNome}
+            voltarHref="/configuracoes/financeiro"
+            voltarLabel="Voltar ao financeiro"
+          />
+        )}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.8fr)]">
+          <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Situação
+            </p>
+            <h2 className="mt-2 text-xl font-semibold text-zinc-950">
+              Integração operacional desativada em produção
+            </h2>
+            <p className="mt-3 max-w-prose text-sm leading-6 text-zinc-600">
+              O motor novo é o UltraPDV.TEF em C#/.NET 8 x64, chamado pelo Connector
+              principal. A empresa ativa vem da sessão. CNPJ, ponto, terminal e
+              diretório ficam isolados por empresa. Instalação, crédito, débito,
+              confirmação e cancelamento existem no motor e não rodam sem
+              autorização explícita de homologação.
+            </p>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-zinc-500">Ambiente</dt>
+                <dd className="font-medium text-zinc-950">Homologação ou produção, por empresa</dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">CNPJ</dt>
+                <dd className="font-medium text-zinc-950">O cadastro da empresa ativa</dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">Ponto de captura</dt>
+                <dd className="font-medium text-zinc-950">Pedido pela biblioteca na instalação</dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">Terminal e PinPad</dt>
+                <dd className="font-medium text-zinc-950">Um diretório e um journal por terminal</dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">Instalação</dt>
+                <dd className="font-medium text-zinc-950">Lida neste computador, sem repetir a instalação</dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">Produção</dt>
+                <dd className="font-medium text-zinc-950">Bloqueada. Nenhuma cobrança de produção é iniciada.</dd>
+              </div>
+            </dl>
+            {plano.permitido && identidade ? (
+              <TefConfiguracaoEmpresa
+                razaoSocial={identidade.razaoSocial}
+                nomeFantasia={identidade.nomeFantasia}
+                cnpj={formatarCnpj(identidade.cnpj)}
+                empresaId={identidade.empresaId}
+                administrador={sessao.perfil.trim().toLowerCase() === "administrador"}
+                habilitado={motor.habilitado}
+                ambiente={motor.ambiente}
+                configurado={motor.existe}
+                referenciaInicial={motor.referenciaCredenciamento}
+                situacaoInicial={motor.situacaoCredenciamento}
+                comprovadoEmInicial={motor.comprovadoEm}
+                credenciamentoInicial={motor.credenciamentoComprovado}
+              />
+            ) : null}
+            {plano.permitido && motor.ambiente !== "producao" ? <TefMotorCsharpPainel /> : null}
+          </section>
+          <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-zinc-950">O que permanece</h2>
+            <ul className="mt-3 space-y-2 text-sm text-zinc-700">
+              {PRESERVADO.map((item) => (
+                <li key={item} className="rounded-lg bg-zinc-50 px-3 py-2">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+        <p className="max-w-prose text-sm leading-6 text-zinc-500">
+          As duas operações locais com retorno -2596 e resultado 151 não foram
+          recriadas e não estão conciliadas. A confirmação externa com a SETIS
+          continua necessária.
         </p>
-        {abrirAssistente ? (
-          <a
-            href="/configuracoes/financeiro/tef"
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800"
-          >
-            Voltar à configuração
-          </a>
-        ) : (
-          <a
-            href="/configuracoes/financeiro/tef?assistente=1"
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
-          >
-            Configurar TEF
-          </a>
-        )}
       </div>
-      {params.erro ? <PageAlert type="erro">{params.erro}</PageAlert> : null}
-      {params.sucesso ? (
-        <PageAlert type="sucesso">Configuração TEF salva.</PageAlert>
-      ) : null}
-      {erroLeitura ? <PageAlert type="erro">{erroLeitura}</PageAlert> : null}
-      {config?.migracaoPendente ? (
-        <PageAlert type="erro">
-          A estrutura de TEF ainda não foi aplicada no banco. A migration
-          20261010120000_tef_multiempresa.sql precisa ser aplicada antes do uso.
-        </PageAlert>
-      ) : null}
-      {abrirAssistente && config && assistente ? (
-        <TefAssistente
-          cnpj={assistente.cnpj}
-          rascunho={assistente.rascunho}
-          empresaJaHabilitada={assistente.empresaJaHabilitada}
-          administrador={assistente.administrador}
-          ambienteAtual={assistente.ambienteAtual === "producao" ? "producao" : "homologacao"}
-          pontoAtual={assistente.pontoAtual}
-          estabelecimentoAtual={assistente.estabelecimentoAtual}
-          servidorHomologacao={assistente.servidorHomologacao}
-          servidorProducao={assistente.servidorProducao}
-          migracaoInstalacaoPendente={assistente.migracaoInstalacaoPendente}
-          empresaId={config.empresaId}
-          terminais={config.terminais}
-          podeRevogar={config.podeRevogar}
-          etapaInicial={etapaInicial({
-            etapaSalva: assistente.rascunho?.etapa ?? null,
-            credenciamentoCompleto: assistente.rascunho?.credenciamentoConfirmado === true,
-            empresaJaHabilitada: assistente.empresaJaHabilitada,
-            servidorOficial:
-              assistente.ambienteAtual === "producao"
-                ? assistente.servidorProducao
-                : assistente.servidorHomologacao,
-          })}
-        />
-      ) : null}
-      {abrirAssistente ? null : (
-      <>
-      <form action={salvarTefEmpresa} className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5">
-        <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
-          <input
-            type="checkbox"
-            name="habilitado"
-            defaultChecked={config?.habilitado === true}
-          />
-          Habilitar TEF nesta empresa
-        </label>
-        <label className="block text-sm font-medium text-zinc-800">
-          Ambiente
-          <select
-            name="ambiente"
-            defaultValue={config?.ambiente === "producao" ? "producao" : "homologacao"}
-            className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-          >
-            <option value="homologacao">Homologação</option>
-            <option value="producao">Produção</option>
-          </select>
-        </label>
-        <label className="block text-sm font-medium text-zinc-800">
-          Estabelecimento
-          <input
-            name="estabelecimento"
-            defaultValue={config?.estabelecimento ?? ""}
-            className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-          />
-        </label>
-        <label className="flex items-start gap-2 text-sm font-medium text-zinc-800">
-          <input
-            type="checkbox"
-            name="permitir_operacao_manual"
-            defaultChecked={config?.permitirOperacaoManual === true}
-            disabled={config?.operacaoManualDisponivel !== true}
-            className="mt-1"
-          />
-          <span>
-            Autorizar operação manual de cartão
-            <span className="mt-1 block text-xs font-normal text-zinc-500">
-              Sem esta autorização, o PDV não conclui cartão quando a plataforma
-              estiver desligada. Com ela, cada venda manual precisa ser confirmada
-              no caixa. A NFC-e continua exigindo os dados reais da transação.
-            </span>
-          </span>
-        </label>
-        {config?.operacaoManualDisponivel ? (
-          <input type="hidden" name="permitir_operacao_manual_informada" value="1" />
-        ) : (
-          <p className="text-xs text-zinc-500">
-            A autorização de cartão manual ainda não está disponível neste ambiente.
-            Enquanto isso, cartão fica bloqueado se o TEF da empresa estiver ligado
-            e a plataforma desligada.
-          </p>
-        )}
-        <label className="block text-sm font-medium text-zinc-800">
-          Ponto de captura
-          <input
-            name="pontoCaptura"
-            defaultValue={config?.pontoCaptura ?? ""}
-            className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2"
-          />
-        </label>
-        <button
-          type="submit"
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
-        >
-          Salvar
-        </button>
-      </form>
-      {config ? (
-        <>
-          <TefInstalacaoResumo
-            terminais={config.terminais.map((terminal) => ({
-              codigo: terminal.codigo,
-              dispositivoId: terminal.dispositivoId,
-            }))}
-            credenciamentoOk={Boolean(config.pontoCaptura && config.estabelecimento)}
-            credenciamentoNecessario={config.ambiente === "producao"}
-          />
-          <TefPareamentoForm
-            empresaId={config.empresaId}
-            terminais={config.terminais}
-            podeRevogar={config.podeRevogar}
-            administrador={assistente?.administrador === true}
-          />
-          <TefInicializacaoBiblioteca />
-          <details className="rounded-2xl border border-zinc-200 bg-white p-5">
-            <summary className="cursor-pointer text-sm font-semibold text-zinc-900">
-              Suporte técnico
-            </summary>
-            <div className="mt-4 space-y-6">
-          <TefPastaForm />
-          <TefProducaoIsolada
-            administrador={assistente?.administrador === true}
-            cnpj={assistente?.cnpj || ""}
-            ponto={assistente?.pontoAtual || config.pontoCaptura}
-            servidor={assistente?.servidorProducao || ""}
-            estabelecimento={assistente?.estabelecimentoAtual || config.estabelecimento}
-            ambiente={
-              assistente?.ambienteAtual === "producao" || config.ambiente === "producao"
-                ? "producao"
-                : "homologacao"
-            }
-          />
-          <TefBibliotecaDiagnostico
-            pontoCadastro={assistente?.pontoAtual || config.pontoCaptura}
-            ambienteCadastro={
-              assistente?.ambienteAtual === "producao" || config.ambiente === "producao"
-                ? "producao"
-                : "homologacao"
-            }
-            servidorCadastro={assistente?.servidorProducao || ""}
-          />
-            </div>
-          </details>
-          <TefPinpadDiagnostico />
-        </>
-      ) : null}
-      </>
-      )}
-      </>
-      ) : null}
-    </div>
     </PageShell>
   );
 }

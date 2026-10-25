@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 
+import { recebedorFiscal, type DadosFiscaisMotor } from "@/lib/pdv/tef/fiscal-motor";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   iniciarOperacao,
@@ -13,6 +14,7 @@ import {
   memoriaTefVazia,
   operacoesParaGravar,
   pedirDesfazimento,
+  recuperarSimulacao,
   registrarResultado,
   reservarOperacoesParaVenda,
   salvarConfigEmpresa,
@@ -26,6 +28,7 @@ import {
   hashComprovante,
   juntarComprovante,
 } from "@/lib/pdv/tef/ambiente-transacao";
+import { credencialPayGoDoAmbiente } from "@/lib/pdv/tef/configuracao-paygo";
 import {
   formaDaModalidadeEfetiva,
   mensagemFormaAusente,
@@ -41,6 +44,7 @@ import {
   type CamposProvaTef,
 } from "@/lib/pdv/tef/prova";
 import {
+  operacaoImpedeDiagnosticoPinpad,
   STATUS_TEF_ABERTOS,
   type ModalidadeTef,
   type ResultadoConectorTef,
@@ -78,6 +82,11 @@ function colunaServidorAusente(error: { code?: string; message?: string } | null
   return /42703|PGRST204|servidor_homologacao|servidor_producao|servidor_confirmado/i.test(texto);
 }
 
+function colunaHomologacaoAusente(error: { code?: string; message?: string } | null) {
+  const texto = `${error?.code ?? ""} ${error?.message ?? ""}`;
+  return /42703|PGRST204|cnpj_instalacao|cnpj_producao|ponto_homologacao/i.test(texto);
+}
+
 function colunaOperacaoManualAusente(error: { code?: string; message?: string } | null) {
   const texto = `${error?.code ?? ""} ${error?.message ?? ""}`;
   return /42703|PGRST204|permitir_operacao_manual/i.test(texto);
@@ -109,6 +118,7 @@ function habilitacaoTefVazia(migracaoPendente: boolean) {
     operacaoManualDisponivel: false,
     migracaoPendente,
     ambiente: "homologacao",
+    ambienteGravado: "" as "" | "homologacao" | "producao",
     estabelecimento: "",
     pontoCaptura: "",
   };
@@ -268,6 +278,217 @@ export async function listarDadosFiscaisTefDaVenda(empresaId: string, vendaId: s
   );
 }
 
+export async function listarFiscaisMotorDaVenda(empresaId: string, vendaId: string) {
+  const cliente = admin();
+  const consulta = await cliente
+    .from("tef_motor_fiscal")
+    .select("id, modalidade, valor_centavos, autorizacao, bandeira_nome, rede, instituicao, cnpj_credenciadora, cnpj_recebedor")
+    .eq("empresa_id", empresaId)
+    .eq("venda_id", vendaId);
+  if (consulta.error) {
+    if (!migracaoAusente(consulta.error)) {
+      throw new ErroTef("Não foi possível consultar os dados fiscais do TEF.", 500);
+    }
+  }
+  const linhas = consulta.error ? [] : ((consulta.data ?? []) as Linha[]);
+  if (linhas.length > 0) {
+    return linhas.map(mapearFiscalMotor);
+  }
+  const venda = await admin()
+    .from("vendas")
+    .select("snapshot_fiscal")
+    .eq("id", vendaId)
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  const snapshot = venda.data?.snapshot_fiscal;
+  const guardados = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? (snapshot as { tefMotorFiscal?: unknown }).tefMotorFiscal
+    : null;
+  if (!Array.isArray(guardados)) {
+    return [];
+  }
+  return guardados.map((item) => mapearFiscalMotor(item as Linha));
+}
+
+function mapearFiscalMotor(linha: Linha) {
+  return {
+    id: String(linha.id ?? linha.chave ?? ""),
+    modalidade: linha.modalidade === "credito" ? ("credito" as const) : ("debito" as const),
+    valorCentavos: Number(linha.valor_centavos),
+    status: "confirmada",
+    autorizacao: linha.autorizacao ? String(linha.autorizacao) : null,
+    nsu: null,
+    rede: linha.rede ? String(linha.rede) : null,
+    bandeiraNome: linha.bandeira_nome ? String(linha.bandeira_nome) : null,
+    cnpjCredenciadora: linha.cnpj_credenciadora ? String(linha.cnpj_credenciadora) : null,
+    cnpjRecebedor: linha.cnpj_recebedor ? String(linha.cnpj_recebedor) : null,
+    instituicao: linha.instituicao ? String(linha.instituicao) : null,
+  };
+}
+
+export async function gravarFiscalMotorNaVenda(input: {
+  empresaId: string;
+  vendaId: string;
+  itens: Array<{ chave: string; valorCentavos: number; fiscal: DadosFiscaisMotor }>;
+}) {
+  if (input.itens.length === 0) {
+    return;
+  }
+  const cliente = admin();
+  const venda = await cliente
+    .from("vendas")
+    .select("id")
+    .eq("id", input.vendaId)
+    .eq("empresa_id", input.empresaId)
+    .maybeSingle();
+  if (venda.error || !venda.data) {
+    return;
+  }
+  const empresa = await cliente.from("empresas").select("cnpj").eq("id", input.empresaId).maybeSingle();
+  const cnpjEmpresa = empresa.data?.cnpj ? String(empresa.data.cnpj) : null;
+  for (const item of input.itens) {
+    const modalidade = item.chave.split(":").at(-2);
+    if (modalidade !== "debito" && modalidade !== "credito") {
+      continue;
+    }
+    if (!item.fiscal.autorizacao && !item.fiscal.bandeiraNome && !item.fiscal.cnpjCredenciadora) {
+      continue;
+    }
+    const linha = {
+      empresa_id: input.empresaId,
+      venda_id: input.vendaId,
+      chave: item.chave,
+      modalidade,
+      valor_centavos: item.valorCentavos,
+      autorizacao: item.fiscal.autorizacao,
+      bandeira_nome: item.fiscal.bandeiraNome,
+      rede: item.fiscal.rede,
+      instituicao: item.fiscal.instituicao,
+      cnpj_credenciadora: item.fiscal.cnpjCredenciadora,
+      cnpj_recebedor: recebedorFiscal(item.fiscal, cnpjEmpresa),
+    };
+    await guardarSnapshotFiscalMotor(cliente, input.empresaId, input.vendaId, linha);
+    await completarPagamentoFiscal(cliente, input.empresaId, input.vendaId, linha);
+    const existente = await cliente
+      .from("tef_motor_fiscal")
+      .select("id, venda_id, autorizacao, bandeira_nome, rede, instituicao, cnpj_credenciadora, cnpj_recebedor")
+      .eq("empresa_id", input.empresaId)
+      .eq("chave", item.chave)
+      .maybeSingle();
+    if (existente.error) {
+      continue;
+    }
+    if (existente.data && String(existente.data.venda_id) !== input.vendaId) {
+      continue;
+    }
+    if (existente.data) {
+      const atual = existente.data as Linha;
+      const patch: Record<string, string> = {};
+      const campos = ["autorizacao", "bandeira_nome", "rede", "instituicao", "cnpj_credenciadora", "cnpj_recebedor"] as const;
+      for (const campo of campos) {
+        const novo = linha[campo];
+        if (!atual[campo] && novo) {
+          patch[campo] = novo;
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        await cliente.from("tef_motor_fiscal").update(patch).eq("id", atual.id).eq("empresa_id", input.empresaId);
+      }
+      continue;
+    }
+    await cliente.from("tef_motor_fiscal").insert(linha);
+  }
+}
+
+async function completarPagamentoFiscal(
+  cliente: ReturnType<typeof admin>,
+  empresaId: string,
+  vendaId: string,
+  linha: { modalidade: string; valor_centavos: number; autorizacao: string | null; bandeira_nome: string | null }
+) {
+  if (!linha.autorizacao && !linha.bandeira_nome) {
+    return;
+  }
+  const codigo = linha.modalidade === "credito" ? "03" : "04";
+  const pagamentos = await cliente
+    .from("vendas_pagamentos")
+    .select("id, valor, bandeira, autorizacao")
+    .eq("empresa_id", empresaId)
+    .eq("venda_id", vendaId)
+    .eq("codigo_fiscal", codigo);
+  if (pagamentos.error || !pagamentos.data) {
+    return;
+  }
+  const alvo = pagamentos.data.find((pagamento) => Math.round(Number(pagamento.valor ?? 0) * 100) === linha.valor_centavos);
+  if (!alvo || String(alvo.autorizacao ?? "").trim() || String(alvo.bandeira ?? "").trim()) {
+    return;
+  }
+  await cliente
+    .from("vendas_pagamentos")
+    .update({
+      autorizacao: linha.autorizacao,
+      bandeira: linha.bandeira_nome,
+    })
+    .eq("id", alvo.id)
+    .eq("empresa_id", empresaId)
+    .eq("venda_id", vendaId);
+}
+
+async function guardarSnapshotFiscalMotor(
+  cliente: ReturnType<typeof admin>,
+  empresaId: string,
+  vendaId: string,
+  linha: {
+    chave: string;
+    modalidade: string;
+    valor_centavos: number;
+    autorizacao: string | null;
+    bandeira_nome: string | null;
+    rede: string | null;
+    instituicao: string | null;
+    cnpj_credenciadora: string | null;
+    cnpj_recebedor: string | null;
+  }
+) {
+  const atual = await cliente
+    .from("vendas")
+    .select("snapshot_fiscal")
+    .eq("id", vendaId)
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  if (atual.error || !atual.data) {
+    return;
+  }
+  const base = atual.data.snapshot_fiscal && typeof atual.data.snapshot_fiscal === "object" && !Array.isArray(atual.data.snapshot_fiscal)
+    ? { ...(atual.data.snapshot_fiscal as Record<string, unknown>) }
+    : {};
+  const anteriores = Array.isArray(base.tefMotorFiscal) ? base.tefMotorFiscal : [];
+  const fiscal = {
+    chave: linha.chave,
+    modalidade: linha.modalidade,
+    valor_centavos: linha.valor_centavos,
+    autorizacao: linha.autorizacao,
+    bandeira_nome: linha.bandeira_nome,
+    rede: linha.rede,
+    instituicao: linha.instituicao,
+    cnpj_credenciadora: linha.cnpj_credenciadora,
+    cnpj_recebedor: linha.cnpj_recebedor,
+  };
+  await cliente
+    .from("vendas")
+    .update({
+      snapshot_fiscal: {
+        ...base,
+        tefMotorFiscal: [
+          ...anteriores.filter((item) => !item || typeof item !== "object" || (item as { chave?: unknown }).chave !== linha.chave),
+          fiscal,
+        ],
+      },
+    })
+    .eq("id", vendaId)
+    .eq("empresa_id", empresaId);
+}
+
 export async function listarDadosFiscaisTefPorIds(empresaId: string, ids: string[]) {
   if (ids.length === 0) {
     return [];
@@ -367,6 +588,10 @@ export async function lerHabilitacaoTef(
   }
   const empresaHabilitada = config.data?.habilitado === true;
   const plataformaHabilitada = plataforma.data?.habilitada === true;
+  const ambienteGravado =
+    config.data?.ambiente === "producao" || config.data?.ambiente === "homologacao"
+      ? config.data.ambiente
+      : "";
   return {
     habilitado: plataformaHabilitada && empresaHabilitada,
     plataformaHabilitada,
@@ -375,6 +600,7 @@ export async function lerHabilitacaoTef(
     operacaoManualDisponivel,
     migracaoPendente: false,
     ambiente: config.data?.ambiente ? String(config.data.ambiente) : "homologacao",
+    ambienteGravado,
     estabelecimento: config.data?.estabelecimento
       ? String(config.data.estabelecimento)
       : "",
@@ -984,6 +1210,7 @@ export async function desfazerTefPersistido(input: {
       });
     }
   }
+  const statusAntes = memoria.operacoes[0]?.status;
   const pedido = pedirDesfazimento(memoria, {
     ...input,
     vendaIdEncontrada,
@@ -991,8 +1218,28 @@ export async function desfazerTefPersistido(input: {
   if (!pedido.ok) {
     throw new ErroTef(pedido.erro, 404);
   }
-  await gravarMemoria(cliente, antes, memoria, input.empresaId, []);
+  if (memoria.operacoes[0]?.status !== statusAntes) {
+    await gravarMemoria(cliente, antes, memoria, input.empresaId, []);
+  }
   return pedido;
+}
+
+export async function recuperarSimulacaoTefPersistida(input: {
+  empresaId: string;
+  operacaoId: string;
+}) {
+  const { cliente, memoria, antes } = await memoriaDaOperacao(
+    input.empresaId,
+    input.operacaoId
+  );
+  const recuperada = recuperarSimulacao(memoria, input);
+  if (!recuperada.ok) {
+    throw new ErroTef(recuperada.erro, recuperada.codigo === "NAO_ENCONTRADA" ? 404 : 409);
+  }
+  if (!recuperada.repetida) {
+    await gravarMemoria(cliente, antes, memoria, input.empresaId, []);
+  }
+  return recuperada;
 }
 
 export async function registrarDesfazimentoTefPersistido(input: {
@@ -1196,91 +1443,9 @@ export async function autorizarPareamentoTef(input: {
   usuarioId: string;
   codigo: string;
 }) {
-  const cliente = admin();
-  const config = await exigirTabela(
-    cliente
-      .from("tef_configuracoes")
-      .select("habilitado, estabelecimento, ponto_captura")
-      .eq("empresa_id", input.empresaId)
-      .maybeSingle()
-  );
-  const estabelecimento = String(config?.estabelecimento ?? "").trim();
-  const pontoCaptura = String(config?.ponto_captura ?? "").trim();
-  if (!estabelecimento || !pontoCaptura) {
-    throw new ErroTef("Salve o estabelecimento e o ponto de captura antes de autorizar o terminal.");
-  }
-  const habilitado = config?.habilitado === true;
-  let ambientePareamento = "";
-  let servidorPareamento = "";
-  let cnpjPareamento = "";
-  if (!habilitado) {
-    const servidores = await cliente
-      .from("tef_configuracoes")
-      .select("ambiente, servidor_homologacao, servidor_producao")
-      .eq("empresa_id", input.empresaId)
-      .maybeSingle();
-    if (servidores.error) {
-      if (colunaServidorAusente(servidores.error)) {
-        throw new ErroTef(
-          "O servidor PayGoWeb ainda não foi aplicado no banco. A migration 20261011190000_tef_servidor_paygo.sql precisa ser aplicada antes de parear um ponto novo.",
-          503
-        );
-      }
-      throw new ErroTef("Não foi possível consultar o servidor PayGoWeb autorizado.", 500);
-    }
-    const ambiente =
-      servidores.data?.ambiente === "producao" || servidores.data?.ambiente === "homologacao"
-        ? servidores.data.ambiente
-        : "";
-    const servidorBruto =
-      ambiente === "producao"
-        ? servidores.data?.servidor_producao
-        : ambiente === "homologacao"
-          ? servidores.data?.servidor_homologacao
-          : "";
-    const servidor = validarServidorPayGo(servidorBruto);
-    if (!servidor.ok) {
-      throw new ErroTef("Confirme o servidor PayGoWeb deste ambiente antes de parear o terminal.");
-    }
-    const empresa = await cliente
-      .from("empresas")
-      .select("cnpj")
-      .eq("id", input.empresaId)
-      .maybeSingle();
-    const cnpj = String(empresa.data?.cnpj ?? "").replace(/\D/g, "");
-    if (!/^\d{14}$/.test(cnpj)) {
-      throw new ErroTef("O cadastro da empresa não possui CNPJ para o pareamento.");
-    }
-    ambientePareamento = ambiente;
-    servidorPareamento = servidor.servidor;
-    cnpjPareamento = cnpj;
-  }
-  const expira = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  const { error } = await cliente.from("tef_pareamentos").insert({
-    empresa_id: input.empresaId,
-    usuario_id: input.usuarioId,
-    codigo_hash: hashSegredoVinculo(input.codigo.trim().toUpperCase()),
-    estabelecimento,
-    ponto_captura: pontoCaptura,
-    expira_em: expira,
-    ...(servidorPareamento
-      ? { ambiente: ambientePareamento, servidor: servidorPareamento, cnpj: cnpjPareamento }
-      : {}),
-  });
-  if (error) {
-    if (colunaServidorAusente(error)) {
-      throw new ErroTef(
-        "O servidor PayGoWeb ainda não foi aplicado no banco. A migration 20261011190000_tef_servidor_paygo.sql precisa ser aplicada antes de parear um ponto novo.",
-        503
-      );
-    }
-    if (migracaoAusente(error)) {
-      throw new ErroTef("A estrutura de TEF ainda não foi aplicada neste ambiente.", 503);
-    }
-    throw new ErroTef("Não foi possível autorizar o pareamento.", 500);
-  }
-  return { ok: true as const, expiraEm: expira, estabelecimento, pontoCaptura };
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 export async function concluirPareamentoTef(input: {
   empresaId: string;
@@ -1290,233 +1455,112 @@ export async function concluirPareamentoTef(input: {
   chaveId: string;
   assinatura: string;
 }) {
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
+}
+
+
+export async function lerPerfilHomologacaoEmpresa(empresaId: string) {
   const cliente = admin();
-  const codigoHash = hashSegredoVinculo(input.codigo.trim().toUpperCase());
-  const pendente = await exigirTabela(
-    cliente
-      .from("tef_pareamentos")
-      .select("id, estabelecimento, ponto_captura, expira_em, consumido_em")
-      .eq("empresa_id", input.empresaId)
-      .eq("codigo_hash", codigoHash)
-      .is("consumido_em", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-  );
-  if (!pendente || new Date(String(pendente.expira_em)).getTime() <= Date.now()) {
-    throw new ErroTef("Não há autorização vigente para este código.", 403);
-  }
-  const assinaturaValida = verificarProvaTef(
-    input.chavePublica,
-    {
-      acao: "pareamento",
-      desafio: codigoHash,
-      identificador: input.dispositivoId,
-      valorCentavos: 0,
-      nsu: "",
-      autorizacao: "",
-      rede: "",
-      finalizacao: "",
-      sucesso: true,
-      codigo: "",
-    },
-    input.assinatura
-  );
-  if (!assinaturaValida) {
-    throw new ErroTef("O Connector não comprovou o código de pareamento.", 403);
-  }
-  const revogada = await exigirTabela(
-    cliente
-      .from("tef_chaves_revogadas")
-      .select("id")
-      .eq("chave_publica", input.chavePublica)
-      .limit(1)
-      .maybeSingle()
-  );
-  if (revogada) {
-    throw new ErroTef("Esta chave do Connector foi revogada. Gere outra neste computador.", 409);
-  }
-  const terminais = await exigirTabela(
-    cliente
-      .from("tef_terminais")
-      .select("id, empresa_id, ativo, chave_publica, revogada_em")
-      .eq("dispositivo_id", input.dispositivoId)
-  );
-  const linhas = (terminais ?? []) as Linha[];
-  if (
-    linhas.some(
-      (linha) => linha.ativo !== false && String(linha.empresa_id) !== input.empresaId
-    )
-  ) {
-    throw new ErroTef("Este terminal já está vinculado a outra empresa.", 409);
-  }
-  const abertas = await exigirTabela(
-    cliente
-      .from("tef_operacoes")
-      .select("id, terminal_id, status")
-      .eq("empresa_id", input.empresaId)
-      .in("status", [...STATUS_TEF_ABERTOS])
-  );
-  const idsTerminais = new Set(linhas.map((linha) => String(linha.id)));
-  if (((abertas ?? []) as Linha[]).some((linha) => idsTerminais.has(String(linha.terminal_id)))) {
-    throw new ErroTef("Há transação TEF pendente neste terminal. Resolva antes de parear de novo.", 409);
-  }
-  const estabelecimento = String(pendente.estabelecimento);
-  const pontoCaptura = String(pendente.ponto_captura);
-  const vinculoPareamento = await cliente
-    .from("tef_pareamentos")
-    .select("ambiente, servidor, cnpj")
-    .eq("id", pendente.id)
-    .eq("empresa_id", input.empresaId)
-    .maybeSingle();
-  let ambientePareamento = "";
-  let servidorPareamento = "";
-  let cnpjPareamento = "";
-  if (!vinculoPareamento.error) {
-    const servidor = validarServidorPayGo(vinculoPareamento.data?.servidor);
-    ambientePareamento =
-      vinculoPareamento.data?.ambiente === "producao" ||
-      vinculoPareamento.data?.ambiente === "homologacao"
-        ? vinculoPareamento.data.ambiente
-        : "";
-    servidorPareamento = servidor.ok ? servidor.servidor : "";
-    cnpjPareamento = /^\d{14}$/.test(String(vinculoPareamento.data?.cnpj ?? ""))
-      ? String(vinculoPareamento.data?.cnpj)
-      : "";
-  } else if (!colunaServidorAusente(vinculoPareamento.error)) {
-    throw new ErroTef("Não foi possível consultar o servidor autorizado do pareamento.", 500);
-  }
-  const daEmpresa = linhas.filter((linha) => String(linha.empresa_id) === input.empresaId);
-  const ativo = daEmpresa.find((linha) => linha.ativo !== false && !linha.revogada_em);
-  if (ativo && String(ativo.chave_publica ?? "") !== input.chavePublica) {
-    throw new ErroTef("Revogue a chave anterior antes de substituir o Connector.", 409);
-  }
-  const alvo = ativo ?? daEmpresa[0];
-  let terminalId = alvo ? String(alvo.id) : randomUUID();
-  if (servidorPareamento && alvo) {
-    const servidorAtual = await cliente
-      .from("tef_terminais")
-      .select("servidor, ambiente")
-      .eq("id", terminalId)
-      .eq("empresa_id", input.empresaId)
-      .maybeSingle();
-    if (servidorAtual.error) {
-      if (!colunaServidorAusente(servidorAtual.error)) {
-        throw new ErroTef("Não foi possível consultar o servidor do terminal.", 500);
-      }
-    } else {
-      const gravado = validarServidorPayGo(servidorAtual.data?.servidor);
-      if (gravado.ok && gravado.servidor !== servidorPareamento) {
-        throw new ErroTef("O servidor deste terminal já foi pareado e não pode ser trocado.", 409);
-      }
-      const ambienteGravado = servidorAtual.data?.ambiente;
-      if (
-        (ambienteGravado === "homologacao" || ambienteGravado === "producao") &&
-        ambientePareamento &&
-        ambienteGravado !== ambientePareamento
-      ) {
-        throw new ErroTef("O ambiente do terminal pareado diverge do ambiente informado.", 409);
-      }
-    }
-  }
-  const camposPareamento = servidorPareamento
-    ? { ambiente: ambientePareamento, servidor: servidorPareamento, cnpj: cnpjPareamento }
-    : {};
-  if (alvo) {
-    const atualizacao = await cliente
-      .from("tef_terminais")
-      .update({
-        ativo: true,
-        revogada_em: null,
-        chave_publica: input.chavePublica,
-        chave_id: input.chaveId || null,
-        estabelecimento,
-        ponto_captura: pontoCaptura,
-        ...camposPareamento,
-      })
-      .eq("id", terminalId)
-      .eq("empresa_id", input.empresaId);
-    if (atualizacao.error) {
-      if (atualizacao.error.code === "23505") {
-        throw new ErroTef("Este terminal já está vinculado a outra empresa.", 409);
-      }
-      if (colunaServidorAusente(atualizacao.error)) {
-        throw new ErroTef(
-          "O servidor PayGoWeb ainda não foi aplicado no banco. A migration 20261011190000_tef_servidor_paygo.sql precisa ser aplicada antes de parear um ponto novo.",
-          503
-        );
-      }
-      throw new ErroTef("Não foi possível registrar o terminal.", 500);
-    }
-  } else {
-    const codigo = /^[A-Za-z0-9._-]{1,40}$/.test(pontoCaptura)
-      ? pontoCaptura
-      : `CX${input.dispositivoId.replace(/-/g, "").slice(0, 4).toUpperCase()}`;
-    const inclusao = await cliente.from("tef_terminais").insert({
-      id: terminalId,
-      empresa_id: input.empresaId,
-      codigo,
-      dispositivo_id: input.dispositivoId,
-      chave_publica: input.chavePublica,
-      chave_id: input.chaveId || null,
-      estabelecimento,
-      ponto_captura: pontoCaptura,
-      ativo: true,
-      ...camposPareamento,
-    });
-    if (inclusao.error) {
-      if (inclusao.error.code === "23505") {
-        throw new ErroTef("Este terminal já está vinculado a outra empresa.", 409);
-      }
-      if (colunaServidorAusente(inclusao.error)) {
-        throw new ErroTef(
-          "O servidor PayGoWeb ainda não foi aplicado no banco. A migration 20261011190000_tef_servidor_paygo.sql precisa ser aplicada antes de parear um ponto novo.",
-          503
-        );
-      }
-      throw new ErroTef("Não foi possível registrar o terminal.", 500);
-    }
-  }
-  await cliente
-    .from("tef_pareamentos")
-    .update({ consumido_em: new Date().toISOString(), dispositivo_id: input.dispositivoId })
-    .eq("id", pendente.id)
-    .eq("empresa_id", input.empresaId);
-  const terminal = await exigirTabela(
-    cliente
-      .from("tef_terminais")
-      .select("codigo")
-      .eq("empresa_id", input.empresaId)
-      .eq("id", terminalId)
-      .maybeSingle()
-  );
-  const configuracao = await cliente
+  const consulta = await cliente
     .from("tef_configuracoes")
-    .select("ambiente")
-    .eq("empresa_id", input.empresaId)
+    .select("cnpj_instalacao, ponto_homologacao, cnpj_producao")
+    .eq("empresa_id", empresaId)
     .maybeSingle();
-  const ambienteConfiguracao = configuracao.data?.ambiente;
-  const ambiente =
-    ambienteConfiguracao === "producao" || ambienteConfiguracao === "homologacao"
-      ? ambienteConfiguracao
-      : "";
-  const empresa = await cliente
-    .from("empresas")
-    .select("cnpj")
-    .eq("id", input.empresaId)
-    .maybeSingle();
-  const cnpj = String(empresa.data?.cnpj ?? "").replace(/\D/g, "");
+  if (consulta.error && /cnpj_producao/i.test(`${consulta.error.code ?? ""} ${consulta.error.message ?? ""}`)) {
+    const base = await cliente
+      .from("tef_configuracoes")
+      .select("cnpj_instalacao, ponto_homologacao")
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
+    if (base.error) {
+      if (colunaHomologacaoAusente(base.error) || migracaoAusente(base.error)) {
+        return { cnpjInstalacao: "", cnpjProducao: "", pontoHomologacao: "", colunas: false as const };
+      }
+      throw new ErroTef("Não foi possível consultar a homologação do TEF.", 500);
+    }
+    return {
+      cnpjInstalacao: String(base.data?.cnpj_instalacao ?? ""),
+      cnpjProducao: "",
+      pontoHomologacao: String(base.data?.ponto_homologacao ?? ""),
+      colunas: true as const,
+    };
+  }
+  if (consulta.error) {
+    if (colunaHomologacaoAusente(consulta.error) || migracaoAusente(consulta.error)) {
+      return { cnpjInstalacao: "", cnpjProducao: "", pontoHomologacao: "", colunas: false as const };
+    }
+    throw new ErroTef("Não foi possível consultar a homologação do TEF.", 500);
+  }
   return {
-    ok: true as const,
-    empresaId: input.empresaId,
-    dispositivoId: input.dispositivoId,
-    terminalId,
-    terminalCodigo: String(terminal?.codigo ?? ""),
-    estabelecimento,
-    pontoCaptura,
-    ambiente: ambientePareamento || ambiente,
-    cnpj: cnpjPareamento || (/^\d{14}$/.test(cnpj) ? cnpj : ""),
-    servidor: servidorPareamento,
+    cnpjInstalacao: String(consulta.data?.cnpj_instalacao ?? ""),
+    cnpjProducao: String(consulta.data?.cnpj_producao ?? ""),
+    pontoHomologacao: String(consulta.data?.ponto_homologacao ?? ""),
+    colunas: true as const,
+  };
+}
+
+async function cnpjTerminalProducao(empresaId: string) {
+  const cliente = admin();
+  const consulta = await cliente
+    .from("tef_terminais")
+    .select("cnpj, ambiente")
+    .eq("empresa_id", empresaId)
+    .eq("ativo", true)
+    .is("revogada_em", null);
+  if (consulta.error) return "";
+  const linha = ((consulta.data ?? []) as Linha[]).find((item) => {
+    const ambiente = item.ambiente;
+    return ambiente === "producao" || ambiente === "" || ambiente == null;
+  });
+  const cnpj = String(linha?.cnpj ?? "").replace(/\D/g, "");
+  return /^\d{14}$/.test(cnpj) ? cnpj : "";
+}
+
+export async function lerIdentidadeHomologacao(empresaId: string, dispositivoId: string) {
+  void empresaId;
+  void dispositivoId;
+  return null;
+}
+
+
+export async function salvarIdentidadeHomologacao(input: {
+  empresaId: string;
+  terminalId: string;
+  dispositivoId: string;
+  chavePublica: string;
+  chaveId: string;
+}) {
+  void input;
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
+}
+
+
+export async function instalacaoPayGoConfirmada(
+  empresaId: string,
+  ambiente: "homologacao" | "producao"
+) {
+  void empresaId;
+  void ambiente;
+  return false;
+}
+
+
+export async function lerServidoresPayGoEmpresa(empresaId: string) {
+  const cliente = admin();
+  const consulta = await cliente
+    .from("tef_configuracoes")
+    .select("servidor_homologacao, servidor_producao")
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  if (consulta.error) {
+    if (colunaServidorAusente(consulta.error) || migracaoAusente(consulta.error)) {
+      return { servidorHomologacao: "", servidorProducao: "" };
+    }
+    throw new ErroTef("Não foi possível consultar o servidor PayGoWeb.", 500);
+  }
+  return {
+    servidorHomologacao: String(consulta.data?.servidor_homologacao ?? ""),
+    servidorProducao: String(consulta.data?.servidor_producao ?? ""),
   };
 }
 
@@ -1617,48 +1661,10 @@ export async function gravarServidoresPayGoEmpresa(
 }
 
 export async function revogarTerminalTef(input: { empresaId: string; terminalId: string }) {
-  const cliente = admin();
-  const terminal = await exigirTabela(
-    cliente
-      .from("tef_terminais")
-      .select("id, dispositivo_id, chave_publica, chave_id, ativo")
-      .eq("empresa_id", input.empresaId)
-      .eq("id", input.terminalId)
-      .maybeSingle()
-  );
-  if (!terminal) {
-    throw new ErroTef("Terminal TEF não encontrado.", 404);
-  }
-  const abertas = await exigirTabela(
-    cliente
-      .from("tef_operacoes")
-      .select("id")
-      .eq("empresa_id", input.empresaId)
-      .eq("terminal_id", input.terminalId)
-      .in("status", [...STATUS_TEF_ABERTOS])
-      .limit(1)
-  );
-  if ((abertas ?? []).length > 0) {
-    throw new ErroTef("Há transação pendente neste terminal. Resolva antes de revogar a chave.", 409);
-  }
-  if (terminal.chave_publica) {
-    await cliente.from("tef_chaves_revogadas").insert({
-      empresa_id: input.empresaId,
-      dispositivo_id: terminal.dispositivo_id,
-      chave_publica: terminal.chave_publica,
-      chave_id: terminal.chave_id,
-    });
-  }
-  const atualizacao = await cliente
-    .from("tef_terminais")
-    .update({ ativo: false, revogada_em: new Date().toISOString() })
-    .eq("empresa_id", input.empresaId)
-    .eq("id", input.terminalId);
-  if (atualizacao.error) {
-    throw new ErroTef("Não foi possível revogar o terminal.", 500);
-  }
-  return { ok: true as const };
+  void input;
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 export async function listarTerminaisAtivosEmpresa(
   supabase: ClienteLeitura,
@@ -1705,6 +1711,33 @@ export async function listarTerminaisAtivosEmpresa(
   }));
 }
 
+export async function diagnosticoPinpadBloqueado(
+  supabase: ClienteLeitura,
+  empresaId: string,
+  terminalId: string
+) {
+  const operacoes = await supabase
+    .from("tef_operacoes")
+    .select("status, nsu, rede, finalizacao")
+    .eq("empresa_id", empresaId)
+    .eq("terminal_id", terminalId)
+    .in("status", [...STATUS_TEF_ABERTOS]);
+  if (operacoes.error) {
+    if (migracaoAusente(operacoes.error)) {
+      return false;
+    }
+    throw new ErroTef("Não foi possível consultar as pendências TEF.", 500);
+  }
+  return ((operacoes.data ?? []) as Linha[]).some((linha) =>
+    operacaoImpedeDiagnosticoPinpad({
+      status: String(linha.status ?? ""),
+      nsu: linha.nsu == null ? null : String(linha.nsu),
+      rede: linha.rede == null ? null : String(linha.rede),
+      finalizacao: linha.finalizacao == null ? null : String(linha.finalizacao),
+    })
+  );
+}
+
 export async function dispositivoAtivoDeOutraEmpresa(
   empresaId: string,
   dispositivoId: string
@@ -1736,6 +1769,9 @@ export async function salvarConfigTefEmpresa(
     ambiente: "homologacao" | "producao";
     estabelecimento: string;
     pontoCaptura: string;
+    cnpjInstalacao?: string;
+    cnpjProducao?: string;
+    pontoHomologacao?: string;
     permitirOperacaoManual?: boolean;
   }
 ) {
@@ -1769,18 +1805,64 @@ export async function salvarConfigTefEmpresa(
       }
       throw new ErroTef("Não foi possível salvar a configuração TEF.", 500);
     }
-    return;
-  }
-  if (error) {
+  } else if (error) {
     if (migracaoAusente(error)) {
       throw new ErroTef("A estrutura de TEF ainda não foi aplicada neste ambiente.", 503);
     }
     throw new ErroTef("Não foi possível salvar a configuração TEF.", 500);
   }
+  if (
+    config.cnpjInstalacao === undefined &&
+    config.cnpjProducao === undefined &&
+    config.pontoHomologacao === undefined
+  ) {
+    return;
+  }
+  const perfil = await cliente
+    .from("tef_configuracoes")
+    .update({
+      cnpj_instalacao: config.cnpjInstalacao ?? "",
+      cnpj_producao: config.cnpjProducao ?? "",
+      ponto_homologacao: config.pontoHomologacao ?? "",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("empresa_id", empresaId);
+  if (perfil.error) {
+    if (colunaHomologacaoAusente(perfil.error)) {
+      const texto = `${perfil.error.code ?? ""} ${perfil.error.message ?? ""}`;
+      const migration = /cnpj_producao/i.test(texto)
+        ? "20261017140000_tef_cnpj_por_ambiente.sql"
+        : "20261017120000_tef_homologacao_empresa.sql";
+      throw new ErroTef(
+        `A homologação do TEF ainda não foi aplicada no banco. A migration ${migration} precisa ser aplicada antes de salvar o CNPJ e o ponto de homologação.`,
+        503
+      );
+    }
+    throw new ErroTef("Não foi possível salvar a homologação do TEF.", 500);
+  }
 }
 
 function ambienteSincronizacao(valor: unknown): TerminalSincronizacao["ambiente"] {
   return valor === "producao" || valor === "homologacao" ? valor : "";
+}
+
+export async function alinharTerminaisAoPontoSalvo(
+  empresaId: string,
+  ponto: {
+    ambiente: string;
+    pontoAtivo: string;
+    pontoOutro: string;
+    estabelecimento: string;
+    servidor: string;
+    cnpj: string;
+  }
+) {
+  void empresaId;
+  void ponto;
+  throw new ErroTef(
+    "A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.",
+    410
+  );
 }
 
 export async function carregarFatosSincronizacaoVinculo(input: {
@@ -1874,16 +1956,22 @@ export async function carregarFatosSincronizacaoVinculo(input: {
     configLinha = configConsulta.data;
   }
   const ambiente = ambienteSincronizacao(configLinha?.ambiente);
+  const perfil = await lerPerfilHomologacaoEmpresa(input.empresaId);
+  const credencial = credencialPayGoDoAmbiente({
+    ambiente,
+    pontoCaptura: String(configLinha?.ponto_captura ?? ""),
+    pontoHomologacao: perfil.pontoHomologacao,
+    servidorHomologacao: String(configLinha?.servidor_homologacao ?? ""),
+    servidorProducao: String(configLinha?.servidor_producao ?? ""),
+    cnpjHomologacao: perfil.cnpjInstalacao,
+    cnpjProducao: perfil.cnpjProducao,
+    cnpjTerminal: ambiente === "producao" ? String(terminal?.cnpj ?? "") : "",
+  });
   const config: ConfiguracaoSincronizacao = {
     ambiente,
     estabelecimento: String(configLinha?.estabelecimento ?? ""),
-    pontoCaptura: String(configLinha?.ponto_captura ?? ""),
-    servidor:
-      ambiente === "producao"
-        ? String(configLinha?.servidor_producao ?? "")
-        : ambiente === "homologacao"
-          ? String(configLinha?.servidor_homologacao ?? "")
-          : "",
+    pontoCaptura: credencial.ok ? credencial.ponto : "",
+    servidor: credencial.ok ? credencial.servidor : "",
   };
   let pendenciaFinanceira = false;
   if (terminal) {
@@ -1898,20 +1986,12 @@ export async function carregarFatosSincronizacaoVinculo(input: {
     );
     pendenciaFinanceira = ((abertas ?? []) as Linha[]).length > 0;
   }
-  const empresa = await cliente
-    .from("empresas")
-    .select("cnpj")
-    .eq("id", input.empresaId)
-    .maybeSingle();
-  if (empresa.error) {
-    throw new ErroTef("Não foi possível consultar o cadastro da empresa.", 500);
-  }
   return {
     dispositivoOutraEmpresa,
     pendenciaFinanceira,
     terminal,
     config,
-    cnpjEmpresa: String(empresa.data?.cnpj ?? ""),
+    cnpjEmpresa: credencial.ok ? credencial.cnpj : "",
   };
 }
 
@@ -1923,32 +2003,11 @@ function funcaoRecuperacaoAusente(error: { code?: string; message?: string } | n
 export async function consultarConflitoChaveTef(input: {
   terminalId: string;
   chavePublica: string;
-}) {
-  const cliente = admin();
-  const revogada = await cliente
-    .from("tef_chaves_revogadas")
-    .select("id")
-    .eq("chave_publica", input.chavePublica)
-    .limit(1)
-    .maybeSingle();
-  if (revogada.error && !migracaoAusente(revogada.error)) {
-    throw new ErroTef("Não foi possível consultar as chaves revogadas.", 500);
-  }
-  const outro = await cliente
-    .from("tef_terminais")
-    .select("id")
-    .eq("chave_publica", input.chavePublica)
-    .neq("id", input.terminalId)
-    .limit(1)
-    .maybeSingle();
-  if (outro.error && !migracaoAusente(outro.error)) {
-    throw new ErroTef("Não foi possível consultar os terminais TEF.", 500);
-  }
-  return {
-    chaveJaRevogada: Boolean(revogada.data?.id),
-    chaveEmOutroTerminal: Boolean(outro.data?.id),
-  };
+}): Promise<{ chaveJaRevogada: boolean; chaveEmOutroTerminal: boolean }> {
+  void input;
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 export async function substituirAutorizacaoTerminalTef(input: {
   empresaId: string;
@@ -1959,39 +2018,11 @@ export async function substituirAutorizacaoTerminalTef(input: {
   chaveAnterior: string;
   fingerprintAnterior: string;
   fingerprintAtual: string;
-}) {
-  const cliente = admin();
-  const { data, error } = await cliente.rpc("tef_recuperar_autorizacao_terminal", {
-    p_empresa_id: input.empresaId,
-    p_dispositivo_id: input.dispositivoId,
-    p_usuario_id: input.usuarioId,
-    p_chave_publica: input.chavePublica,
-    p_chave_id: input.chaveId,
-    p_chave_anterior: input.chaveAnterior,
-    p_fingerprint_anterior: input.fingerprintAnterior,
-    p_fingerprint_atual: input.fingerprintAtual,
-  });
-  if (error) {
-    if (funcaoRecuperacaoAusente(error)) {
-      throw new ErroTef(
-        "A recuperação de autorização ainda não foi aplicada no banco. A migration 20261012140000_tef_recuperar_autorizacao.sql precisa ser aplicada antes de usar o botão. Ela não revoga nenhuma chave ao ser aplicada.",
-        503
-      );
-    }
-    if (/concorrente/i.test(error.message ?? "")) {
-      throw new ErroTef(
-        "A autorização deste terminal mudou durante a recuperação. Confira as chaves antes de tentar de novo. Nenhuma chave nova foi gerada.",
-        409
-      );
-    }
-    throw new ErroTef("Não foi possível recuperar a autorização do terminal.", 500);
-  }
-  const resultado = (data ?? {}) as { efeito?: string; motivo?: string };
-  return {
-    efeito: String(resultado.efeito ?? "recusar"),
-    motivo: String(resultado.motivo ?? ""),
-  };
+}): Promise<{ efeito: string; motivo: string }> {
+  void input;
+  throw new ErroTef("A operação TEF foi desativada. Nenhuma instalação, pareamento, comunicação com PinPad ou cobrança foi executada. O histórico financeiro permanece.", 410);
 }
+
 
 export async function definirTefPlataforma(habilitada: boolean) {
   const cliente = admin();
