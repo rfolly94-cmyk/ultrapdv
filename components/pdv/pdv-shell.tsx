@@ -24,15 +24,18 @@ import {
   X,
 } from "lucide-react";
 
-import { finalizarVendaPdv } from "../../app/pdv/actions";
+import { renderizarQrBrCode } from "@/lib/pagamentos/pix/brcode/qr";
+import { finalizarVendaPdv, validarVendaPdvAntesDaCobranca } from "../../app/pdv/actions";
 import { PdvCaixaFechado } from "@/components/pdv/pdv-caixa-fechado";
 import { PdvConsumidorNota } from "@/components/pdv/pdv-consumidor-nota";
 import { CampoValor } from "@/components/ui/campo-valor";
 import {
   aplicarDigitoMonetarioPdv,
   aplicarValorFormaPdv,
+  atalhoCampoPagamentoPdv,
   escolherFormaDinheiroPdv,
   formaAposNavegacaoPdv,
+  ordenarFormasCheckoutPdv,
   pagamentosAberturaPdv,
   preencherRestanteAoSelecionarPdv,
   sincronizarDinheiroResidualPdv,
@@ -43,8 +46,10 @@ import {
   buscarConfiguracoesImpressaoAction,
 } from "@/app/configuracoes/impressao/actions";
 import { obterDispositivoId } from "@/lib/impressao/dispositivo";
-import { executarDestinoImpressao } from "@/lib/impressao/executar-cliente";
+import { executarDestinoImpressao, imprimirPdfNoUltraPdvConector } from "@/lib/impressao/executar-cliente";
+import { gerarPdfSimples } from "@/lib/impressao/pdf-simples";
 import {
+  configDoTipo,
   decidirDestinoImpressaoAutomatica,
   decidirDocumentoImpressao,
 } from "@/lib/impressao/regras";
@@ -148,33 +153,24 @@ import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
 import {
   confirmarTefAposVenda,
   desfazerCobrancasTef,
-  executarCobrancasTef,
-  executarVendaPinpad,
   reenviarProvaLocal,
+  type CobrancaTefPronta,
 } from "@/lib/pdv/tef/fluxo-cliente";
 import {
-  MENSAGEM_CONSULTA_TEF_FALHOU,
-  MENSAGEM_HABILITAR_TEF,
-  MENSAGEM_TEF_FALHA_SEM_FALLBACK,
   mensagemCobrancaNaoConcluida,
-  avaliarCartaoAntesDaCobranca,
-  selecionarParcelasTef,
   type PoliticaCartaoTef,
 } from "@/lib/pdv/tef/cartao-checkout";
 import {
   escolherFormaTef,
-  escolherPixMaquininha,
   ehPixMaquininha,
   modalidadePinpadDaForma,
-  opcoesCreditoTef,
 } from "@/lib/pdv/tef/atalhos-checkout";
 import { cobrarPeloMotorCsharp, decidirProximaCobranca, faseDaCaptura, podeRetomarConfirmacao } from "@/lib/pdv/tef/motor-csharp";
+import { decidirNavegacaoPagamentoTef } from "@/lib/pdv/tef/navegacao-pagamento";
 import { classificarAmbienteDaConclusao, decidirEmissaoAposConfirmacao, decidirFalhaFiscalMotor, decidirRetomadaMotor, gravarTentativaMotor, lerTentativaMotor, limparTentativaMotor } from "@/lib/pdv/tef/retomada-motor";
 import { cobrancaRealBloqueada } from "@/lib/pdv/tef/motor";
-import { contratoOficialAtual, versaoConnectorAceita } from "@/lib/pdv/tef/contrato-oficial";
+import { contratoOficialAtual } from "@/lib/pdv/tef/contrato-oficial";
 import {
-  avaliarConclusaoTefF2,
-  evidenciaAtual,
   impedeFechamentoPagamento,
   liberacaoConformeDocumentacao,
   type EstadoConclusaoTef,
@@ -182,8 +178,13 @@ import {
 import { exibirTesteFinanceiroHomologacao } from "@/lib/pdv/tef/menu-homologacao-interface";
 import { classificarDisponibilidadePdv } from "@/lib/pdv/tef/disponibilidade-pdv";
 import {
-  aguardarConsultaTef,
-  classificarProntidaoConnector,
+  permitirReciboComercialNaVendaTef,
+  preferenciaComprovantesTefAusente,
+  viasAutomaticasTef,
+  type PreferenciaComprovantesTef,
+} from "@/lib/impressao/comprovantes-tef";
+import { executarImpressaoComprovantesTef } from "@/lib/pdv/tef/comprovantes-impressao";
+import {
   interpretarConsultaTef,
   type ConsultaTefCheckout,
 } from "@/lib/pdv/tef/prontidao-connector";
@@ -767,7 +768,6 @@ export function PdvShell({
     useState<PixGeranetCheckoutState | null>(null);
 
   const [tefHabilitado, setTefHabilitado] = useState(false);
-  const [creditoTefAberto, setCreditoTefAberto] = useState(false);
   const [tefAmbiente, setTefAmbiente] = useState<"" | "homologacao" | "producao">("");
   const [politicaCartao, setPoliticaCartao] = useState<PoliticaCartaoTef>({
     plataformaHabilitada: false,
@@ -781,7 +781,7 @@ export function PdvShell({
   const [conectorOrigem, setConectorOrigem] = useState<string | null>(null);
   const [estadosVendaTef, setEstadosVendaTef] = useState<string[]>([]);
   const capturaTefRef = useRef<{
-    fase: "menu" | "digitado" | "pinpad";
+    fase: "menu" | "digitado" | "pinpad" | "qrcode" | "exibicao";
     menu: { capturaId?: number; prompt?: string; opcoes?: Array<{ texto?: string; valor?: string }> } | null;
     mensagem: string;
     origem: string;
@@ -790,8 +790,15 @@ export function PdvShell({
     chave: string;
     oculto: boolean;
     valorCentavos: number;
+    qrcode?: string;
   } | null>(null);
-  const tefMotorConfirmadoRef = useRef<{ origem: string; chave: string; valorCentavos: number } | null>(null);
+  const tefMotorConfirmadoRef = useRef<{ origem: string; chave: string; valorCentavos: number; producao: boolean } | null>(null);
+  const comprovantesTefRef = useRef<{
+    viaEstabelecimento: string;
+    viaCliente: string;
+    rede: string;
+    quando: string;
+  } | null>(null);
   const cobrancaProducaoRef = useRef(false);
   const [capturaTef, setCapturaTef] = useState(capturaTefRef.current);
   const autoMenuRef = useRef("");
@@ -860,6 +867,9 @@ export function PdvShell({
     configsImpressao,
     setConfigsImpressao,
   ] = useState<ConfiguracaoImpressao[]>([]);
+  const [preferenciaTef, setPreferenciaTef] = useState<PreferenciaComprovantesTef>(
+    preferenciaComprovantesTefAusente()
+  );
 
   const [
     impressaoPos,
@@ -949,6 +959,7 @@ export function PdvShell({
     void buscarConfiguracoesImpressaoAction(id).then((resultado) => {
       if (resultado.ok) {
         setConfigsImpressao(resultado.configs);
+        setPreferenciaTef(resultado.comprovantesTef ?? preferenciaComprovantesTefAusente());
       }
     });
   }, []);
@@ -1043,7 +1054,8 @@ export function PdvShell({
     vendaId: string,
     fiscal: FiscalUltimaVenda | null,
     forcar = false,
-    relogio: ReturnType<typeof criarCronometroFinalizacao> | null = null
+    relogio: ReturnType<typeof criarCronometroFinalizacao> | null = null,
+    suprimirReciboComercial = false
   ) {
     if (!conectorLiberado) {
       if (forcar) {
@@ -1067,6 +1079,9 @@ export function PdvShell({
           conectorPermitido: true,
         });
     if (destino.tipo !== "danfe_nfce" && destino.tipo !== "recibo") {
+      return false;
+    }
+    if (suprimirReciboComercial && destino.tipo === "recibo") {
       return false;
     }
 
@@ -1956,28 +1971,25 @@ export function PdvShell({
 
   const formaCreditoTef = escolherFormaTef(formasPagas, "credito");
   const formaDebitoTef = escolherFormaTef(formasPagas, "debito");
-  const formaPixTef = escolherPixMaquininha(formasPagas);
-  const idsAtalhoTef = new Set(
-    [formaCreditoTef?.id, formaDebitoTef?.id, formaPixTef?.id].filter((id): id is string => Boolean(id))
-  );
+  const formaDinheiro = escolherFormaDinheiroPdv(formasPagas);
+  const formasOrdenadas = ordenarFormasCheckoutPdv(formasPagas, {
+    dinheiroId: formaDinheiro?.id,
+    pixId: formaPix?.id,
+    debitoId: formaDebitoTef?.id,
+    creditoId: formaCreditoTef?.id,
+  });
 
-  function pagamentosDoAtalho(formaId: string) {
-    return preencherRestanteAoSelecionarPdv({
-      formas: formasPagas,
-      pagamentos,
-      totalCentavos,
-      dinheiroAutomatico,
-      formaPagamentoId: formaId,
-    }).pagamentos;
-  }
-
-  function concluirAtalhoTef(formaId: string) {
-    const lista = pagamentosDoAtalho(formaId);
-    setPagamentos(lista);
-    setFormaSelecionadaId(formaId);
-    setDinheiroAutomatico(false);
-    setCreditoTefAberto(false);
-    concluirVenda(lista);
+  function focarAtalhoPagamento(papel: "dinheiro" | "pix" | "debito" | "credito") {
+    const id =
+      papel === "dinheiro"
+        ? formaDinheiro?.id
+        : papel === "pix"
+          ? formaPix?.id
+          : papel === "debito"
+            ? formaDebitoTef?.id
+            : formaCreditoTef?.id;
+    if (!id) return;
+    selecionarFormaPagamento(id);
   }
 
   function selecionarFormaPagamento(formaId: string) {
@@ -2086,17 +2098,14 @@ export function PdvShell({
         formas: formasPagas,
         pagamentos: atual,
         totalCentavos,
-        dinheiroAutomatico,
+        dinheiroAutomatico: false,
         formaPagamentoId,
-        valorTexto,
-        ajustarDinheiro: participaDoResidual,
+        valorTexto: valorTexto.replace(/-/g, ""),
+        ajustarDinheiro: false,
       });
       return distribuido.pagamentos;
     });
-    if (
-      participaDoResidual &&
-      escolherFormaDinheiroPdv(formasPagas)?.id === formaPagamentoId
-    ) {
+    if (participaDoResidual) {
       setDinheiroAutomatico(false);
     }
   }
@@ -2368,15 +2377,6 @@ export function PdvShell({
       }
     }
 
-    const parcelasCartao = pagamentosDaConclusao.flatMap((pagamento) => {
-      const modalidade = modalidadePinpadDaForma(pagamento.forma);
-      if (!modalidade) {
-        return [];
-      }
-      return [{ modalidade, operacaoManual: cartaoManualConfirmado }];
-    });
-    let cobrarNoPinpad = false;
-
     if (
       !idempotencyRef.current
     ) {
@@ -2398,6 +2398,8 @@ export function PdvShell({
       return;
     }
     tefLockRef.current = true;
+    let viasTefDestaVenda = comprovantesTefRef.current;
+    comprovantesTefRef.current = null;
 
     startTransition(
       async () => {
@@ -2447,10 +2449,36 @@ export function PdvShell({
         });
         if (parcelasClassificadas.length > 1) {
           setEstadoConclusaoTef("recusada");
-          setErroPagamento("Faça uma modalidade de cartão por venda. Nenhuma cobrança foi iniciada.");
+          setErroPagamento("Faça uma modalidade TEF por venda. Nenhuma cobrança foi iniciada.");
           return;
         }
         if (parcelasClassificadas.length === 1 && !pagamentoTefConfirmadoRef.current) {
+          const previa = await validarVendaPdvAntesDaCobranca({
+            descontoCentavos: descontoAplicado,
+            itens: carrinho.map((item) =>
+              itemVendaEhAvulso(item)
+                ? {
+                    origem: ORIGEM_ITEM_AVULSO,
+                    descricao: item.nome,
+                    quantidade: item.quantidade,
+                    valorUnitarioCentavos: item.valorUnitarioCentavos,
+                  }
+                : {
+                    origem: ORIGEM_ITEM_PRODUTO,
+                    produtoId: item.produtoId as string,
+                    quantidade: item.quantidade,
+                  }
+            ),
+            pagamentos: pagamentosDaConclusao.map((pagamento) => ({
+              formaPagamentoId: pagamento.formaPagamentoId,
+              valorCentavos: pagamento.valorCentavos,
+            })),
+          });
+          if (!previa.ok) {
+            setEstadoConclusaoTef("recusada");
+            setErroPagamento(previa.erro);
+            return;
+          }
           const parcela = parcelasClassificadas[0];
           let origemMotor = conectorOrigem;
           if (!origemMotor) {
@@ -2518,6 +2546,7 @@ export function PdvShell({
               origem: retomada.tentativa.origem,
               chave: retomada.tentativa.chave,
               valorCentavos: retomada.tentativa.valorCentavos,
+              producao: retomada.tentativa.producao,
             };
             if (!cobrancaProducao) suprimirNfceTef = true;
             setEstadoConclusaoTef("confirmada");
@@ -2552,6 +2581,7 @@ export function PdvShell({
               chave: chaveMotor,
               oculto: resultadoMotor.oculto,
               valorCentavos: parcela.valorCentavos,
+              qrcode: resultadoMotor.qrcode || undefined,
             };
             capturaTefRef.current = proxima;
             setCapturaTef(proxima);
@@ -2575,8 +2605,12 @@ export function PdvShell({
             origem: origemMotor,
             chave: resultadoMotor.chave ?? chaveMotor,
             valorCentavos: parcela.valorCentavos,
+            producao: cobrancaProducao,
           };
-          if (parcela.modalidade === "debito" || parcela.modalidade === "credito") {
+          if (resultadoMotor.comprovantes) {
+            viasTefDestaVenda = resultadoMotor.comprovantes;
+          }
+          if (parcela.modalidade === "debito" || parcela.modalidade === "credito" || parcela.modalidade === "pix") {
             gravarTentativaMotor(sessionStorage, {
               idempotencyKey,
               chave: resultadoMotor.chave ?? chaveMotor,
@@ -2598,228 +2632,8 @@ export function PdvShell({
         if (pagamentoTefConfirmadoRef.current && !cobrancaProducao) {
           suprimirNfceTef = true;
         }
-        let cobrancasTef: Awaited<
-          ReturnType<typeof executarCobrancasTef>
-        >["operacoes"] = [];
-        let origemTef = conectorOrigem;
-        let consultaResolvida: ConsultaTefCheckout | null = null;
-        if (parcelasCartao.length > 0 && !pagamentoTefConfirmadoRef.current && consultaTefPendente && consultaTefRef.current) {
-          setEstadoConclusaoTef("aguardando");
-          setEstadosVendaTef(["Consultando a disponibilidade do TEF."]);
-          const espera = await aguardarConsultaTef(consultaTefRef.current);
-          if (!espera.ok) {
-            setEstadoConclusaoTef("aguardando");
-            setEstadosVendaTef([]);
-            setErroPagamento(`${espera.mensagem} ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`);
-            return;
-          }
-          consultaResolvida = espera.valor;
-          setConsultaTefPendente(false);
-          setConsultaTefFalhou(!consultaResolvida.ok);
-          setPoliticaCartao(consultaResolvida.politica);
-          setTefHabilitado(false);
-          setTefAmbiente(consultaResolvida.ambiente);
-          setTefEmpresaId(consultaResolvida.empresaId);
-          setTefEstabelecimento(consultaResolvida.estabelecimento);
-          setTefPendencias(consultaResolvida.pendencias as typeof tefPendencias);
-        }
-        const politicaEfetiva = consultaResolvida?.politica ?? {
-          ...politicaCartao,
-          ambiente: tefAmbiente,
-        };
-        const consultaFalhouEfetiva = consultaResolvida ? !consultaResolvida.ok : consultaTefFalhou;
-        const habilitadoEfetivo = consultaResolvida ? consultaResolvida.habilitado : tefHabilitado;
-        const pendenciasEfetivas = (
-          consultaResolvida ? consultaResolvida.pendencias : tefPendencias
-        ) as typeof tefPendencias;
-        if (parcelasCartao.length > 0 && !pagamentoTefConfirmadoRef.current && consultaFalhouEfetiva) {
-          setErroPagamento(MENSAGEM_CONSULTA_TEF_FALHOU);
-          return;
-        }
-        if (parcelasCartao.length > 0 && !pagamentoTefConfirmadoRef.current) {
-          const decisaoCartao = avaliarCartaoAntesDaCobranca(politicaEfetiva, parcelasCartao);
-          if (!decisaoCartao.ok) {
-            setErroPagamento(decisaoCartao.erro);
-            return;
-          }
-          if (habilitadoEfetivo && pendenciasEfetivas.length > 0) {
-            setErroPagamento(mensagemPendenciasTef(pendenciasEfetivas));
-            return;
-          }
-          cobrarNoPinpad = decisaoCartao.cobrarNoPinpad;
-        }
-        let parcelasTef = cobrarNoPinpad ? parcelasClassificadas : [];
-        if (parcelasClassificadas.length > 0 && !pagamentoTefConfirmadoRef.current) {
-          setEstadosVendaTef([]);
-          const consultaPendencias = consultaResolvida
-            ? {
-                habilitado: consultaResolvida.habilitado,
-                ambiente: consultaResolvida.ambiente,
-                pendencias: consultaResolvida.pendencias,
-              }
-            : await fetch("/api/pdv/tef/config")
-                .then(async (resposta) => (resposta.ok ? resposta.json() : null))
-                .catch(() => null);
-          const pendenciasAtuais = Array.isArray(consultaPendencias?.pendencias)
-            ? consultaPendencias.pendencias
-            : tefPendencias;
-          if (Array.isArray(consultaPendencias?.pendencias)) {
-            setTefPendencias(consultaPendencias.pendencias);
-          }
-          const ambienteTef =
-            consultaPendencias?.ambiente === "homologacao" || consultaPendencias?.ambiente === "producao"
-              ? consultaPendencias.ambiente
-              : tefAmbiente;
-          if (ambienteTef) {
-            setTefAmbiente(ambienteTef);
-          }
-          const habilitadoAgora = consultaPendencias?.habilitado === true;
-          if (!habilitadoAgora && ambienteTef === "producao") {
-            setErroPagamento("A produção TEF continua bloqueada. Nenhuma cobrança foi iniciada.");
-            return;
-          }
-          if (!habilitadoAgora && ambienteTef !== "homologacao") {
-            setErroPagamento(MENSAGEM_HABILITAR_TEF);
-            return;
-          }
-          const selecao = selecionarParcelasTef({
-            parcelas: parcelasClassificadas,
-            cobrarNoPinpad,
-            tefHabilitado: habilitadoAgora,
-            ambiente: ambienteTef,
-            cobrancaRealBloqueada: cobrancaRealBloqueada(),
-          });
-          parcelasTef = selecao.parcelas;
-          if (parcelasTef.length > 0 && pendenciasAtuais.length > 0) {
-            setErroPagamento(mensagemPendenciasTef(pendenciasAtuais));
-            return;
-          }
-          if (parcelasTef.length > 0) {
-          const conclusaoTef = avaliarConclusaoTefF2({
-            ambiente: ambienteTef === "homologacao" || ambienteTef === "producao" ? ambienteTef : "",
-            evidencia: evidenciaAtual(),
-          });
-          if (!conclusaoTef.podeCobrar) {
-            setEstadoConclusaoTef("aguardando");
-            setEstadosVendaTef(conclusaoTef.requisitos);
-            setErroPagamento(conclusaoTef.mensagem);
-            return;
-          }
-          setEstadoConclusaoTef("executando");
-          const descoberta = await relogio.medir(
-            "conector_descoberta",
-            "tef",
-            () => descobrirUltraPdvConector()
-          );
-          const dispositivoId =
-            descoberta?.ok && descoberta.saude.dispositivoId
-              ? descoberta.saude.dispositivoId
-              : "";
-          if (!descoberta.ok || !dispositivoId) {
-            setEstadoConclusaoTef("aguardando");
-            setErroPagamento(
-              `O Connector local não está disponível para o TEF. ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`
-            );
-            return;
-          }
-          if (!versaoConnectorAceita(String(descoberta.saude.versao ?? descoberta.saude.version ?? ""))) {
-            setEstadoConclusaoTef("aguardando");
-            setErroPagamento(
-              `O Connector instalado ainda não executa a PW_iExecTransac desta venda. Atualize para 1.3.32 sem cobrar de novo. ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`
-            );
-            return;
-          }
-          const statusConnector = (await fetch(`${descoberta.origem}/tef/status`, { cache: "no-store" })
-            .then(async (resposta) => (resposta.ok ? resposta.json() : null))
-            .catch(() => null)) as { tef?: unknown } | null;
-          const prontidao = classificarProntidaoConnector(statusConnector?.tef ?? null);
-          if (!prontidao.podeEncaminharPgWeb) {
-            setEstadoConclusaoTef("aguardando");
-            setErroPagamento(`${prontidao.codigo}: ${prontidao.mensagem} ${MENSAGEM_TEF_FALHA_SEM_FALLBACK}`);
-            return;
-          }
-          origemTef = descoberta.origem;
-          setConectorOrigem(descoberta.origem);
-          const chavesTef = parcelasTef.map((parcela, indice) => {
-            const chave = `${idempotencyKey}:${indice}:${parcela.modalidade}:${parcela.valorCentavos}`;
-            if (!chavesTefRef.current[chave]) {
-              chavesTefRef.current[chave] = crypto.randomUUID();
-            }
-            return chavesTefRef.current[chave];
-          });
-          if (pagamentoTefConfirmadoRef.current) {
-            pagamentoTefConfirmadoRef.current = false;
-            capturaTefRef.current = null;
-            setCapturaTef(null);
-            if (ambienteTef !== "producao") {
-              setEstadoConclusaoTef("confirmada");
-              setEstadosVendaTef([
-                "A homologação confirmou a operação no PinPad. A NFC-e comercial não foi emitida e o pagamento não foi registrado como recebimento.",
-              ]);
-              setErroPagamento(null);
-              return;
-            }
-            setEstadoConclusaoTef("confirmada");
-          } else {
-          const cobranca = await executarVendaPinpad({
-            parcelas: parcelasTef,
-            origem: descoberta.origem,
-            dispositivoId,
-            idempotencyKey: (indice) => chavesTef[indice] ?? crypto.randomUUID(),
-          });
-          if ("captura" in cobranca && cobranca.captura === true) {
-            const proxima = {
-              fase: cobranca.fase,
-              menu: cobranca.menu as {
-                capturaId?: number;
-                prompt?: string;
-                opcoes?: Array<{ texto?: string; valor?: string }>;
-              } | null,
-              mensagem: cobranca.erro,
-              origem: descoberta.origem,
-              dispositivoId,
-              sessao: "",
-              chave: "",
-              oculto: false,
-              valorCentavos: 0,
-            };
-            capturaTefRef.current = proxima;
-            setCapturaTef(proxima);
-            setEstadoConclusaoTef("executando");
-            setEstadosVendaTef(proxima.fase === "menu" ? [] : [cobranca.erro]);
-            setErroPagamento(null);
-            return;
-          }
-          if (!cobranca.ok || cobranca.pagamentoRecebido !== true) {
-            setEstadoConclusaoTef(
-              cobranca.erro.toLowerCase().includes("desconhecido")
-                ? "resultado_desconhecido"
-                : cobranca.comandoEnviado
-                  ? "executando"
-                  : "recusada"
-            );
-            setEstadosVendaTef(cobranca.comandoEnviado ? [cobranca.erro] : []);
-            setAvisoPagamento(null);
-            const causaTef = cobranca.codigo ? `${cobranca.codigo}: ${cobranca.erro}` : cobranca.erro;
-            setErroPagamento(
-              cobranca.comandoEnviado
-                ? null
-                : mensagemCobrancaNaoConcluida(causaTef)
-            );
-            return;
-          }
-          if (ambienteTef !== "producao") {
-            setEstadoConclusaoTef("confirmada");
-            setEstadosVendaTef([
-              "A homologação confirmou a operação no PinPad. A NFC-e comercial não foi emitida e o pagamento não foi registrado como recebimento.",
-            ]);
-            setErroPagamento(null);
-            return;
-          }
-          setEstadoConclusaoTef("confirmada");
-          }
-          }
-        }
+        const cobrancasTef: CobrancaTefPronta[] = [];
+        const origemTef = conectorOrigem;
 
         const avisoAutorizacao =
           cobrancasTef.map((item) => item.avisoModalidade).find((item) => item) ?? null;
@@ -2909,6 +2723,7 @@ export function PdvShell({
                 parcelasVenda.map(
                   (pagamento) => {
                     const modalidadeTef = classificarFormaTef(pagamento.forma);
+                    const modalidadePinpad = modalidadePinpadDaForma(pagamento.forma);
                     const cobrancaTef = modalidadeTef
                       ? cobrancasTef[indiceCartaoTef++]
                       : undefined;
@@ -2935,7 +2750,7 @@ export function PdvShell({
                       cartaoManualConfirmado &&
                       !cobrancaTef,
                     motorChave:
-                      modalidadeTef &&
+                      modalidadePinpad &&
                       motorConfirmado !== null &&
                       motorConfirmado.valorCentavos === pagamento.valorCentavos
                         ? motorConfirmado.chave
@@ -2952,6 +2767,11 @@ export function PdvShell({
                   : null,
               usarDocumentoClienteNaNota: usarDocumentoCliente,
               motorOrigem: tefMotorConfirmadoRef.current?.origem ?? null,
+              ambienteCobranca: tefMotorConfirmadoRef.current
+                ? tefMotorConfirmadoRef.current.producao
+                  ? "producao"
+                  : "homologacao"
+                : null,
               correlacao,
             }
             )
@@ -3182,11 +3002,59 @@ export function PdvShell({
                   resultado.vendaId,
                   fiscalParaImpressao,
                   imprimirApos,
-                  relogio
+                  relogio,
+                  Boolean(viasTefDestaVenda) && !permitirReciboComercialNaVendaTef(preferenciaTef)
                 )
             : null,
         });
         void corrida.impressao;
+        if (viasTefDestaVenda && conectorLiberado) {
+          const configRecibo = configDoTipo(configsImpressao, "recibo");
+          const viasAuto = viasAutomaticasTef(preferenciaTef);
+          const papelTef = preferenciaTef.cadastrada
+            ? preferenciaTef.papel
+            : configRecibo.papel === "58mm"
+              ? "58mm"
+              : "80mm";
+          const impressoraTef = preferenciaTef.cadastrada && preferenciaTef.impressoraNome
+            ? preferenciaTef.impressoraNome
+            : configRecibo.impressoraNome;
+          void executarImpressaoComprovantesTef({
+            empresaId,
+            vendaId: resultado.vendaId,
+            status: "confirmada",
+            pagamentoRecebido: true,
+            transacaoConfirmada: true,
+            viaEstabelecimento: viasTefDestaVenda.viaEstabelecimento,
+            viaCliente: viasTefDestaVenda.viaCliente,
+            imprimirViaCliente: viasAuto.cliente,
+            imprimirViaEstabelecimento: viasAuto.estabelecimento,
+            rede: viasTefDestaVenda.rede,
+            quando: viasTefDestaVenda.quando,
+            ler: () => lerFilaImpressaoPdv(armazenamentoImpressaoPdv()),
+            gravar: (fila) => gravarFilaImpressaoPdv(fila, armazenamentoImpressaoPdv()),
+            emCurso: impressoesEmCursoPdv,
+            agora: () => new Date().toISOString(),
+            imprimirVia: async (via) => {
+              const pdf = gerarPdfSimples({
+                papel: papelTef,
+                linhas: via.linhas,
+              });
+              let binario = "";
+              for (let i = 0; i < pdf.length; i += 0x8000) {
+                binario += String.fromCharCode(...pdf.subarray(i, i + 0x8000));
+              }
+              const enviado = await imprimirPdfNoUltraPdvConector({
+                pdfBase64: btoa(binario),
+                tipoDocumento: via.documento,
+                papel: papelTef,
+                copias: 1,
+                impressora: impressoraTef,
+              });
+              return enviado.ok ? { ok: true } : { ok: false, erro: enviado.erro };
+            },
+          });
+        }
 
         requestAnimationFrame(
           () =>
@@ -3208,12 +3076,15 @@ export function PdvShell({
     );
   }
 
-  async function responderCaptura(valor: string) {
+  async function responderCaptura(valor: string, cancelar = false) {
     const atual = capturaTefRef.current;
     if (!atual || respostaTefRef.current || !atual.sessao) {
       return;
     }
     respostaTefRef.current = true;
+    if (cancelar) {
+      setEstadosVendaTef(["Cancelando a operação. Aguarde o resultado da biblioteca."]);
+    }
     try {
       let corpo = await cobrarPeloMotorCsharp({
         origem: atual.origem,
@@ -3221,8 +3092,9 @@ export function PdvShell({
         sessao: atual.sessao,
         valor,
         chave: atual.chave,
+        ...(cancelar ? { cancelar: true } : {}),
       });
-      if (corpo.fase === "captura") {
+      if (corpo.fase === "captura" && !cancelar) {
         const proxima = {
           ...atual,
           fase: faseDaCaptura(corpo.tipoDado, corpo.opcoes),
@@ -3230,6 +3102,7 @@ export function PdvShell({
           mensagem: corpo.erro,
           sessao: corpo.sessao ?? atual.sessao,
           oculto: corpo.oculto,
+          qrcode: corpo.qrcode || undefined,
         };
         capturaTefRef.current = proxima;
         setCapturaTef(proxima);
@@ -3238,7 +3111,7 @@ export function PdvShell({
         setErroPagamento(null);
         return;
       }
-      if (corpo.codigo === "aguardando_confirmacao" && corpo.nativo) {
+      if (!cancelar && corpo.codigo === "aguardando_confirmacao" && corpo.nativo) {
         corpo = await cobrarPeloMotorCsharp({
           origem: atual.origem,
           comando: "confirmar",
@@ -3253,12 +3126,16 @@ export function PdvShell({
           origem: atual.origem,
           chave: corpo.chave ?? atual.chave,
           valorCentavos: atual.valorCentavos,
+          producao: cobrancaProducaoRef.current,
         };
+        if (corpo.comprovantes) {
+          comprovantesTefRef.current = corpo.comprovantes;
+        }
         const chaveConfirmada = corpo.chave ?? atual.chave;
         const partesChave = chaveConfirmada.split(":");
         const modalidadeConfirmada = partesChave.at(-2);
         const idempotenciaConfirmada = partesChave.slice(0, -2).join(":");
-        if ((modalidadeConfirmada === "debito" || modalidadeConfirmada === "credito") && idempotenciaConfirmada) {
+        if ((modalidadeConfirmada === "debito" || modalidadeConfirmada === "credito" || modalidadeConfirmada === "pix") && idempotenciaConfirmada) {
           gravarTentativaMotor(sessionStorage, {
             idempotencyKey: idempotenciaConfirmada,
             chave: chaveConfirmada,
@@ -3271,8 +3148,15 @@ export function PdvShell({
         concluirVenda();
         return;
       }
+      const cancelada = cancelar || corpo.codigo === "interrompida" || /cancelad/i.test(corpo.erro);
       setEstadoConclusaoTef(
-        corpo.codigo.includes("desconhecido") ? "resultado_desconhecido" : "recusada"
+        corpo.codigo.includes("desconhecido")
+          ? "resultado_desconhecido"
+          : corpo.codigo === "aguardando_confirmacao"
+            ? "aguardando_confirmacao"
+            : cancelada
+              ? "cancelada"
+              : "recusada"
       );
       const erroCaptura = corpo.erro || "";
       setErroPagamento(
@@ -3283,6 +3167,71 @@ export function PdvShell({
     } finally {
       respostaTefRef.current = false;
     }
+  }
+
+  async function pedirInterrupcaoCaptura() {
+    const atual = capturaTefRef.current;
+    if (!atual?.sessao) {
+      setErroPagamento("Não há captura aberta para interromper.");
+      return;
+    }
+    if (pagamentoTefConfirmadoRef.current || estadoConclusaoTef === "aguardando_confirmacao" || estadoConclusaoTef === "confirmada") {
+      setErroPagamento("O pagamento já foi autorizado. Voltar não cancela a venda. Nenhuma nova cobrança foi iniciada.");
+      return;
+    }
+    setEstadosVendaTef(["Cancelamento solicitado. Aguarde o retorno da biblioteca. Nenhuma nova cobrança foi iniciada."]);
+    if (respostaTefRef.current) {
+      await cobrarPeloMotorCsharp({
+        origem: atual.origem,
+        comando: "responder",
+        sessao: atual.sessao,
+        valor: "",
+        chave: atual.chave,
+        cancelar: true,
+      });
+      return;
+    }
+    await responderCaptura("", true);
+  }
+
+  function solicitarSaidaPagamento() {
+    const navegacao = decidirNavegacaoPagamentoTef({
+      fase: capturaTefRef.current?.fase ?? null,
+      pagamentoConfirmado: pagamentoTefConfirmadoRef.current,
+      estado: estadoConclusaoTef,
+    });
+    if (navegacao.acao === "cancelar-interacao") {
+      void pedirInterrupcaoCaptura();
+      return;
+    }
+    if (navegacao.acao !== "voltar") {
+      setErroPagamento(navegacao.mensagem);
+      return;
+    }
+    if (impedeFechamentoPagamento(estadoConclusaoTef)) {
+      setErroPagamento("Há uma operação TEF em andamento. Aguarde o resultado. Nenhuma nova cobrança foi iniciada.");
+      return;
+    }
+    if (pixGeranetAtivo && pixGeranet?.status === "pendente") {
+      setDescartarGeranetAberto(true);
+      return;
+    }
+    setModalPagamento(false);
+  }
+
+  function solicitarCancelamentoOperacao() {
+    const navegacao = decidirNavegacaoPagamentoTef({
+      fase: capturaTefRef.current?.fase ?? null,
+      pagamentoConfirmado: pagamentoTefConfirmadoRef.current,
+      estado: estadoConclusaoTef,
+    });
+    if (navegacao.acao === "cancelar-interacao") {
+      void pedirInterrupcaoCaptura();
+      return;
+    }
+    setErroPagamento(navegacao.acao === "voltar"
+      ? "Não há operação TEF para cancelar."
+      : navegacao.mensagem);
   }
 
   useEffect(() => {
@@ -3334,6 +3283,32 @@ export function PdvShell({
         modalPagamento &&
         !modalDesconto &&
         !modalCliente &&
+        !descartarGeranetAberto
+      ) {
+        const atalho = atalhoCampoPagamentoPdv(event.key);
+        if (atalho) {
+          event.preventDefault();
+          focarAtalhoPagamento(atalho);
+          return;
+        }
+        if (event.key === "F8") {
+          event.preventDefault();
+          alternarFiado(!usarFiado);
+          return;
+        }
+        if (event.key === "F10") {
+          event.preventDefault();
+          if (!isPending) {
+            concluirVenda();
+          }
+          return;
+        }
+      }
+
+      if (
+        modalPagamento &&
+        !modalDesconto &&
+        !modalCliente &&
         !descartarGeranetAberto &&
         event.key !== "F2" &&
         event.key !== "F3" &&
@@ -3346,7 +3321,7 @@ export function PdvShell({
           Boolean(alvo?.closest("input, textarea, select")) &&
           !alvo?.closest("[data-pagamento-formas]");
         const noValor = Boolean(alvo?.closest("[data-pagamento-valor]"));
-        const ids = formasPagas.map((forma) => forma.id);
+        const ids = formasOrdenadas.map((forma) => forma.id);
 
         if (
           !campoLivre &&
@@ -3368,19 +3343,11 @@ export function PdvShell({
           return;
         }
 
-        if (!campoLivre && event.key === "Enter") {
+        if (!campoLivre && event.key === "Enter" && !alvo?.closest("button")) {
           event.preventDefault();
-          if (
-            !isPending &&
-            restanteCentavos === 0 &&
-            !avaliacaoPagamentos.bloqueado &&
-            totalCentavos > 0
-          ) {
-            concluirVenda();
-            return;
-          }
-          if (formaSelecionadaId) {
-            selecionarFormaPagamento(formaSelecionadaId);
+          const proxima = formaAposNavegacaoPdv(ids, formaSelecionadaId, "proxima");
+          if (proxima) {
+            selecionarFormaPagamento(proxima);
           }
           return;
         }
@@ -3417,7 +3384,9 @@ export function PdvShell({
 
       if (event.key === "F4") {
         event.preventDefault();
-        void abrirGavetaPdv();
+        if (!modalPagamento) {
+          void abrirGavetaPdv();
+        }
         return;
       }
 
@@ -3445,9 +3414,11 @@ export function PdvShell({
         event.key === "F5"
       ) {
         event.preventDefault();
-        abrirCliente(
-          contextoCliente === "fiado" ? "fiado" : "manual"
-        );
+        if (!modalPagamento) {
+          abrirCliente(
+            contextoCliente === "fiado" ? "fiado" : "manual"
+          );
+        }
       }
 
       if (
@@ -3508,15 +3479,7 @@ export function PdvShell({
         }
 
         if (decisao.overlay === "pagamento") {
-          if (impedeFechamentoPagamento(estadoConclusaoTef)) {
-            return;
-          }
-          if (pixGeranetAtivo && pixGeranet?.status === "pendente") {
-            setDescartarGeranetAberto(true);
-            return;
-          }
-
-          setModalPagamento(false);
+          solicitarSaidaPagamento();
           return;
         }
 
@@ -4364,50 +4327,19 @@ export function PdvShell({
       )}
 
       {modalPagamento && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button
-            type="button"
-            aria-label="Fechar"
-            disabled={isPending}
-            onClick={() => {
-              if (isPending || impedeFechamentoPagamento(estadoConclusaoTef)) {
-                return;
-              }
-
-              if (pixGeranetAtivo && pixGeranet?.status === "pendente") {
-                setDescartarGeranetAberto(true);
-                return;
-              }
-
-              setModalPagamento(false);
-            }}
-            className="absolute inset-0 bg-black/40"
-          />
-          <div className={`pdv-modal-box relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-xl px-6 pb-6 pt-8 shadow-2xl ${
-            pixLocalAtivo || pixGeranetAtivo ? "max-w-lg" : "max-w-[420px]"
-          }`}>
+        <div className="pdv-modal-box fixed inset-0 z-50 flex h-dvh w-full flex-col">
             <button
               type="button"
               disabled={isPending}
-              onClick={() => {
-                if (isPending || impedeFechamentoPagamento(estadoConclusaoTef)) {
-                  return;
-                }
-
-                if (pixGeranetAtivo && pixGeranet?.status === "pendente") {
-                  setDescartarGeranetAberto(true);
-                  return;
-                }
-
-                setModalPagamento(false);
-              }}
+              onClick={solicitarSaidaPagamento}
               className="absolute right-4 top-4 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
               aria-label="Fechar"
             >
               <X className="h-5 w-5" />
             </button>
 
-            <h2 className="text-center text-[28px] font-bold leading-none text-zinc-950">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-7">
+            <h2 className="text-center text-2xl font-bold leading-none text-zinc-950">
               Total: {dinheiroCentavos(totalCentavos)}
             </h2>
             <p className="mt-3 text-center text-xs leading-snug text-zinc-500">
@@ -4424,67 +4356,15 @@ export function PdvShell({
             >
               F3 Desconto
             </button>
+            <p className="mt-1 text-center text-[11px] text-zinc-400">
+              F4 dinheiro · F5 PIX · F6 débito · F7 crédito · F8 fiado · F10 concluir
+            </p>
 
-            {formaDebitoTef || formaCreditoTef || formaPixTef ? (
-              <div className="mt-6 grid grid-cols-1 gap-2">
-                {formaDebitoTef ? (
-                  <button
-                    type="button"
-                    disabled={tefPendencias.length > 0}
-                    className="rounded-lg bg-zinc-900 px-3 py-3 text-sm font-semibold text-white disabled:opacity-40"
-                    onClick={() => concluirAtalhoTef(formaDebitoTef.id)}
-                  >
-                    Débito
-                  </button>
-                ) : null}
-                {formaCreditoTef ? (
-                  <button
-                    type="button"
-                    disabled={tefPendencias.length > 0}
-                    className="rounded-lg bg-zinc-900 px-3 py-3 text-sm font-semibold text-white disabled:opacity-40"
-                    onClick={() => setCreditoTefAberto(true)}
-                  >
-                    Crédito
-                  </button>
-                ) : null}
-                {formaPixTef ? (
-                  <button
-                    type="button"
-                    disabled={tefPendencias.length > 0}
-                    className="rounded-lg bg-zinc-900 px-3 py-3 text-sm font-semibold text-white disabled:opacity-40"
-                    onClick={() => concluirAtalhoTef(formaPixTef.id)}
-                  >
-                    PIX na maquininha
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-            {creditoTefAberto && formaCreditoTef ? (
-              <div className="mt-3 space-y-2 rounded-lg border border-zinc-200 p-3">
-                <p className="text-sm font-semibold text-zinc-900">{formaCreditoTef.nome}</p>
-                {opcoesCreditoTef(formaCreditoTef).map((opcao) => (
-                  <button
-                    key={opcao.codigo}
-                    type="button"
-                    className="block w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm"
-                    onClick={() => concluirAtalhoTef(formaCreditoTef.id)}
-                  >
-                    {opcao.rotulo}
-                    {opcao.codigo === "parcelado"
-                      ? ". O PinPad pede só as parcelas que a adquirente permitir."
-                      : ""}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <div
               data-pagamento-formas
-              className="mt-6 divide-y divide-zinc-200 border-y border-zinc-200"
+              className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2"
             >
-              {formasPagas.map((forma) => {
-                if (idsAtalhoTef.has(forma.id)) {
-                  return null;
-                }
+              {formasOrdenadas.map((forma) => {
                 const atual = pagamentos.find(
                   (pagamento) => pagamento.formaPagamentoId === forma.id
                 );
@@ -4493,6 +4373,17 @@ export function PdvShell({
                 const valorExibido = atual?.valorTexto
                   ? atual.valorTexto
                   : "0,00";
+
+                const atalho =
+                  forma.id === formaDinheiro?.id
+                    ? "F4"
+                    : forma.id === formaPix?.id
+                      ? "F5"
+                      : forma.id === formaDebitoTef?.id
+                        ? "F6"
+                        : forma.id === formaCreditoTef?.id
+                          ? "F7"
+                          : "";
 
                 return (
                   <div
@@ -4503,18 +4394,23 @@ export function PdvShell({
                       }
                       selecionarFormaPagamento(forma.id);
                     }}
-                    className={`flex items-center gap-3 px-3 py-3 ${
-                      selecionada ? "pdv-row-selected" : "bg-white"
+                    className={`rounded-lg border px-3 py-2 ${
+                      selecionada ? "border-blue-500 bg-blue-50" : "border-zinc-200 bg-white"
                     }`}
                   >
-                    <Icone
-                      className={`h-5 w-5 ${
-                        selecionada ? "text-emerald-600" : "text-zinc-500"
-                      }`}
-                    />
-                    <span className="flex-1 text-sm font-medium text-zinc-900">
-                      {rotuloFormaCheckout(forma)}
-                    </span>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-sm font-medium text-zinc-900">
+                        <Icone
+                          className={`h-4 w-4 ${
+                            selecionada ? "text-emerald-600" : "text-zinc-500"
+                          }`}
+                        />
+                        {rotuloFormaCheckout(forma)}
+                      </span>
+                      {atalho ? (
+                        <span className="text-[11px] font-semibold text-zinc-400">{atalho}</span>
+                      ) : null}
+                    </div>
                     <CampoValor
                       data-pagamento-valor={forma.id}
                       value={valorExibido}
@@ -4548,7 +4444,7 @@ export function PdvShell({
                           ehFormaPix(forma) &&
                           pixGeranet?.status === "paga")
                       }
-                      className={`h-8 w-24 rounded border px-2 text-right text-sm outline-none ${
+                      className={`h-10 w-full rounded border px-2 text-right text-base outline-none ${
                         ehFormaPix(forma) && !pixHabilitado
                           ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400"
                           : selecionada
@@ -4617,37 +4513,28 @@ export function PdvShell({
             )}
 
             <div
-              className={`mt-4 space-y-1 rounded-md border p-3 text-sm ${
+              className={`mt-3 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border p-3 text-sm sm:grid-cols-3 ${
                 pagamentoExcedente
                   ? "border-red-300 bg-red-50 text-red-800"
                   : "border-zinc-200 bg-zinc-50 text-zinc-700"
               }`}
             >
               <p>Total da venda: {dinheiroCentavos(totalCentavos)}</p>
-              <p>
-                Pagamentos informados:{" "}
-                {dinheiroCentavos(totalInformado)}
-              </p>
+              <p>Total recebido: {dinheiroCentavos(totalInformado)}</p>
+              <p>Saldo restante: {dinheiroCentavos(restanteCentavos)}</p>
+              {trocoCentavos > 0 ? (
+                <p className="col-span-full text-lg font-bold text-emerald-700">
+                  Troco {dinheiroCentavos(trocoCentavos)}
+                </p>
+              ) : null}
               {pagamentoExcedente ? (
-                <>
-                  <p className="font-semibold">
-                    Excedente:{" "}
-                    {dinheiroCentavos(avaliacaoPagamentos.excedenteCentavos)}
-                  </p>
-                  <p className="font-semibold">
-                    {MENSAGEM_PAGAMENTOS_ULTRAPASSAM}
-                  </p>
-                </>
-              ) : (
-                <p>Restante: {dinheiroCentavos(restanteCentavos)}</p>
-              )}
+                <p className="col-span-full font-semibold whitespace-pre-line">
+                  {avaliacaoPagamentos.somaNaoTrocoCentavos > totalCentavos
+                    ? "Os pagamentos que não são em dinheiro ultrapassam o total da venda."
+                    : MENSAGEM_PAGAMENTOS_ULTRAPASSAM}
+                </p>
+              ) : null}
             </div>
-
-            {trocoCentavos > 0 && (
-              <p className="mt-4 text-right text-lg font-bold text-zinc-950">
-                Troco {dinheiroCentavos(trocoCentavos)}
-              </p>
-            )}
 
             {politicaCartao.permitirOperacaoManual &&
             politicaCartao.empresaHabilitada &&
@@ -4762,6 +4649,12 @@ export function PdvShell({
               </ol>
             )}
 
+            {(capturaTef || estadoConclusaoTef === "executando" || estadoConclusaoTef === "aguardando_confirmacao") && (
+              <p className="mt-3 rounded border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-950">
+                Operação TEF em andamento. Nenhuma nova cobrança será iniciada até o resultado definitivo.
+              </p>
+            )}
+
             {capturaTef?.fase === "menu" && (capturaTef.menu?.opcoes?.length ?? 0) > 0 && (
               <div className="mt-3 space-y-2 rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
                 <p className="font-semibold">{capturaTef.menu?.prompt || capturaTef.mensagem}</p>
@@ -4808,6 +4701,27 @@ export function PdvShell({
               </p>
             )}
 
+            {(capturaTef?.fase === "qrcode" || capturaTef?.fase === "exibicao") && (
+              <div className="mt-3 space-y-2 rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+                <p className="font-semibold">
+                  {capturaTef.fase === "qrcode"
+                    ? "QR Code solicitado pela biblioteca PayGo"
+                    : "A biblioteca pediu para exibir este dado"}
+                </p>
+                {capturaTef.qrcode ? <QrBiblioteca payload={capturaTef.qrcode} /> : null}
+                <p className="whitespace-pre-wrap break-all text-sm">
+                  {capturaTef.menu?.prompt || capturaTef.mensagem}
+                </p>
+                <button
+                  type="button"
+                  className="rounded bg-zinc-900 px-3 py-2 font-semibold text-white"
+                  onClick={() => void responderCaptura("exibido")}
+                >
+                  Continuar
+                </button>
+              </div>
+            )}
+
             {erroPagamento && (
               <div className="mt-3 whitespace-pre-line rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
                 {erroPagamento}
@@ -4817,16 +4731,34 @@ export function PdvShell({
               </div>
             )}
 
+            </div>
+            <div className="shrink-0 flex gap-2 border-t border-zinc-200 bg-white px-6 py-3">
+            <button
+              type="button"
+              onClick={solicitarSaidaPagamento}
+              className="h-12 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-800"
+            >
+              Voltar
+            </button>
+            {capturaTef ? (
+              <button
+                type="button"
+                onClick={solicitarCancelamentoOperacao}
+                className="h-12 rounded-md border border-red-300 px-4 text-sm font-semibold text-red-800"
+              >
+                Cancelar operação
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={concluirVenda}
-              disabled={isPending || totalCentavos <= 0 || avaliacaoPagamentos.bloqueado}
-              className="pdv-btn-primary mt-5 h-12 w-full rounded-md text-sm font-bold uppercase tracking-wide disabled:bg-zinc-300"
+              disabled={isPending || Boolean(capturaTef) || totalCentavos <= 0 || avaliacaoPagamentos.bloqueado}
+              className="pdv-btn-primary h-12 min-w-0 flex-1 rounded-md text-sm font-bold uppercase tracking-wide disabled:bg-zinc-300"
             >
-              {isPending ? "Finalizando..." : "F2 Concluir"}
+              {isPending ? "Finalizando..." : "Concluir venda"}
             </button>
+            </div>
           </div>
-        </div>
       )}
 
       {toastPdv ? (
@@ -5031,3 +4963,34 @@ function Modal({
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-100";
+
+function QrBiblioteca({ payload }: { payload: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let ativo = true;
+    void renderizarQrBrCode(payload)
+      .then((imagem) => {
+        if (ativo) {
+          setUrl(imagem);
+        }
+      })
+      .catch(() => {
+        if (ativo) {
+          setUrl(null);
+        }
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [payload]);
+  if (!url) {
+    return null;
+  }
+  return (
+    <img
+      src={url}
+      alt="QR Code apresentado pela biblioteca"
+      className="h-56 w-56 bg-white p-2"
+    />
+  );
+}

@@ -205,10 +205,11 @@ test("com as duas flags ativas, o pinpad começa antes da venda e a autorizaçã
   const inicio = shell.indexOf("function concluirVenda(");
   const gravacao = shell.indexOf("finalizarVendaPdv(", inicio);
   const checkout = shell.slice(inicio, gravacao);
-  const posPolitica = checkout.indexOf("avaliarCartaoAntesDaCobranca");
-  const posCobranca = checkout.indexOf("executarVendaPinpad");
+  const posPolitica = checkout.indexOf("decidirProximaCobranca");
+  const posCobranca = checkout.indexOf("cobrarPeloMotorCsharp");
   assert.ok(posPolitica > 0);
   assert.ok(posCobranca > posPolitica);
+  assert.equal(checkout.includes("executarVendaPinpad"), false);
   assert.equal(checkout.includes("avaliarParcelasCartao("), false);
 
   const finalizacao = readFileSync(join(raiz, "lib/pdv/tef/finalizacao.ts"), "utf8");
@@ -218,10 +219,10 @@ test("com as duas flags ativas, o pinpad começa antes da venda e a autorizaçã
 
 test("falha do Connector não marca a venda como cartão manual", () => {
   const fonte = readFileSync(join(raiz, "components/pdv/pdv-shell.tsx"), "utf8");
-  const inicio = fonte.indexOf("if (!cobranca.ok || cobranca.pagamentoRecebido !== true)");
+  const inicio = fonte.indexOf("if (!resultadoMotor.pagamentoRecebido)");
   assert.notEqual(inicio, -1);
-  const trecho = fonte.slice(inicio, inicio + 900);
-  assert.match(trecho, /mensagemCobrancaNaoConcluida/);
+  const trecho = fonte.slice(inicio, inicio + 400);
+  assert.match(trecho, /setErroPagamento\(resultadoMotor\.erro\)/);
   assert.doesNotMatch(trecho, /setCartaoManualConfirmado\(true\)/);
   assert.match(trecho, /return/);
 });

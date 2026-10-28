@@ -6,7 +6,12 @@ import {
   buscarConfiguracoesImpressaoAction,
   gerarPdfTesteImpressaoAction,
   salvarConfiguracaoImpressaoAction,
+  salvarPreferenciaComprovantesTefAction,
 } from "@/app/configuracoes/impressao/actions";
+import {
+  preferenciaComprovantesTefAusente,
+  type PreferenciaComprovantesTef,
+} from "@/lib/impressao/comprovantes-tef";
 import { consultarSaudeAgente, listarImpressorasAgente } from "@/lib/impressao/agente";
 import {
   ULTRAPDV_CONNECTOR_DOWNLOAD_URL,
@@ -67,8 +72,11 @@ export function ImpressaoWorkspace() {
   const [versaoConector, setVersaoConector] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [mensagem, setMensagem] = useState<string | null>(null);
-  const [salvandoTipo, setSalvandoTipo] = useState<TipoDocumentoImpressao | null>(
+  const [salvandoTipo, setSalvandoTipo] = useState<TipoDocumentoImpressao | "tef" | null>(
     null
+  );
+  const [comprovantesTef, setComprovantesTef] = useState<PreferenciaComprovantesTef>(
+    preferenciaComprovantesTefAusente()
   );
 
   useEffect(() => {
@@ -100,6 +108,7 @@ export function ImpressaoWorkspace() {
       if (configuracoes.ok) {
         setConfigs(configuracoes.configs);
         setEmpresaNome(configuracoes.empresaNome);
+        setComprovantesTef(configuracoes.comprovantesTef);
       }
       setCarregando(false);
     })();
@@ -132,6 +141,26 @@ export function ImpressaoWorkspace() {
     if (!resultado.ok) {
       setMensagem(resultado.erro);
     }
+  }
+
+  async function salvarComprovantes(patch: Partial<PreferenciaComprovantesTef>) {
+    const proxima = { ...comprovantesTef, ...patch, cadastrada: true };
+    setComprovantesTef(proxima);
+    setSalvandoTipo("tef");
+    const resultado = await salvarPreferenciaComprovantesTefAction({
+      dispositivoId,
+      impressoraNome: proxima.impressoraNome,
+      papel: proxima.papel,
+      viaCliente: proxima.viaCliente,
+      viaEstabelecimento: proxima.viaEstabelecimento,
+      reciboComercial: proxima.reciboComercial,
+    });
+    setSalvandoTipo(null);
+    if (!resultado.ok) {
+      setMensagem(resultado.erro);
+      return;
+    }
+    setComprovantesTef(resultado.preferencia);
   }
 
   async function imprimirTeste(config: ConfiguracaoImpressao) {
@@ -220,6 +249,7 @@ export function ImpressaoWorkspace() {
                 if (configuracoes.ok) {
                   setConfigs(configuracoes.configs);
                   setEmpresaNome(configuracoes.empresaNome);
+                  setComprovantesTef(configuracoes.comprovantesTef);
                 }
                 setCarregando(false);
               })();
@@ -380,6 +410,92 @@ export function ImpressaoWorkspace() {
           </section>
         );
       })}
+
+      <section className="rounded-xl border border-zinc-200 bg-white p-4">
+        <h2 className="text-[15px] font-semibold text-zinc-950">Comprovantes TEF</h2>
+        <p className="mt-1 text-[13px] text-zinc-500">
+          A via do cliente e a via do estabelecimento são impressas à parte do recibo comercial.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="block min-w-0">
+            <span className="mb-1 block text-[11px] font-medium text-zinc-500">
+              Impressora
+            </span>
+            <select
+              className="updv-select w-full"
+              value={comprovantesTef.impressoraNome ?? ""}
+              onChange={(event) =>
+                void salvarComprovantes({ impressoraNome: event.target.value || null })
+              }
+            >
+              <option value="">Selecionar impressora</option>
+              {comprovantesTef.impressoraNome &&
+              !impressoras.some((item) => item.nome === comprovantesTef.impressoraNome) ? (
+                <option value={comprovantesTef.impressoraNome}>
+                  {comprovantesTef.impressoraNome} (não encontrada)
+                </option>
+              ) : null}
+              {impressoras.map((impressora) => (
+                <option key={impressora.nome} value={impressora.nome}>
+                  {impressora.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-zinc-500">
+              Papel
+            </span>
+            <select
+              className="updv-select w-full"
+              value={comprovantesTef.papel}
+              onChange={(event) =>
+                void salvarComprovantes({
+                  papel: event.target.value === "58mm" ? "58mm" : "80mm",
+                })
+              }
+            >
+              <option value="58mm">58 mm</option>
+              <option value="80mm">80 mm</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 space-y-2">
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              checked={comprovantesTef.viaCliente}
+              onChange={(event) =>
+                void salvarComprovantes({ viaCliente: event.target.checked })
+              }
+            />
+            Imprimir automaticamente a via do cliente
+          </label>
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              checked={comprovantesTef.viaEstabelecimento}
+              onChange={(event) =>
+                void salvarComprovantes({ viaEstabelecimento: event.target.checked })
+              }
+            />
+            Imprimir automaticamente a via do estabelecimento
+          </label>
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              checked={comprovantesTef.reciboComercial}
+              onChange={(event) =>
+                void salvarComprovantes({ reciboComercial: event.target.checked })
+              }
+            />
+            Imprimir automaticamente o recibo comercial da venda
+          </label>
+        </div>
+        {salvandoTipo === "tef" ? (
+          <p className="mt-3 text-[13px] text-zinc-500">Salvando comprovantes TEF...</p>
+        ) : null}
+      </section>
     </div>
   );
 }

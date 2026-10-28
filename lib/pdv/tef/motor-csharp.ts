@@ -16,6 +16,13 @@ export type RespostaMotorCsharp = {
   tipoDado: number | null;
   codigoNativo: number | null;
   servidorValidado: boolean;
+  comprovantes: {
+    viaEstabelecimento: string;
+    viaCliente: string;
+    rede: string;
+    quando: string;
+  } | null;
+  qrcode: string;
 };
 
 export function interpretarRespostaMotor(corpo: unknown): RespostaMotorCsharp {
@@ -54,7 +61,30 @@ export function interpretarRespostaMotor(corpo: unknown): RespostaMotorCsharp {
     tipoDado: typeof resposta.tipoDado === "number" ? resposta.tipoDado : null,
     codigoNativo,
     servidorValidado: resposta.servidorValidado === true,
+    comprovantes: comprovantesDaResposta(resposta, confirmada && pagamentoEfetivo),
+    qrcode: textoViaMotor(resposta.qrcode),
   };
+}
+
+function textoViaMotor(valor: unknown) {
+  if (typeof valor !== "string") return "";
+  const texto = valor.replace(/\0/g, "");
+  if (!texto.trim() || texto.length > 4096) return "";
+  return texto;
+}
+
+function comprovantesDaResposta(resposta: Record<string, unknown>, confirmada: boolean) {
+  if (!confirmada) return null;
+  const vias = resposta.comprovantes;
+  if (!vias || typeof vias !== "object") return null;
+  const campos = vias as Record<string, unknown>;
+  const viaEstabelecimento = textoViaMotor(campos.viaEstabelecimento);
+  const viaCliente = textoViaMotor(campos.viaCliente);
+  const rede = typeof campos.rede === "string" ? campos.rede.trim() : "";
+  const quando = typeof campos.quando === "string" ? campos.quando.trim() : "";
+  if (!viaEstabelecimento || !viaCliente || !rede || !quando || rede.length > 40) return null;
+  if (viaEstabelecimento === viaCliente) return null;
+  return { viaEstabelecimento, viaCliente, rede, quando };
 }
 
 export function instalacaoAceita(resposta: RespostaMotorCsharp) {
@@ -75,7 +105,23 @@ export function decidirComprovanteMotor(input: { ambienteGravado: string; codigo
   return "legado" as const;
 }
 
-const CHAVE_VENDA = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:(debito|credito):\d+$/i;
+const MODALIDADES_MOTOR = new Set(["debito", "credito", "pix"]);
+const CHAVE_VENDA = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:(debito|credito|pix):\d+$/i;
+
+export function escolherConsultaJournal(input: {
+  preferido: "producao" | "homologacao";
+  codigoPreferido: string;
+  codigoOutro: string;
+}) {
+  const prova = (codigo: string) =>
+    codigo === "venda_confirmada"
+    || codigo === "venda_vinculada"
+    || codigo === "venda_pendente"
+    || codigo === "venda_nao_confirmada";
+  if (prova(input.codigoPreferido)) return "preferido" as const;
+  if (prova(input.codigoOutro)) return "outro" as const;
+  return "preferido" as const;
+}
 
 export function haPendenciaFinanceiraNativa(mensagem: string) {
   return /confirmação financeira pendente|resultado desconhecido|aguardando confirmação|em execução/i.test(mensagem);
@@ -121,6 +167,8 @@ export function decidirProximaCobranca(input: {
 }
 
 export function faseDaCaptura(tipoDado: number | null, opcoes: Array<{ valor?: string }>) {
+  if (tipoDado === 20) return "qrcode" as const;
+  if (tipoDado === 18) return "exibicao" as const;
   const validas = opcoes.filter((opcao) => String(opcao.valor ?? "").trim().length > 0);
   if (tipoDado === 1 || validas.length > 0) return "menu" as const;
   if (tipoDado === 2 || tipoDado === 12 || tipoDado === 17) return "digitado" as const;
@@ -154,7 +202,7 @@ export function decidirRegistroVendaMotor(input: {
   }
   const chave = input.chave.trim();
   const confere = CHAVE_VENDA.test(chave) && chave.toLowerCase().endsWith(`:${input.modalidade}:${input.valorCentavos}`);
-  if (!confere || (input.modalidade !== "debito" && input.modalidade !== "credito")) {
+  if (!confere || !MODALIDADES_MOTOR.has(input.modalidade)) {
     return {
       acao: "recusar" as const,
       suprimirNfce: false,
@@ -233,7 +281,7 @@ export async function cobrarPeloMotorCsharp(entrada: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(entrada),
-    signal: AbortSignal.timeout(180000),
+    signal: AbortSignal.timeout(300000),
   });
   return interpretarRespostaMotor(await resposta.json().catch(() => null));
 }

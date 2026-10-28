@@ -3,16 +3,12 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const ENTRADAS = ["server.mjs", "stop.mjs", "verify.mjs", "identidade.mjs", "tef-preparar-pasta.mjs"];
+const ENTRADAS = ["server.mjs", "stop.mjs", "verify.mjs", "identidade.mjs"];
 const ATIVOS = ["pagina-status.html"];
 const MODULOS_TEF = [
-  "tef.mjs",
-  "tef-pendencia.mjs",
-  "tef-vinculo.mjs",
-  "tef-prova.mjs",
-  "tef-pareamento.mjs",
-  "tef-recuperacao.mjs",
-  "tef-pasta.mjs",
+  "tef-csharp-ponte.mjs",
+  "tef-pendencias-ambiente.mjs",
+  "tef-motor-caminho.mjs",
 ];
 const ARQUIVOS_PROGRAMDATA = [
   "print-agent.json",

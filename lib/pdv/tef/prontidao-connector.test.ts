@@ -97,22 +97,14 @@ test("a consulta HTTP vira a política usada pelo F2", () => {
   assert.equal(interpretarConsultaTef(false, null).ok, false);
 });
 
-test("o F2 espera a consulta e só encaminha a PGWebLib quando pgwebLib.pronta", () => {
+test("o F2 cobra pelo motor C# e não encaminha a PGWebLib em JavaScript", () => {
   const raiz = path.resolve(import.meta.dirname, "../../..");
   const shell = readFileSync(path.join(raiz, "components/pdv/pdv-shell.tsx"), "utf8");
   const conclusao = shell.slice(shell.indexOf("function concluirVenda("), shell.indexOf("finalizarVendaPdv("));
-  assert.equal(conclusao.includes("A disponibilidade do TEF ainda está sendo consultada."), false);
-  const espera = conclusao.indexOf("aguardarConsultaTef");
-  const prontidao = conclusao.indexOf("classificarProntidaoConnector");
-  const venda = conclusao.indexOf("executarVendaPinpad");
-  assert.ok(espera > 0);
-  assert.ok(prontidao > espera);
-  assert.ok(venda > prontidao);
-  assert.match(conclusao.slice(prontidao, venda), /podeEncaminharPgWeb/);
-  const trava = conclusao.indexOf("tefLockRef.current = true");
-  assert.ok(trava > 0 && trava < espera);
+  assert.match(conclusao, /cobrarPeloMotorCsharp/);
+  assert.doesNotMatch(conclusao, /executarVendaPinpad/);
+  assert.doesNotMatch(conclusao, /classificarProntidaoConnector/);
+  assert.doesNotMatch(conclusao, /\/tef\/status/);
   const fluxo = readFileSync(path.join(raiz, "lib/pdv/tef/fluxo-cliente.ts"), "utf8");
-  const decisao = fluxo.indexOf("decidirInicializacaoPascal");
-  assert.ok(decisao > 0);
   assert.equal(fluxo.includes("/tef/inicializar"), false);
 });

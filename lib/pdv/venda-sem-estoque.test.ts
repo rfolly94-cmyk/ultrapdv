@@ -260,6 +260,31 @@ test("engrenagem do PDV web expõe a opção da empresa e o carrinho valida esto
   assert.doesNotMatch(fonte("components/pdv/pdv-edicao-shell.tsx"), /permitirVendaSemEstoque/);
 });
 
+test("o histórico aceita saldo negativo só quando a configuração da empresa permite", () => {
+  const sql = fonte("supabase/migrations/20261025143000_estoque_movimento_saldo_configuravel.sql");
+  const baixa = fonte("supabase/migrations/20260910120000_pdv_item_avulso.sql");
+  const action = fonte("app/pdv/actions.ts");
+  const shell = fonte("components/pdv/pdv-shell.tsx");
+  assert.match(sql, /DROP CONSTRAINT IF EXISTS estoque_movimentacoes_saldos_check/);
+  assert.match(baixa, /v_permitir IS NOT TRUE/);
+  assert.match(baixa, /permitir_venda_sem_estoque/);
+  assert.match(action, /validarVendaPdvAntesDaCobranca/);
+  assert.doesNotMatch(
+    action.slice(
+      action.indexOf("export async function validarVendaPdvAntesDaCobranca"),
+      action.indexOf("export async function finalizarVendaPdv")
+    ),
+    /input\.empresaId|p_empresa_id/
+  );
+  assert.ok(
+    action.indexOf("const estoque = await") < action.indexOf("if (usarLivroCaixa)")
+  );
+  assert.ok(
+    shell.indexOf("await validarVendaPdvAntesDaCobranca") <
+      shell.indexOf("await cobrarPeloMotorCsharp")
+  );
+});
+
 test("migration nova alinha a edição com a baixa e não altera a migration antiga", () => {
   const nova = fonte("supabase/migrations/20261011120000_editar_venda_estoque_permitido.sql");
   const antiga = fonte("supabase/migrations/20260910121000_pdv_item_avulso_edicao.sql");

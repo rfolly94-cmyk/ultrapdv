@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { interpretarPendencia, STATUS_JOURNAL_TEF } from "./tef-pendencia.mjs";
+import { classificarArquivoJournal } from "./tef-pendencias-ambiente.mjs";
 
 const HOSTS_REAIS = [
   "https://xdcmoqvfrdqfinylyjqt.supabase.co",
@@ -26,37 +26,24 @@ test("journal do Connector não é exercitado contra serviço real", () => {
   }
 });
 
-test("journal corrompido, incompleto e de status desconhecido fica ilegível", () => {
-  assert.equal(interpretarPendencia("{").ok, false);
-  assert.equal(interpretarPendencia("").ok, false);
-  assert.equal(interpretarPendencia("null").ok, false);
-  assert.equal(interpretarPendencia("[]").ok, false);
-  assert.equal(
-    interpretarPendencia(
-      JSON.stringify({ status: STATUS_JOURNAL_TEF.AGUARDANDO_DECISAO, nsu: "1" })
-    ).ok,
-    false
-  );
-  assert.equal(interpretarPendencia(JSON.stringify({ status: "confirmada" })).ok, false);
+test("journal corrompido ou incompleto do motor C# fica ilegível e não libera a troca", () => {
+  assert.equal(classificarArquivoJournal(null).ilegivel, true);
+  assert.equal(classificarArquivoJournal([]).ilegivel, true);
+  assert.equal(classificarArquivoJournal("texto").ilegivel, true);
+  const decisao = classificarArquivoJournal({ status: "aguardando_decisao" });
+  assert.equal(decisao.ilegivel, false);
+  assert.equal(decisao.bloqueia, true);
+  const confirmada = classificarArquivoJournal({ Status: "confirmada" });
+  assert.equal(confirmada.bloqueia, false);
 });
 
-test("journal completo de decisão preserva NSU, rede e finalização", () => {
-  const lido = interpretarPendencia(
-    JSON.stringify({
-      status: STATUS_JOURNAL_TEF.AGUARDANDO_DECISAO,
-      identificador: "10fc717b-5e8b-433b-9e24-f5040c8c0076",
-      valor: 1,
-      rede: "PIX C6 BANK",
-      nsu: "E1928374620261011120364LDuT35VP5",
-      finalizacao: "1",
-      confirmar: true,
-    })
-  );
-  assert.equal(lido.ok, true);
-  if (!lido.ok) {
-    return;
-  }
-  assert.equal(lido.registro.nsu, "E1928374620261011120364LDuT35VP5");
-  assert.equal(lido.registro.rede, "PIX C6 BANK");
-  assert.equal(lido.registro.finalizacao, "1");
+test("journal de decisão do motor C# continua bloqueando a troca de ambiente", () => {
+  const lido = classificarArquivoJournal({
+    status: "aguardando_decisao",
+    identificador: "10fc717b-5e8b-433b-9e24-f5040c8c0076",
+    valor: 1,
+  });
+  assert.equal(lido.ilegivel, false);
+  assert.equal(lido.status, "aguardando_decisao");
+  assert.equal(lido.bloqueia, true);
 });

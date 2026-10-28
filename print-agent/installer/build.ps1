@@ -162,7 +162,7 @@ if ($pkgAtualizado -ne $pkgRaw) {
 }
 
 New-Item -ItemType Directory -Force -Path $generated, $dist | Out-Null
-$setupOut = Join-Path $dist "$setupName.exe"
+$setupOut = Join-Path $dist "$setupName-$productVersion.exe"
 
 if (Test-Path -LiteralPath $setupOut) {
   $infoAnterior = Get-Item -LiteralPath $setupOut
@@ -236,7 +236,7 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 $appFiles = @($listaApp | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
-if ($appFiles -notcontains "tef-prova.mjs" -or $appFiles -notcontains "tef-recuperacao.mjs") {
+if ($appFiles -notcontains "tef-csharp-ponte.mjs" -or $appFiles -notcontains "tef-pendencias-ambiente.mjs" -or $appFiles -notcontains "tef-motor-caminho.mjs") {
   Write-Fail "O grafo de empacotamento nao inclui os modulos TEF obrigatorios."
   exit 1
 }
@@ -268,8 +268,26 @@ if ($assinaturaDll.Status -ne "Valid" -or $assuntoDll -notmatch "SETIS Automacao
   exit 1
 }
 Copy-Item -LiteralPath $dllOrigem -Destination (Join-Path $staging "bin\tef\PGWebLib.dll") -ErrorAction Stop
-$extrasTef = Get-ChildItem -LiteralPath (Join-Path $staging "bin\tef") -Recurse -Force |
-  Where-Object { $_.Name -ne "PGWebLib.dll" }
+Write-Info "Publicando o motor C# compartilhado..."
+$motorProj = Join-Path $repo "UltraPDV.TEF\src\UltraPDV.TEF.Host\UltraPDV.TEF.Host.csproj"
+$motorDestino = Join-Path $staging "bin\tef\motor"
+& dotnet publish $motorProj -c Release -r win-x64 --self-contained false -o $motorDestino
+if ($LASTEXITCODE -ne 0) {
+  Write-Fail "A publicacao do motor C# falhou. O instalador nao foi gerado."
+  exit 1
+}
+$motorExe = Join-Path $motorDestino "UltraPDV.TEF.Host.exe"
+if (-not (Test-Path -LiteralPath $motorExe)) {
+  Write-Fail "O executavel do motor C# nao foi publicado."
+  exit 1
+}
+if (Test-Path -LiteralPath (Join-Path $motorDestino "PGWebLib.dll")) {
+  Write-Fail "A publicacao do motor nao pode substituir a PGWebLib oficial."
+  exit 1
+}
+Get-ChildItem -LiteralPath $motorDestino -Recurse -Force -Filter *.pdb | Remove-Item -Force
+$extrasTef = Get-ChildItem -LiteralPath (Join-Path $staging "bin\tef") -Force |
+  Where-Object { $_.Name -ne "PGWebLib.dll" -and $_.Name -ne "motor" }
 if ($extrasTef) {
   Write-Fail "O pacote TEF so pode levar a PGWebLib.dll. Journals, certificados e o executavel antigo ficam na maquina."
   $extrasTef | ForEach-Object { Write-Host "  $($_.FullName)" }
@@ -289,6 +307,10 @@ if ([string]$pacoteObj.executavel) {
 }
 if ([string]$pacoteObj.dll -ne "bin/tef/PGWebLib.dll") {
   Write-Fail "tef-pacote.json nao aponta para a PGWebLib.dll x64."
+  exit 1
+}
+if ([string]$pacoteObj.motor -ne "bin/tef/motor/UltraPDV.TEF.Host.exe") {
+  Write-Fail "tef-pacote.json nao aponta para o motor C# compartilhado."
   exit 1
 }
 Copy-Item $pacoteTef (Join-Path $staging "tef-pacote.json")
@@ -361,26 +383,13 @@ if ($servidorEmpacotado -match 'Access-Control-Allow-Origin"\s*=\s*"\*"') {
   Write-Fail "O server.mjs empacotado libera qualquer origem."
   exit 1
 }
-$tefEmpacotado = Get-Content -Raw (Join-Path $staging "app\tef.mjs")
-if ($tefEmpacotado -notmatch "validarPastaConfirmada" -or $tefEmpacotado -notmatch "mensagemRetornoBiblioteca") {
-  Write-Fail "O Connector empacotado nao valida a pasta confirmada nem preserva o codigo do PW_iInit."
+$ponteEmpacotada = Get-Content -Raw (Join-Path $staging "app\tef-csharp-ponte.mjs")
+if ($ponteEmpacotada -notmatch "pedidoLocalDoMotor") {
+  Write-Fail "O Connector empacotado nao inclui a ponte do motor C#."
   exit 1
 }
-$pastaEmpacotada = Get-Content -Raw (Join-Path $staging "app\tef-pasta.mjs")
-$inicioValidacao = $pastaEmpacotada.IndexOf("export async function validarPastaConfirmada")
-$fimValidacao = $pastaEmpacotada.IndexOf("export async function testarGravacaoOperacional")
-if ($inicioValidacao -lt 0 -or $fimValidacao -le $inicioValidacao) {
-  Write-Fail "A validacao da pasta confirmada nao foi empacotada."
-  exit 1
-}
-$validacaoEmpacotada = $pastaEmpacotada.Substring($inicioValidacao, $fimValidacao - $inicioValidacao)
-if ($validacaoEmpacotada.Contains("testarGravacaoPasta") -or $validacaoEmpacotada.Contains("icacls")) {
-  Write-Fail "A validacao da pasta confirmada ainda cria arquivo temporario ou executa icacls."
-  exit 1
-}
-$prepararEmpacotado = Get-Content -Raw (Join-Path $staging "app\tef-preparar-pasta.mjs")
-if ($prepararEmpacotado.Contains("UltraPDV-TEF") -or $prepararEmpacotado.Contains("validarPastaConfirmada")) {
-  Write-Fail "A preparacao do instalador nao pode redefinir a pasta personalizada."
+if ($servidorEmpacotado -notmatch '/tef/csharp' -or $servidorEmpacotado -match 'GerenciadorPgWeb') {
+  Write-Fail "O server.mjs empacotado nao usa exclusivamente o motor C#."
   exit 1
 }
 & $nodeExe (Join-Path $installerDir "empacotar-app.mjs") --verificar (Join-Path $staging "app")

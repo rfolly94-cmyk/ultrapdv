@@ -91,7 +91,7 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
     }
 
     var producao = comando.Ambiente == CodigosPgWeb.AmbienteProducao;
-    var vendaProducao = producao && comando.AutorizaVendaProducao && comando.Comando is "vender" or "confirmar";
+    var vendaProducao = producao && comando.AutorizaVendaProducao && comando.Comando is "vender" or "confirmar" or "cancelar";
     if (producao && comando.Comando is not ("instalar" or "configurar") && !vendaProducao)
     {
         return new RespostaHost("resultado", false, false, false, "PRODUCAO_NAO_AUTORIZADA", "Produção não está autorizada. Nenhuma cobrança foi iniciada.", false, false, null, null, false, null);
@@ -167,10 +167,12 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
     };
     var recebido = biblioteca.EhNativa && resultado.PagamentoRecebido;
     var confirmada = biblioteca.EhNativa && resultado.ConfirmacaoChamada && resultado.PagamentoRecebido;
+    var comprovantes = confirmada ? motor.Comprovantes(contexto, pedido.ChaveIdempotencia) : null;
     return new RespostaHost("resultado", recebido, resultado.ConfirmacaoChamada, biblioteca.EhNativa, resultado.Situacao, resultado.Mensagem, false, confirmada, null, null, false, pedido.ChaveIdempotencia)
     {
         ServidorValidado = resultado.ServidorValidado,
         CodigoNativo = resultado.Codigo,
+        Comprovantes = comprovantes,
     };
 }
 
@@ -215,16 +217,42 @@ internal sealed record RespostaHost(
     public string? ReferenciaInstalacao { get; init; }
     public string? VendaId { get; init; }
     public DadosFiscaisVenda? Fiscal { get; init; }
+    public ComprovantesTef? Comprovantes { get; init; }
 }
 
 file sealed class CapturaLinha : ICapturaOperador
 {
     private readonly JsonSerializerOptions _json;
+    private readonly object _trava = new();
+    private readonly Queue<string> _linhas = new();
     private string? _aviso;
+    private string? _qrCode;
+    private bool _leitorIniciado;
 
     public CapturaLinha(JsonSerializerOptions json) => _json = json;
 
     public void DefinirAviso(string? aviso) => _aviso = aviso;
+
+    public void ReceberQrCode(string payload)
+    {
+        var texto = payload.Replace("\0", "", StringComparison.Ordinal).Trim();
+        _qrCode = texto.Length is > 0 and <= 4096 ? texto : null;
+    }
+
+    public bool ConsumirCancelamento()
+    {
+        GarantirLeitor();
+        lock (_trava)
+        {
+            if (_linhas.Count == 0 || !LinhaCancela(_linhas.Peek()))
+            {
+                return false;
+            }
+
+            _linhas.Dequeue();
+            return true;
+        }
+    }
 
     public bool TentarResponder(PwGetData pedido, out string valor)
     {
@@ -240,10 +268,12 @@ file sealed class CapturaLinha : ICapturaOperador
             pedido.Identificador,
             pedido.TipoDeDado,
             pedido.OcultarDadosDigitados == 1 || pedido.TipoDeDado == TipoDadoPgWeb.AutenticacaoUsuario,
-            TextoCaptura.OpcoesValidas(ref pedido).Select(opcao => new OpcaoHost(opcao.Texto, opcao.Valor)).ToArray());
+            TextoCaptura.OpcoesValidas(ref pedido).Select(opcao => new OpcaoHost(opcao.Texto, opcao.Valor)).ToArray(),
+            _qrCode);
+        _qrCode = null;
         Console.Out.WriteLine(JsonSerializer.Serialize(evento, _json));
         Console.Out.Flush();
-        var linha = Console.ReadLine();
+        var linha = EsperarLinha();
         if (string.IsNullOrWhiteSpace(linha))
         {
             valor = "";
@@ -260,9 +290,78 @@ file sealed class CapturaLinha : ICapturaOperador
         valor = resposta?.Valor ?? "";
         return valor.Length > 0 || pedido.AceitaNulo == 1;
     }
+
+    private void GarantirLeitor()
+    {
+        lock (_trava)
+        {
+            if (_leitorIniciado)
+            {
+                return;
+            }
+
+            _leitorIniciado = true;
+        }
+
+        var leitor = new Thread(LerEntrada)
+        {
+            IsBackground = true,
+            Name = "captura-tef",
+        };
+        leitor.Start();
+    }
+
+    private void LerEntrada()
+    {
+        while (true)
+        {
+            var linha = Console.ReadLine();
+            if (linha is null)
+            {
+                return;
+            }
+
+            lock (_trava)
+            {
+                _linhas.Enqueue(linha);
+                Monitor.PulseAll(_trava);
+            }
+        }
+    }
+
+    private string EsperarLinha()
+    {
+        GarantirLeitor();
+        lock (_trava)
+        {
+            while (_linhas.Count == 0)
+            {
+                Monitor.Wait(_trava);
+            }
+
+            return _linhas.Dequeue();
+        }
+    }
+
+    private bool LinhaCancela(string linha)
+    {
+        if (string.IsNullOrWhiteSpace(linha))
+        {
+            return false;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RespostaOperador>(linha, _json)?.Cancelar == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 }
 
-file sealed record EventoCaptura(string Tipo, string? Prompt, ushort Identificador, byte TipoDado, bool Oculto, OpcaoHost[] Opcoes);
+file sealed record EventoCaptura(string Tipo, string? Prompt, ushort Identificador, byte TipoDado, bool Oculto, OpcaoHost[] Opcoes, string? QrCode);
 
 file sealed record OpcaoHost(string Texto, string Valor);
 

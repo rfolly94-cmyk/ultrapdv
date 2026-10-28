@@ -245,6 +245,43 @@ export function preencherRestanteAoSelecionarPdv(params: {
   });
 }
 
+export function ordenarFormasCheckoutPdv<T extends FormaDistribuicaoPdv>(
+  formas: T[],
+  destaques: {
+    dinheiroId?: string | null;
+    pixId?: string | null;
+    debitoId?: string | null;
+    creditoId?: string | null;
+  }
+) {
+  const ordem = [
+    destaques.dinheiroId,
+    destaques.pixId,
+    destaques.debitoId,
+    destaques.creditoId,
+  ].filter((id): id is string => Boolean(id));
+  const vistos = new Set<string>();
+  const inicio: T[] = [];
+  for (const id of ordem) {
+    const forma = formas.find((item) => item.id === id && item.permite_fiado !== true);
+    if (!forma || vistos.has(forma.id)) continue;
+    vistos.add(forma.id);
+    inicio.push(forma);
+  }
+  const resto = formas.filter(
+    (forma) => forma.permite_fiado !== true && !vistos.has(forma.id)
+  );
+  return [...inicio, ...resto];
+}
+
+export function atalhoCampoPagamentoPdv(tecla: string) {
+  if (tecla === "F4") return "dinheiro" as const;
+  if (tecla === "F5") return "pix" as const;
+  if (tecla === "F6") return "debito" as const;
+  if (tecla === "F7") return "credito" as const;
+  return null;
+}
+
 export function formaAposNavegacaoPdv(
   ids: string[],
   atualId: string | null,

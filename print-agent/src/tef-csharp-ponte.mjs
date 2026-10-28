@@ -28,6 +28,10 @@ export function diretorioProducaoEmpresaTef(raiz, empresaId, terminalId) {
   return { raiz: homologacao.raiz, diretorio, raizJournals, homologacao: homologacao.diretorio };
 }
 
+export function respostaImediataDeInterrupcao(sessao, corpo) {
+  return Boolean(sessao && corpo?.comando === "responder" && corpo.cancelar === true && sessao.aguardando === true);
+}
+
 export function continuarCaptura(sessao, corpo) {
   if (!sessao || corpo?.comando !== "responder") {
     return {
@@ -94,6 +98,8 @@ export function normalizarRespostaMotor(bruto, sessao) {
     referenciaInstalacao: typeof resposta.referenciaInstalacao === "string" ? resposta.referenciaInstalacao : "",
     vendaId: typeof resposta.vendaId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(resposta.vendaId) ? resposta.vendaId : null,
     fiscal: fiscalDoMotor(resposta.fiscal),
+    comprovantes: comprovantesDoMotor(resposta, recebido),
+    qrcode: textoVia(resposta.qrCode),
   };
 }
 
@@ -121,15 +127,42 @@ function fiscalDoMotor(bruto) {
   return { autorizacao, bandeiraNome, rede, instituicao, cnpjCredenciadora, cnpjRecebedor };
 }
 
+function textoVia(valor) {
+  if (typeof valor !== "string") return "";
+  const texto = valor.replace(/\0/g, "");
+  if (!texto.trim() || texto.length > 4096) return "";
+  return texto;
+}
+
+function comprovantesDoMotor(bruto, confirmada) {
+  if (!confirmada) return null;
+  const vias = bruto?.comprovantes;
+  if (!vias || typeof vias !== "object") return null;
+  const viaEstabelecimento = textoVia(vias.viaEstabelecimento);
+  const viaCliente = textoVia(vias.viaCliente);
+  const rede = textoFiscal(vias.rede, 40) || "";
+  const quando = typeof vias.quando === "string" ? vias.quando.trim() : "";
+  if (!viaEstabelecimento || !viaCliente || !rede || !quando) return null;
+  if (viaEstabelecimento === viaCliente) return null;
+  return { viaEstabelecimento, viaCliente, rede, quando };
+}
+
+function chaveVenda(valor) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:(debito|credito|pix):\d+$/i.test(String(valor ?? ""));
+}
+
 export function pedidoLocalDoMotor(corpo, caminhos) {
   const pedido = corpo && typeof corpo === "object" ? { ...corpo } : { comando: "status" };
   delete pedido.autorizacao;
   delete pedido.ponto;
   delete pedido.servidor;
+  if (pedido.comando === "cancelar" && !chaveVenda(pedido.chave)) {
+    return { bloqueado: true };
+  }
   if (pedido.ambiente === 0 || pedido.ambiente === "producao") {
     const finalidade = pedido.finalidade;
     const comando = pedido.comando;
-    const vendaAutorizada = finalidade === "venda_producao" && (comando === "vender" || comando === "confirmar");
+    const vendaAutorizada = finalidade === "venda_producao" && (comando === "vender" || comando === "confirmar" || comando === "cancelar");
     const permitido =
       (finalidade === "instalacao_producao" && comando === "instalar") ||
       (finalidade === "configuracao_producao" && comando === "configurar") ||
@@ -137,7 +170,7 @@ export function pedidoLocalDoMotor(corpo, caminhos) {
       (finalidade === "consulta_producao" && comando === "situacao") ||
       (finalidade === "vinculo_producao" && comando === "vincular") ||
       vendaAutorizada;
-    if (!permitido || comando === "cancelar") {
+    if (!permitido) {
       return { bloqueado: true };
     }
     const chave = typeof pedido.chave === "string" ? pedido.chave : "";

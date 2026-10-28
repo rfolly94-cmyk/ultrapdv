@@ -52,10 +52,8 @@ function entrada(parcial: Record<string, unknown> = {}) {
   };
 }
 
-test("a mensagem v2 é a mesma do Connector e não inclui empresa nem dispositivo", async () => {
-  const { mensagemBibliotecaTef } = await import("../../../print-agent/src/tef-prova.mjs");
+test("a mensagem v2 não inclui empresa nem dispositivo", () => {
   const valor = campos();
-  assert.equal(mensagemProvaBibliotecaV2(valor), mensagemBibliotecaTef(valor));
   assert.equal(mensagemProvaBibliotecaV2(valor).includes(empresaA), false);
   assert.equal(mensagemProvaBibliotecaV2(valor).includes(dispositivo), false);
 });

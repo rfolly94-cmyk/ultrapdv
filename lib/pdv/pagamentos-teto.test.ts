@@ -168,6 +168,63 @@ test("13. valores com centavos funcionam corretamente", () => {
   assert.equal(ok.bloqueado, false);
 });
 
+test("troco só sai do dinheiro e cartão acima do total bloqueia", () => {
+  const somenteDinheiro = avaliarPagamentosPdv({
+    totalVendaCentavos: 10000,
+    pagamentos: [{ valorCentavos: 15000, ...dinheiro }],
+  });
+  assert.equal(somenteDinheiro.bloqueado, false);
+  assert.equal(somenteDinheiro.trocoCentavos, 5000);
+  assert.equal(somenteDinheiro.restanteCentavos, 0);
+
+  const misto = avaliarPagamentosPdv({
+    totalVendaCentavos: 100000,
+    pagamentos: [
+      { valorCentavos: 30000, ...pix },
+      { valorCentavos: 20000, ...cartao },
+      { valorCentavos: 20000, ...cartao },
+      { valorCentavos: 40000, ...dinheiro },
+    ],
+  });
+  assert.equal(misto.bloqueado, false);
+  assert.equal(misto.totalInformadoCentavos, 110000);
+  assert.equal(misto.trocoCentavos, 10000);
+  assert.equal(misto.restanteCentavos, 0);
+  assert.ok(misto.trocoCentavos <= 40000);
+
+  const cartaoAcima = avaliarPagamentosPdv({
+    totalVendaCentavos: 100000,
+    pagamentos: [{ valorCentavos: 110000, ...cartao }],
+  });
+  assert.equal(cartaoAcima.bloqueado, true);
+  assert.equal(cartaoAcima.trocoCentavos, 0);
+
+  const parcial = avaliarPagamentosPdv({
+    totalVendaCentavos: 100000,
+    pagamentos: [
+      { valorCentavos: 20000, ...dinheiro },
+      { valorCentavos: 15000, ...pix },
+      { valorCentavos: 25000, ...cartao },
+      { valorCentavos: 30000, ...cartao },
+    ],
+  });
+  assert.equal(parcial.bloqueado, false);
+  assert.equal(parcial.trocoCentavos, 0);
+  assert.equal(parcial.restanteCentavos, 10000);
+
+  const fiado = avaliarPagamentosPdv({
+    totalVendaCentavos: 100000,
+    pagamentos: [
+      { valorCentavos: 20000, ...dinheiro },
+      { valorCentavos: 30000, ...pix },
+      { valorCentavos: 50000, permiteTroco: false },
+    ],
+  });
+  assert.equal(fiado.bloqueado, false);
+  assert.equal(fiado.trocoCentavos, 0);
+  assert.equal(fiado.restanteCentavos, 0);
+});
+
 test("14. dinheiro/troco existente continua funcionando", () => {
   const r = avaliarPagamentosPdv({
     totalVendaCentavos: 10000,

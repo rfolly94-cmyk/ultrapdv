@@ -73,6 +73,21 @@ public static class InformacaoPgWeb
     public const ushort VersaoAutomacao = 0x16;
     public const ushort DesenvolvedorAutomacao = 0x17;
     public const ushort CapacidadeAutomacao = 0x24;
+    public const ushort ComprovanteEstabelecimento = 0x53;
+    public const ushort ComprovanteCliente = 0x54;
+    public const ushort ComprovanteReduzido = 0x55;
+
+    /// <summary>
+    /// PWINFO_AUTHPOSQRCODE. Payload da carteira quando a biblioteca pede PWDAT_DSPQRCODE.
+    /// Não é lido enquanto o QR permanece no PinPad.
+    /// </summary>
+    public const ushort QrCodeAutorizador = 0x1F77;
+
+    /// <summary>
+    /// PWINFO_AUTCAP. O 4 é o termo fixo da especificação. O 8 declara vias diferenciadas.
+    /// O comprovante reduzido não entra nesta soma.
+    /// </summary>
+    public const string CapacidadeComViasDiferenciadas = "12";
     public const ushort EnderecoAutorizador = 0x05;
     public const ushort PortaAutorizador = 0x07;
     public const ushort DestinoTcpIp = 0x1B;
@@ -82,6 +97,7 @@ public static class InformacaoPgWeb
 
     public const string Credito = "1";
     public const string Debito = "2";
+    public const string Pix = "pix";
 }
 
 public static class TipoDadoPgWeb

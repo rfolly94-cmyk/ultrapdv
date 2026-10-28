@@ -150,6 +150,8 @@ Section "UltraPDV Connector" SecPrincipal
   ; Executaveis e dados ja presentes na maquina nao sao apagados por esta secao.
   SetOutPath "$INSTDIR\bin\tef"
   File "${STAGING_DIR}\bin\tef\PGWebLib.dll"
+  SetOutPath "$INSTDIR\bin\tef\motor"
+  File /r "${STAGING_DIR}\bin\tef\motor\*.*"
 
   SetOutPath "$INSTDIR\print-engine"
   File "${STAGING_DIR}\print-engine\SumatraPDF.exe"
@@ -185,7 +187,6 @@ Section "UltraPDV Connector" SecPrincipal
   CreateDirectory "$1\UltraPDV"
   CreateDirectory "$1\UltraPDV\TEF\Producao"
   nsExec::ExecToLog 'icacls "$1\UltraPDV" /grant *S-1-5-32-545:(OI)(CI)M /C /Q'
-  nsExec::ExecToLog '"$INSTDIR\runtime\node.exe" "$INSTDIR\app\tef-preparar-pasta.mjs"'
 
   nsExec::ExecToLog '"$INSTDIR\runtime\node.exe" "$INSTDIR\app\identidade.mjs" --ensure'
 

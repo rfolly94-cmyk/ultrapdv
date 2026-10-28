@@ -39,7 +39,7 @@ export default async function ConfiguracaoTefPage() {
   return (
     <PageShell
       title="TEF"
-      description="Histórico financeiro preservado. A cobrança operacional está desativada."
+      description="O ambiente TEF é escolhido por empresa. Credenciais e journals de homologação e produção permanecem separados."
       breadcrumb={[
         { label: "Configurações", href: "/configuracoes" },
         { label: "Financeiro", href: "/configuracoes/financeiro" },
@@ -94,8 +94,8 @@ export default async function ConfiguracaoTefPage() {
                 <dd className="font-medium text-zinc-950">Lida neste computador, sem repetir a instalação</dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Produção</dt>
-                <dd className="font-medium text-zinc-950">Bloqueada. Nenhuma cobrança de produção é iniciada.</dd>
+                <dt className="text-zinc-500">Ambiente ativo</dt>
+                <dd className="font-medium text-zinc-950">{motor.ambiente === "producao" ? "Produção" : "Homologação"}</dd>
               </div>
             </dl>
             {plano.permitido && identidade ? (

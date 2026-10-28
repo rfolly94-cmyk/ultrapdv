@@ -230,7 +230,7 @@ test("migration separa os servidores e o fluxo habilitado não inventa endereço
   const persistencia = fonte("lib/pdv/tef/persistencia.ts");
   const sessao = fonte("lib/pdv/tef/assistente-sessao.ts");
   const ui = fonte("components/pdv/tef-assistente.tsx");
-  const conector = fonte("print-agent/src/tef.mjs");
+  const conector = fonte("print-agent/src/server.mjs");
   assert.match(sql, /Não aplicar automaticamente/);
   assert.match(sql, /servidor_homologacao text NOT NULL DEFAULT ''/);
   assert.match(sql, /servidor_producao text NOT NULL DEFAULT ''/);

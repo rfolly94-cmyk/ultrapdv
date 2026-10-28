@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { continuarCaptura, diretorioEmpresaTef, diretorioProducaoEmpresaTef, normalizarRespostaMotor, pedidoLocalDoMotor } from "./tef-csharp-ponte.mjs";
+import { continuarCaptura, diretorioEmpresaTef, diretorioProducaoEmpresaTef, normalizarRespostaMotor, pedidoLocalDoMotor, respostaImediataDeInterrupcao } from "./tef-csharp-ponte.mjs";
 
 test("vínculo de produção não autoriza nova venda", () => {
   const empresa = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -70,6 +70,18 @@ test("captura não recebe pagamento e remove autorização do pedido", () => {
   assert.equal(captura.pagamentoRecebido, false);
   assert.equal(captura.sessao, "sessao-1");
   assert.equal(captura.opcoes[0].valor, "1");
+  assert.equal(captura.qrcode, "");
+
+  const comQr = normalizarRespostaMotor({
+    tipo: "captura",
+    tipoDado: 20,
+    qrCode: "qr-teste-homologacao",
+    prompt: "Mostre o QR no checkout",
+  }, "sessao-qr");
+  assert.equal(comQr.fase, "captura");
+  assert.equal(comQr.pagamentoRecebido, false);
+  assert.equal(comQr.qrcode, "qr-teste-homologacao");
+  assert.equal(comQr.fiscal, null);
 
   const pedido = pedidoLocalDoMotor({
     comando: "status",
@@ -123,6 +135,27 @@ test("instalação de produção fica isolada e venda continua bloqueada", () =>
   assert.match(vendaProducao.pedido.diretorio, /\\producao\\Data$/);
   const cancelamento = pedidoLocalDoMotor({ comando: "cancelar", ambiente: 0, finalidade: "venda_producao", empresaId: empresa, terminalId: terminal }, { raiz });
   assert.equal(cancelamento.bloqueado, true);
+  const cancelamentoComChave = pedidoLocalDoMotor({
+    comando: "cancelar",
+    ambiente: 0,
+    finalidade: "venda_producao",
+    empresaId: empresa,
+    terminalId: terminal,
+    chave: "11111111-1111-4111-8111-111111111111:debito:100",
+  }, { raiz });
+  assert.equal(cancelamentoComChave.bloqueado, false);
+  assert.equal(cancelamentoComChave.pedido.autorizaVendaProducao, true);
+  assert.match(cancelamentoComChave.pedido.diretorio, /\\producao\\Data$/);
+  const cancelamentoHomologacao = pedidoLocalDoMotor({
+    comando: "cancelar",
+    ambiente: 1,
+    empresaId: empresa,
+    terminalId: terminal,
+    chave: "11111111-1111-4111-8111-111111111111:pix:100",
+  }, { raiz });
+  assert.equal(cancelamentoHomologacao.bloqueado, false);
+  assert.equal(cancelamentoHomologacao.pedido.ambiente, 1);
+  assert.doesNotMatch(cancelamentoHomologacao.pedido.diretorio, /\\producao\\Data$/);
   const continuacao = continuarCaptura({ operacaoNativa: "PWOPER_CONFIG", chave: "cfg:ponto" }, { comando: "responder", operacaoNativa: "PWOPER_INSTALL", chave: "cfg:ponto", valor: "lab.exemplo:31735" });
   assert.equal(continuacao.continuar, false);
   assert.equal(continuacao.codigo, "OPERACAO_DIVERGENTE");
@@ -164,10 +197,47 @@ test("situação encaminha somente os campos fiscais da transação", () => {
   assert.equal(resposta.fiscal.cnpjRecebedor, "11222333000181");
   assert.equal(Object.hasOwn(resposta.fiscal, "numeroRequisicao"), false);
   assert.equal(Object.hasOwn(resposta.fiscal, "comprovante"), false);
+  const vias = normalizarRespostaMotor({
+    tipo: "resultado",
+    pagamentoRecebido: true,
+    nativo: true,
+    confirmada: true,
+    codigo: "confirmada",
+    fiscal: { autorizacao: "A1B2C3", comprovante: "nao-misturar" },
+    comprovantes: {
+      viaEstabelecimento: "VIA ESTABELECIMENTO\nLOJA",
+      viaCliente: "VIA CLIENTE\nPORTADOR",
+      rede: "C6 PAY",
+      quando: "2026-10-26T18:23:31.000Z",
+    },
+  });
+  assert.equal(vias.comprovantes.viaEstabelecimento, "VIA ESTABELECIMENTO\nLOJA");
+  assert.equal(vias.comprovantes.viaCliente, "VIA CLIENTE\nPORTADOR");
+  assert.equal(Object.hasOwn(vias.fiscal, "comprovante"), false);
+  assert.equal(normalizarRespostaMotor({
+    confirmada: false,
+    pagamentoRecebido: false,
+    comprovantes: vias.comprovantes,
+  }).comprovantes, null);
+  assert.equal(normalizarRespostaMotor({
+    tipo: "resultado",
+    pagamentoRecebido: true,
+    nativo: true,
+    confirmada: true,
+    comprovantes: { viaEstabelecimento: "VIA ESTABELECIMENTO", viaCliente: "", rede: "C6 PAY", quando: "agora" },
+  }).comprovantes, null);
   const pan = normalizarRespostaMotor({
     tipo: "resultado",
     fiscal: { autorizacao: "4111111111111111", bandeiraNome: "Maestro" },
   });
   assert.equal(pan.fiscal.autorizacao, null);
   assert.equal(pan.fiscal.bandeiraNome, "Maestro");
+});
+
+test("cancelar durante a espera do PinPad não abre outra leitura do resultado", () => {
+  const sessao = { aguardando: true };
+  assert.equal(respostaImediataDeInterrupcao(sessao, { comando: "responder", cancelar: true }), true);
+  assert.equal(respostaImediataDeInterrupcao({ aguardando: false }, { comando: "responder", cancelar: true }), false);
+  assert.equal(respostaImediataDeInterrupcao(sessao, { comando: "responder", cancelar: false }), false);
+  assert.equal(respostaImediataDeInterrupcao(sessao, { comando: "vender", cancelar: true }), false);
 });

@@ -77,6 +77,7 @@ export type FinalizarVendaPdvInput = {
     motorChave?: string | null;
   }>;
   motorOrigem?: string | null;
+  ambienteCobranca?: "producao" | "homologacao" | null;
   cpfNaNota?: string | null;
   usarDocumentoClienteNaNota?: boolean;
   correlacao?: string | null;
@@ -545,6 +546,7 @@ export async function executarFinalizacaoVendaPdv(
       usuarioId: String(claimsData.claims.sub),
       pagamentos: input.pagamentos,
       motorOrigem: input.motorOrigem,
+      ambienteCobranca: input.ambienteCobranca,
     })
     );
 
@@ -684,20 +686,18 @@ export async function executarFinalizacaoVendaPdv(
       fluxoExigeCaixa,
     });
 
-    if (fluxoExigeCaixa) {
-      const estoque = await relogio.medir("supabase_estoque", "supabase", () =>
-        validarEstoqueNaFinalizacaoPdv({
+    const estoque = await relogio.medir("supabase_estoque", "supabase", () =>
+      validarEstoqueNaFinalizacaoPdv({
         supabase,
         empresaId: String(vinculo.empresa_id),
         itens: input.itens,
       })
-      );
-      if (!estoque.ok) {
-        return {
-          ok: false,
-          erro: estoque.erro,
-        };
-      }
+    );
+    if (!estoque.ok) {
+      return {
+        ok: false,
+        erro: estoque.erro,
+      };
     }
 
     if (usarLivroCaixa) {
@@ -1027,6 +1027,53 @@ export async function executarFinalizacaoVendaPdv(
   } finally {
     relogio.publicarResumo(medicaoOk);
   }
+}
+
+export async function validarVendaPdvAntesDaCobranca(input: {
+  descontoCentavos: number;
+  itens: FinalizarVendaPdvInput["itens"];
+  pagamentos: Array<{ formaPagamentoId: string; valorCentavos: number }>;
+}): Promise<{ ok: true } | { ok: false; erro: string }> {
+  const supabase = await createClient();
+  const { data: claimsData, error: authError } = await obterClaimsSessao(supabase);
+  if (authError || !claimsData?.claims?.sub) {
+    return { ok: false, erro: "Não autenticado." };
+  }
+
+  const { data: vinculo } = await supabase
+    .from("usuarios_empresas")
+    .select("empresa_id")
+    .eq("usuario_id", String(claimsData.claims.sub))
+    .eq("principal", true)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  if (!vinculo?.empresa_id) {
+    return { ok: false, erro: "Nenhuma empresa ativa encontrada." };
+  }
+
+  const empresaId = String(vinculo.empresa_id);
+  const teto = await avaliarTetoPagamentosNoServidor({
+    supabase,
+    empresaId,
+    itens: input.itens.map((item) => ({
+      produtoId: item.produtoId,
+      origem: item.origem,
+      quantidade: item.quantidade,
+      precoUnitarioCentavos: item.valorUnitarioCentavos,
+    })),
+    descontoCentavos: input.descontoCentavos,
+    pagamentos: input.pagamentos,
+  });
+  if (!teto.ok) {
+    return { ok: false, erro: teto.erro };
+  }
+
+  return validarEstoqueNaFinalizacaoPdv({
+    supabase,
+    empresaId,
+    itens: input.itens,
+  });
 }
 
 export async function finalizarVendaPdv(

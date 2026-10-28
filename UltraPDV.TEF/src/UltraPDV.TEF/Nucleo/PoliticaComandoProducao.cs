@@ -26,7 +26,7 @@ public static class PoliticaComandoProducao
             return false;
         }
 
-        if (comando is "vender" or "confirmar" && autorizaVenda && DiretorioIsolado(diretorio))
+        if (comando is "vender" or "confirmar" or "cancelar" && autorizaVenda && DiretorioIsolado(diretorio))
         {
             return false;
         }

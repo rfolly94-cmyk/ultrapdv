@@ -72,13 +72,16 @@ test("autorização exige as sete provas e escolher produção não autoriza", (
   const liberado = decidirAmbienteCobranca({ ambienteEmpresa: "producao", liberada: true, comando: "vender" });
   assert.equal(liberado.ok, true);
   if (liberado.ok) assert.equal(liberado.finalidade, "venda_producao");
-  assert.equal(decidirAmbienteCobranca({ ambienteEmpresa: "producao", liberada: true, comando: "cancelar" }).ok, false);
+  const cancelamento = decidirAmbienteCobranca({ ambienteEmpresa: "producao", liberada: true, comando: "cancelar" });
+  assert.equal(cancelamento.ok, true);
+  if (cancelamento.ok) assert.equal(cancelamento.ambiente, 0);
+  assert.equal(decidirAmbienteCobranca({ ambienteEmpresa: "producao", liberada: false, comando: "cancelar" }).ok, false);
   const debito = modalidadeNativaPinpad("debito");
   const credito = modalidadeNativaPinpad("credito");
   assert.equal(debito.ok && debito.modalidade === "2", true);
   assert.equal(credito.ok && credito.modalidade === "1", true);
   const pix = modalidadeNativaPinpad("pix");
-  assert.equal(pix.ok && pix.modalidade === "", true);
+  assert.equal(pix.ok && pix.modalidade === "pix", true);
   assert.equal(modalidadeNativaPinpad("voucher").ok, false);
 
   const servidor = fonte("lib/pdv/tef/politica-empresa-servidor.ts");

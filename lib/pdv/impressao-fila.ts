@@ -5,11 +5,12 @@ export const MENSAGEM_IMPRESSAO_INTERROMPIDA =
 
 export type EstadoTrabalhoImpressao = "pendente" | "executando" | "concluido" | "falhou";
 
-export type DocumentoImpressaoPdv = "danfe_nfce" | "recibo";
+export type DocumentoImpressaoPdv = "danfe_nfce" | "recibo" | "tef_estabelecimento" | "tef_cliente";
 
 export type TrabalhoImpressaoPdv = {
   id: string;
   vendaId: string;
+  empresaId?: string;
   emissaoId: string | null;
   documento: DocumentoImpressaoPdv;
   origem: "automatica" | "reimpressao";
@@ -72,20 +73,24 @@ export function iniciarImpressaoSemBloquear<T>(input: {
   return { impressao };
 }
 
-function chaveDocumento(trabalho: Pick<TrabalhoImpressaoPdv, "vendaId" | "documento" | "emissaoId">) {
-  return `${trabalho.vendaId}:${trabalho.documento}:${trabalho.emissaoId ?? ""}`;
+function chaveDocumento(trabalho: Pick<TrabalhoImpressaoPdv, "vendaId" | "documento" | "emissaoId" | "empresaId">) {
+  const nucleo = `${trabalho.vendaId}:${trabalho.documento}:${trabalho.emissaoId ?? ""}`;
+  if (trabalho.documento === "tef_estabelecimento" || trabalho.documento === "tef_cliente") {
+    return `${trabalho.empresaId ?? ""}:${nucleo}`;
+  }
+  return nucleo;
 }
 
 function mesmoDocumento(
   trabalho: TrabalhoImpressaoPdv,
-  pedido: { vendaId: string; documento: DocumentoImpressaoPdv; emissaoId: string | null }
+  pedido: { vendaId: string; documento: DocumentoImpressaoPdv; emissaoId: string | null; empresaId?: string }
 ) {
   return chaveDocumento(trabalho) === chaveDocumento(pedido);
 }
 
 function ocupado(
   fila: FilaImpressaoPdv,
-  pedido: { vendaId: string; documento: DocumentoImpressaoPdv; emissaoId: string | null }
+  pedido: { vendaId: string; documento: DocumentoImpressaoPdv; emissaoId: string | null; empresaId?: string }
 ) {
   return fila.trabalhos.some(
     (trabalho) =>
@@ -110,6 +115,7 @@ export function enfileirarImpressaoAutomatica(
     vendaId: string;
     emissaoId: string | null;
     documento: DocumentoImpressaoPdv;
+    empresaId?: string;
     agora: string;
   }
 ) {
@@ -122,6 +128,7 @@ export function enfileirarImpressaoAutomatica(
   const trabalho: TrabalhoImpressaoPdv = {
     id: `automatica:${chaveDocumento(pedido)}`,
     vendaId: pedido.vendaId,
+    empresaId: pedido.empresaId,
     emissaoId: pedido.emissaoId,
     documento: pedido.documento,
     origem: "automatica",
@@ -143,6 +150,7 @@ export function solicitarReimpressao(
     vendaId: string;
     emissaoId: string | null;
     documento: DocumentoImpressaoPdv;
+    empresaId?: string;
     agora: string;
   }
 ) {
@@ -154,6 +162,7 @@ export function solicitarReimpressao(
   const trabalho: TrabalhoImpressaoPdv = {
     id: `reimpressao:${chaveDocumento(pedido)}:${sequencia}`,
     vendaId: pedido.vendaId,
+    empresaId: pedido.empresaId,
     emissaoId: pedido.emissaoId,
     documento: pedido.documento,
     origem: "reimpressao",
@@ -323,7 +332,11 @@ export function lerFilaImpressaoPdv(storage: ArmazenamentoImpressao | null): Fil
       return (
         typeof trabalho.id === "string" &&
         typeof trabalho.vendaId === "string" &&
-        (trabalho.documento === "danfe_nfce" || trabalho.documento === "recibo") &&
+        (trabalho.documento === "danfe_nfce" ||
+          trabalho.documento === "recibo" ||
+          ((trabalho.documento === "tef_estabelecimento" || trabalho.documento === "tef_cliente") &&
+            typeof trabalho.empresaId === "string" &&
+            trabalho.empresaId.length > 0)) &&
         (trabalho.estado === "pendente" ||
           trabalho.estado === "executando" ||
           trabalho.estado === "concluido" ||

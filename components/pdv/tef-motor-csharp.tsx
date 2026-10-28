@@ -59,7 +59,8 @@ export function TefMotorCsharpPainel() {
       });
       setEtapa(resposta);
       if (instalacaoAceita(resposta)) {
-        setAviso("Ponto de homologação instalado com sucesso");
+        setPonto("Ponto de homologação instalado.");
+        setAviso(resposta.erro.includes("já está instalado") ? resposta.erro : "Ponto de homologação instalado com sucesso");
         return;
       }
       if (

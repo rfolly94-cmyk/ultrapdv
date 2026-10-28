@@ -39,7 +39,9 @@ public class InstalacaoProducaoTests : IDisposable
         Assert.True(PoliticaComandoProducao.Bloqueado("vender", CodigosPgWeb.AmbienteProducao, false, producao, false));
         Assert.False(PoliticaComandoProducao.Bloqueado("vender", CodigosPgWeb.AmbienteProducao, false, producao, true));
         Assert.False(PoliticaComandoProducao.Bloqueado("confirmar", CodigosPgWeb.AmbienteProducao, false, producao, true));
-        Assert.True(PoliticaComandoProducao.Bloqueado("cancelar", CodigosPgWeb.AmbienteProducao, false, producao, true));
+        Assert.True(PoliticaComandoProducao.Bloqueado("cancelar", CodigosPgWeb.AmbienteProducao, false, producao, false));
+        Assert.False(PoliticaComandoProducao.Bloqueado("cancelar", CodigosPgWeb.AmbienteProducao, false, producao, true));
+        Assert.True(PoliticaComandoProducao.Bloqueado("cancelar", CodigosPgWeb.AmbienteProducao, false, homologacao, true));
         Assert.True(PoliticaComandoProducao.Bloqueado("vender", CodigosPgWeb.AmbienteProducao, false, homologacao, true));
     }
 

@@ -10,7 +10,7 @@ import { carregarSinaisCobranca } from "@/lib/pdv/tef/sinais-cobranca";
 
 export const dynamic = "force-dynamic";
 
-const COMANDOS = new Set(["vender", "instalar", "configurar", "cancelar", "confirmar", "recuperar", "responder", "situacao", "pinpad", "vincular"]);
+const COMANDOS = new Set(["vender", "instalar", "configurar", "cancelar", "confirmar", "recuperar", "responder", "situacao", "pinpad", "vincular", "pendencias"]);
 
 export async function POST(request: Request) {
   const sessao = await obterPermissoesSessao();
@@ -44,6 +44,19 @@ export async function POST(request: Request) {
   }
 
   const comando = typeof corpo?.comando === "string" && COMANDOS.has(corpo.comando) ? corpo.comando : "vender";
+  if (comando === "pendencias") {
+    try {
+      const resposta = await fetch(new URL("/tef/csharp", url), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comando: "pendencias", empresaId: sessao.empresaId }),
+        signal: AbortSignal.timeout(8000),
+      });
+      return Response.json(await resposta.json().catch(() => ({ codigo: "CONECTOR_INDISPONIVEL" })));
+    } catch {
+      return Response.json({ codigo: "CONECTOR_INDISPONIVEL", pagamentoRecebido: false });
+    }
+  }
   let cnpj = "";
   try {
     const supabase = await createClient();
@@ -111,7 +124,7 @@ export async function POST(request: Request) {
         valor: corpo?.valor,
         cancelar: corpo?.cancelar === true,
       }),
-      signal: AbortSignal.timeout(180000),
+      signal: AbortSignal.timeout(300000),
     });
     return Response.json(interpretarRespostaMotor(await resposta.json().catch(() => null)));
   } catch {

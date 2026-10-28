@@ -3,6 +3,13 @@ import "server-only";
 import { buscarVinculoEmpresaAtiva } from "@/lib/empresa/empresa-ativa";
 import { createClient } from "@/lib/supabase/server";
 import {
+  papelComprovanteTef,
+  preferenciaComprovantesTefAusente,
+  preferenciaComprovantesTefDaLinha,
+  sanitizarPreferenciaComprovantesTef,
+  type PreferenciaComprovantesTef,
+} from "./comprovantes-tef";
+import {
   completarConfiguracoesImpressao,
   ehTipoDocumentoImpressao,
   ehUuid,
@@ -109,7 +116,70 @@ export async function buscarConfiguracoesImpressao(dispositivoId: string) {
     usuarioId: ctx.usuarioId,
     dispositivoId,
     configs,
+    comprovantesTef: await lerPreferenciaComprovantesTef(ctx, dispositivoId),
   };
+}
+
+async function lerPreferenciaComprovantesTef(
+  ctx: { supabase: Awaited<ReturnType<typeof createClient>>; empresaId: string; usuarioId: string },
+  dispositivoId: string
+): Promise<PreferenciaComprovantesTef> {
+  const { data, error } = await ctx.supabase
+    .from("impressoes_comprovantes_tef")
+    .select(
+      "empresa_id, usuario_id, dispositivo_id, impressora_nome, papel, imprimir_via_cliente, imprimir_via_estabelecimento, imprimir_recibo_comercial"
+    )
+    .eq("empresa_id", ctx.empresaId)
+    .eq("usuario_id", ctx.usuarioId)
+    .eq("dispositivo_id", dispositivoId)
+    .maybeSingle();
+
+  if (error || !data || data.empresa_id !== ctx.empresaId || data.usuario_id !== ctx.usuarioId) {
+    return preferenciaComprovantesTefAusente();
+  }
+  return preferenciaComprovantesTefDaLinha(data);
+}
+
+export async function salvarPreferenciaComprovantesTef(input: {
+  dispositivoId: string;
+  impressoraNome?: string | null;
+  papel?: string;
+  viaCliente?: boolean;
+  viaEstabelecimento?: boolean;
+  reciboComercial?: boolean;
+}) {
+  if (!ehUuid(input.dispositivoId)) {
+    return { ok: false as const, erro: "Dispositivo inválido." };
+  }
+  const preferencia = sanitizarPreferenciaComprovantesTef({
+    impressoraNome: input.impressoraNome,
+    papel: papelComprovanteTef(input.papel),
+    viaCliente: input.viaCliente,
+    viaEstabelecimento: input.viaEstabelecimento,
+    reciboComercial: input.reciboComercial,
+  });
+  const ctx = await contextoImpressao();
+  if (!ctx.ok) {
+    return ctx;
+  }
+  const { error } = await ctx.supabase.from("impressoes_comprovantes_tef").upsert(
+    {
+      empresa_id: ctx.empresaId,
+      usuario_id: ctx.usuarioId,
+      dispositivo_id: input.dispositivoId,
+      impressora_nome: preferencia.impressoraNome,
+      papel: preferencia.papel,
+      imprimir_via_cliente: preferencia.viaCliente,
+      imprimir_via_estabelecimento: preferencia.viaEstabelecimento,
+      imprimir_recibo_comercial: preferencia.reciboComercial,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "empresa_id,usuario_id,dispositivo_id" }
+  );
+  if (error) {
+    return { ok: false as const, erro: error.message };
+  }
+  return { ok: true as const, preferencia };
 }
 
 export async function salvarConfiguracaoImpressao(input: {

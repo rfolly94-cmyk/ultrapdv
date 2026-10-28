@@ -377,7 +377,6 @@ test("homologação e produção conferem o ponto do próprio ambiente", () => {
 
 test("migration da evidência isola por empresa e não guarda segredo", () => {
   const sql = fonte("supabase/migrations/20261011180000_tef_evidencia_instalacao.sql");
-  const conector = fonte("print-agent/src/tef-prova.mjs");
   assert.match(sql, /Não aplicar automaticamente/);
   assert.match(sql, /tem_acesso_empresa\(empresa_id\)/);
   assert.match(sql, /UNIQUE \(instalacao_id\)/);
@@ -387,8 +386,4 @@ test("migration da evidência isola por empresa e não guarda segredo", () => {
   assert.doesNotMatch(sql, /GRANT INSERT ON public\.tef_evidencias_instalacao TO authenticated/);
   assert.doesNotMatch(sql, /password|senha_paygo|coluna senha/i);
   assert.match(sql, /origem = 'instalacao_controlada'/);
-  assert.match(conector, /ultrapdv-tef-instalacao-v1/);
-  assert.match(conector, /assinarEvidenciaInstalacao/);
-  assert.match(fonte("print-agent/src/tef.mjs"), /observacaoBiblioteca !== true/);
-  assert.match(fonte("print-agent/src/tef.mjs"), /assinarEvidenciaInstalacao/);
 });

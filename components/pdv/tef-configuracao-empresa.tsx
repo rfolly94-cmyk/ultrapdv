@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
 import { cobrarPeloMotorCsharp } from "@/lib/pdv/tef/motor-csharp";
 import { ACAO_REGISTRAR_COMPROVACAO, rotuloSituacaoCredenciamento, type SituacaoCredenciamento } from "@/lib/pdv/tef/credenciamento-comercial";
@@ -39,7 +40,9 @@ export function TefConfiguracaoEmpresa(props: {
   credenciamentoInicial?: boolean;
 }) {
   const [habilitado, setHabilitado] = useState(props.habilitado);
+  const roteador = useRouter();
   const [ambiente, setAmbiente] = useState<AmbienteTefEmpresa>(props.ambiente);
+  const [ambienteAtivo, setAmbienteAtivo] = useState<AmbienteTefEmpresa>(props.ambiente);
   const [dispositivo, setDispositivo] = useState("Consultando o Connector.");
   const [pinpad, setPinpad] = useState("Não testado");
   const [consulta, setConsulta] = useState<RespostaConfig | null>(null);
@@ -54,6 +57,11 @@ export function TefConfiguracaoEmpresa(props: {
   const [servidorDeclarado, setServidorDeclarado] = useState(false);
   const [servidorValidado, setServidorValidado] = useState(false);
   const [autorizaPinPadProducao, setAutorizaPinPadProducao] = useState(false);
+
+  useEffect(() => {
+    setAmbiente(props.ambiente);
+    setAmbienteAtivo(props.ambiente);
+  }, [props.ambiente]);
 
   async function consultarSinais(opcoes?: { preencherServidor?: boolean }) {
     const descoberta = await descobrirUltraPdvConector();
@@ -107,16 +115,23 @@ export function TefConfiguracaoEmpresa(props: {
     setOcupado(true);
     setErro("");
     setAviso("");
-    const resultado = await salvarMotorTefEmpresa({ habilitado, ambiente });
+    const descoberta = await descobrirUltraPdvConector();
+    const resultado = await salvarMotorTefEmpresa({
+      habilitado,
+      ambiente,
+      origem: descoberta.ok ? descoberta.origem : "",
+    });
     setOcupado(false);
     if (!resultado.ok) {
       setErro(resultado.erro);
       return;
     }
+    setAmbienteAtivo(ambiente);
+    roteador.refresh();
     setAviso(
       ambiente === "producao"
-        ? "A escolha de produção foi gravada. Nenhuma cobrança de produção foi habilitada."
-        : "A configuração de homologação desta empresa foi gravada."
+        ? "Ambiente ativo: Produção. As credenciais e os journals de homologação não foram alterados."
+        : "Ambiente ativo: Homologação. As credenciais e os journals de produção não foram alterados."
     );
   }
 
@@ -291,8 +306,11 @@ export function TefConfiguracaoEmpresa(props: {
         <input type="checkbox" checked={habilitado} disabled={!props.administrador || ocupado} onChange={(event) => setHabilitado(event.target.checked)} />
         Habilitar TEF desta empresa
       </label>
+      <p className={`rounded-lg px-3 py-2 text-sm font-semibold ${ambienteAtivo === "producao" ? "bg-emerald-50 text-emerald-950" : "bg-amber-50 text-amber-950"}`}>
+        Ambiente ativo: {ambienteAtivo === "producao" ? "Produção" : "Homologação"}
+      </p>
       <label className="block text-sm text-zinc-900">
-        Ambiente
+        Ambiente TEF
         <select
           className="mt-1 h-10 w-full rounded border border-zinc-300 px-3"
           value={ambiente}

@@ -7,10 +7,15 @@ import {
   salvarIdentificacaoCredenciamento,
 } from "@/lib/pdv/tef/politica-empresa-servidor";
 
-export async function salvarMotorTefEmpresa(input: { habilitado: boolean; ambiente: "homologacao" | "producao" }) {
+export async function salvarMotorTefEmpresa(input: {
+  habilitado: boolean;
+  ambiente: "homologacao" | "producao";
+  origem?: string;
+}) {
   const resultado = await salvarConfiguracaoMotor({
     habilitado: input.habilitado === true,
     ambiente: input.ambiente === "producao" ? "producao" : "homologacao",
+    origem: typeof input.origem === "string" ? input.origem : "",
   });
   if (!resultado.ok) return resultado;
   return { ok: true as const, producaoLiberada: false as const };

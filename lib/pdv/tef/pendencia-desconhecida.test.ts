@@ -152,6 +152,6 @@ test("o caixa não envia resultado desconhecido para confirmação ou desfazimen
   assert.match(shell, /Cobrança bloqueada\. A pendência permanece/);
   assert.equal(shell.includes("/api/pdv/tef/recuperar-simulacao"), false);
   assert.equal(shell.includes("Recuperar pendência TEF"), false);
-  assert.equal(shell.includes("disabled={tefPendencias.length > 0}"), true);
+  assert.match(shell, /if \(!resultadoMotor\.pagamentoRecebido\)/);
   assert.doesNotMatch(shell, /PW_iConfirmation/);
 });

@@ -14,7 +14,7 @@ import {
 import { classificarFormaTef, validarPagamentoMisto, type ModalidadeTef } from "@/lib/pdv/tef/regras";
 import { hashSegredoVinculo } from "@/lib/pdv/tef/prova";
 import { dadosFiscaisDoMotor, type DadosFiscaisMotor } from "@/lib/pdv/tef/fiscal-motor";
-import { decidirComprovanteMotor, decidirRegistroVendaMotor, decidirTratamentoComprovante } from "@/lib/pdv/tef/motor-csharp";
+import { decidirComprovanteMotor, decidirRegistroVendaMotor, decidirTratamentoComprovante, escolherConsultaJournal } from "@/lib/pdv/tef/motor-csharp";
 import { carregarConfiguracaoMotor } from "@/lib/pdv/tef/politica-empresa-servidor";
 import {
   ErroTef,
@@ -84,6 +84,31 @@ async function codigoJournalMotor(origem: string, empresaId: string, chave: stri
   }
 }
 
+async function localizarJournalDaOperacao(
+  origem: string,
+  empresaId: string,
+  chave: string,
+  valorCentavos: number,
+  preferido: "producao" | "homologacao",
+): Promise<{
+  ambiente: "producao" | "homologacao";
+  consulta: { codigo: string; vendaId: string | null; fiscal: DadosFiscaisMotor | null };
+}> {
+  const vazio = { codigo: "", vendaId: null as string | null, fiscal: null as DadosFiscaisMotor | null };
+  const preferida = await codigoJournalMotor(origem, empresaId, chave, valorCentavos, preferido === "producao" ? 0 : 1);
+  const outroAmbiente = preferido === "producao" ? "homologacao" : "producao";
+  const outra = await codigoJournalMotor(origem, empresaId, chave, valorCentavos, outroAmbiente === "producao" ? 0 : 1);
+  const escolha = escolherConsultaJournal({
+    preferido,
+    codigoPreferido: preferida.codigo,
+    codigoOutro: outra.codigo,
+  });
+  if (escolha === "outro") {
+    return { ambiente: outroAmbiente, consulta: outra };
+  }
+  return { ambiente: preferido, consulta: preferida.codigo ? preferida : vazio };
+}
+
 export async function validarTefNaFinalizacao(input: {
   supabase: {
     from: (tabela: string) => {
@@ -94,6 +119,7 @@ export async function validarTefNaFinalizacao(input: {
   usuarioId: string;
   pagamentos: PagamentoTef[];
   motorOrigem?: string | null;
+  ambienteCobranca?: "producao" | "homologacao" | null;
 }) {
   const comprovantes = input.pagamentos.filter((pagamento) => pagamento.motorChave);
   if (comprovantes.length > 0) {
@@ -113,21 +139,30 @@ export async function validarTefNaFinalizacao(input: {
     let suprimirNfceComercial = false;
     let vendaJaRegistradaId = "";
     let registraNova = false;
+    let ambienteOperacao = ambiente;
     const fiscaisMotor: Array<{ chave: string; valorCentavos: number; fiscal: DadosFiscaisMotor }> = [];
     for (const pagamento of comprovantes) {
       const chave = pagamento.motorChave ?? "";
       const modalidade = chave.split(":").at(-2) ?? "";
-      const consulta = input.motorOrigem
-        ? await codigoJournalMotor(
+      const localizado = input.motorOrigem
+        ? await localizarJournalDaOperacao(
             input.motorOrigem,
             input.empresaId,
             chave,
             pagamento.valorCentavos,
-            ambiente === "producao" ? 0 : 1,
+            input.ambienteCobranca === "producao" || input.ambienteCobranca === "homologacao"
+              ? input.ambienteCobranca
+              : ambiente,
           )
-        : { codigo: "", vendaId: null, fiscal: null };
+        : {
+            ambiente: ambiente === "producao" ? "producao" : "homologacao",
+            consulta: { codigo: "", vendaId: null, fiscal: null },
+          };
+      const consulta = localizado.consulta;
+      const ambienteDaOperacao = localizado.ambiente === "producao" ? "producao" : "homologacao";
+      ambienteOperacao = ambienteDaOperacao;
       const decisao = decidirRegistroVendaMotor({
-        ambiente,
+        ambiente: ambienteDaOperacao,
         codigo: consulta.codigo,
         chave,
         modalidade,
@@ -177,7 +212,7 @@ export async function validarTefNaFinalizacao(input: {
       ajustes: [] as Array<{ indice: number; formaPagamentoId: string; aviso: string | null }>,
       suprimirNfceComercial,
       motorComprovado: true as const,
-      ambienteMotor: ambiente,
+      ambienteMotor: ambienteOperacao,
       vendaJaRegistradaId,
       fiscaisMotor,
     };

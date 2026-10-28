@@ -292,7 +292,7 @@ test("página, ação e motor permanecem sem AUTCAP manual e sem publicar o pgwe
     "utf8"
   );
   const servico = readFileSync(new URL("./servico.ts", import.meta.url), "utf8");
-  const motor = readFileSync(new URL("../../../print-agent/src/tef-pgweb.mjs", import.meta.url), "utf8");
+  const motor = readFileSync(new URL("./motor.ts", import.meta.url), "utf8");
   assert.equal(existsSync(new URL("../../../tef-2/agente/PgWebLib.pas", import.meta.url)), false);
   const juntos = `${pagina}\n${acao}\n${formulario}`;
   assert.equal(/autcap|name="capacidades"/i.test(juntos), false);
@@ -447,7 +447,6 @@ test("página, ação e motor permanecem sem AUTCAP manual e sem publicar o pgwe
   assert.match(pinpad, /Identificar Pinpad/);
   assert.match(pinpad, /Testar Comunicação/);
   assert.equal(/LoadLibrary|PGWebLib\.dll|PW_iInit/.test(pinpad), false);
-  assert.match(motor, /MOTOR_PADRAO = "pgweb"/);
   assert.match(motor, /PGWEB2_PRODUCAO = true/);
   assert.match(motor, /ABI_COMPROVADO = false/);
   assert.match(motor, /LAYOUT_HOMOLOGADO = false/);

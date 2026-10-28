@@ -5,6 +5,7 @@ import {
   buscarConfiguracoesImpressao,
   buscarEmissaoAutorizadaDaVenda,
   salvarConfiguracaoImpressao as gravarConfiguracao,
+  salvarPreferenciaComprovantesTef,
 } from "@/lib/impressao/configuracoes-servidor";
 import { gerarPdfSimples, linhasTesteImpressao } from "@/lib/impressao/pdf-simples";
 import { ehPapelImpressao, rotuloTipoDocumentoImpressao } from "@/lib/impressao/regras";
@@ -102,6 +103,41 @@ export async function salvarConfiguracaoImpressaoAction(input: {
   }
 
   return gravarConfiguracao(input);
+}
+
+export async function salvarPreferenciaComprovantesTefAction(input: {
+  dispositivoId: string;
+  impressoraNome?: string | null;
+  papel?: string;
+  viaCliente?: boolean;
+  viaEstabelecimento?: boolean;
+  reciboComercial?: boolean;
+}) {
+  const identidade = await obterIdentidadeEmpresaSessao();
+  if (!identidade?.empresaId) {
+    return { ok: false as const, erro: "Empresa ativa não encontrada." };
+  }
+
+  try {
+    await exigirAcessoOperacao({
+      empresaId: identidade.empresaId,
+      recurso: "impressao_automatica",
+      modulo: "configuracoes",
+      acao: "acessar",
+      origem: "salvarPreferenciaComprovantesTefAction",
+    });
+  } catch (error) {
+    const entitlement = resultadoErroEntitlement(error);
+    if (entitlement) {
+      return entitlement;
+    }
+    if (error instanceof ErroPermissao) {
+      return { ok: false as const, erro: error.message };
+    }
+    throw error;
+  }
+
+  return salvarPreferenciaComprovantesTef(input);
 }
 
 export async function gerarPdfTesteImpressaoAction(input: {

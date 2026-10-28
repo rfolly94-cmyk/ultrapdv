@@ -4,7 +4,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { decidirAmbienteCobranca } from "./habilitacao-producao";
-import { classificarPendenciaSituacao, decidirComprovanteMotor, decidirProximaCobranca, decidirRegistroVendaMotor, faseDaCaptura, haPendenciaFinanceiraNativa, interpretarRespostaMotor, podeRetomarConfirmacao, pontoInstaladoNaSituacao } from "./motor-csharp";
+import { classificarPendenciaSituacao, decidirComprovanteMotor, decidirProximaCobranca, decidirRegistroVendaMotor, escolherConsultaJournal, faseDaCaptura, haPendenciaFinanceiraNativa, interpretarRespostaMotor, podeRetomarConfirmacao, pontoInstaladoNaSituacao } from "./motor-csharp";
 
 test("uma resposta simulada não vira pagamento recebido", () => {
   const resultado = interpretarRespostaMotor({
@@ -85,6 +85,37 @@ test("pagamento confirmado de produção registra a venda e a homologação não
     empresaJournal: empresa,
   });
   assert.equal(credito.acao, "registrar_producao");
+  const pix = decidirRegistroVendaMotor({
+    ambiente: "homologacao",
+    codigo: "venda_confirmada",
+    chave: "11111111-1111-4111-8111-111111111111:pix:100",
+    modalidade: "pix",
+    valorCentavos: 100,
+    empresaSessao: empresa,
+    empresaJournal: empresa,
+  });
+  assert.equal(pix.acao, "registrar_homologacao");
+  assert.equal(pix.suprimirNfce, true);
+  const pixPendente = decidirRegistroVendaMotor({
+    ambiente: "producao",
+    codigo: "venda_pendente",
+    chave: "11111111-1111-4111-8111-111111111111:pix:100",
+    modalidade: "pix",
+    valorCentavos: 100,
+    empresaSessao: empresa,
+    empresaJournal: empresa,
+  });
+  assert.equal(pixPendente.acao, "recusar");
+  assert.equal(escolherConsultaJournal({
+    preferido: "homologacao",
+    codigoPreferido: "ponto_instalado",
+    codigoOutro: "venda_confirmada",
+  }), "outro");
+  assert.equal(escolherConsultaJournal({
+    preferido: "producao",
+    codigoPreferido: "venda_confirmada",
+    codigoOutro: "venda_confirmada",
+  }), "preferido");
   const falha = decidirRegistroVendaMotor({
     ambiente: "producao",
     codigo: "venda_nao_confirmada",
@@ -168,6 +199,20 @@ test("menu, pendência e ciclo aberto não viram outra cobrança nem pagamento",
   ]), "menu");
   assert.equal(faseDaCaptura(1, []), "menu");
   assert.equal(faseDaCaptura(3, []), "pinpad");
+  assert.equal(faseDaCaptura(20, []), "qrcode");
+  const qr = interpretarRespostaMotor({
+    fase: "captura",
+    tipoDado: 20,
+    qrcode: "qr-teste-homologacao",
+    nativo: true,
+    confirmada: true,
+    pagamentoRecebido: true,
+  });
+  assert.equal(qr.fase, "captura");
+  assert.equal(qr.pagamentoRecebido, false);
+  assert.equal(qr.qrcode, "qr-teste-homologacao");
+  assert.equal(qr.comprovantes, null);
+  assert.equal(faseDaCaptura(18, []), "exibicao");
   const moredata = interpretarRespostaMotor({
     fase: "resultado",
     codigoNativo: -2497,
@@ -229,4 +274,38 @@ test("instalação confirmada pela biblioteca não vira pagamento", () => {
   assert.equal(resultado.pagamentoRecebido, false);
   assert.equal(resultado.ok, false);
   assert.equal(resultado.codigo, "instalada");
+  assert.equal(resultado.comprovantes, null);
+});
+
+test("as vias só seguem depois da confirmação e permanecem separadas", () => {
+  const antes = interpretarRespostaMotor({
+    fase: "resultado",
+    nativo: true,
+    confirmada: false,
+    pagamentoRecebido: false,
+    codigo: "aguardando_confirmacao",
+    comprovantes: {
+      viaEstabelecimento: "VIA ESTABELECIMENTO\nLOJA",
+      viaCliente: "VIA CLIENTE\nPORTADOR",
+      rede: "C6 PAY",
+      quando: "2026-10-26T18:23:31.000Z",
+    },
+  });
+  assert.equal(antes.comprovantes, null);
+  const depois = interpretarRespostaMotor({
+    fase: "resultado",
+    nativo: true,
+    confirmada: true,
+    pagamentoRecebido: true,
+    codigo: "confirmada",
+    comprovantes: {
+      viaEstabelecimento: "VIA ESTABELECIMENTO\nLOJA",
+      viaCliente: "VIA CLIENTE\nPORTADOR",
+      rede: "C6 PAY",
+      quando: "2026-10-26T18:23:31.000Z",
+    },
+  });
+  assert.equal(depois.comprovantes?.viaEstabelecimento, "VIA ESTABELECIMENTO\nLOJA");
+  assert.equal(depois.comprovantes?.viaCliente, "VIA CLIENTE\nPORTADOR");
+  assert.equal(depois.comprovantes?.viaEstabelecimento.includes(depois.comprovantes.viaCliente), false);
 });

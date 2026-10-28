@@ -1,6 +1,6 @@
 {
   "nome": "UltraPDV Connector",
-  "executavel": "bin/tef/UltraPDVTef_1316.exe",
+  "motor": "bin/tef/motor/UltraPDV.TEF.Host.exe",
   "dll": "bin/tef/PGWebLib.dll",
   "dllVersao": "4.1.50.924",
   "dllSha256": "d17ac81323396ae172648935b0b797b74705b1ca01c9ae0cd3b2ff78119d4220",

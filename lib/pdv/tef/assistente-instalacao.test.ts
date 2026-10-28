@@ -507,14 +507,14 @@ test("migration do assistente isola por empresa e não guarda segredo", () => {
 test("assistente não grava segredo no navegador nem altera a plataforma", () => {
   const ui = fonte("components/pdv/tef-assistente.tsx");
   const sessao = fonte("lib/pdv/tef/assistente-sessao.ts");
-  const conector = fonte("print-agent/src/tef.mjs");
+  const servidor = fonte("print-agent/src/server.mjs");
   assert.doesNotMatch(ui, /localStorage|sessionStorage/);
   assert.doesNotMatch(ui, /manutencao|PW_iInit|PWOPER_MAINTENANCE/);
   assert.doesNotMatch(sessao, /definirTefPlataforma|from\("tef_plataforma"\)/);
   assert.match(sessao, /consultarEvidenciaDaEmpresa/);
   assert.doesNotMatch(sessao, /PWOPER_INSTALL|PWOPER_MAINTENANCE/);
-  assert.match(conector, /assinarEvidenciaInstalacao/);
-  assert.match(conector, /observacaoBiblioteca !== true/);
+  assert.match(servidor, /\/tef\/csharp/);
+  assert.doesNotMatch(servidor, /GerenciadorPgWeb/);
   const producao = fonte("components/pdv/tef-producao-isolada.tsx");
   assert.match(ui, /TefProducaoIsolada/);
   assert.match(producao, /\/tef\/instalar/);

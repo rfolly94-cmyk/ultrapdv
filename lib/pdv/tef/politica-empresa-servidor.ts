@@ -14,6 +14,7 @@ import {
   type ConfiguracaoTefEmpresa,
 } from "@/lib/pdv/tef/politica-empresa";
 import { classificarServidorComercial } from "@/lib/pdv/tef/servidor-comercial";
+import { decidirTrocaAmbiente, origemLocalDoConector } from "@/lib/pdv/tef/troca-ambiente";
 
 export type IdentidadeEmpresaTef = {
   empresaId: string;
@@ -101,7 +102,11 @@ export async function carregarConfiguracaoMotor(empresaId: string): Promise<Conf
   }
 }
 
-export async function salvarConfiguracaoMotor(input: { habilitado: boolean; ambiente: AmbienteTefEmpresa }) {
+export async function salvarConfiguracaoMotor(input: {
+  habilitado: boolean;
+  ambiente: AmbienteTefEmpresa;
+  origem?: string;
+}) {
   const sessao = await obterPermissoesSessao();
   if (!sessao) {
     return { ok: false as const, erro: "A empresa ativa não foi resolvida." };
@@ -110,6 +115,27 @@ export async function salvarConfiguracaoMotor(input: { habilitado: boolean; ambi
     return { ok: false as const, erro: "Somente o administrador da empresa pode alterar o TEF." };
   }
   const ambiente: AmbienteTefEmpresa = input.ambiente === "producao" ? "producao" : "homologacao";
+  const atual = await carregarConfiguracaoMotor(sessao.empresaId);
+  if (atual.ambiente !== ambiente) {
+    const origem = origemLocalDoConector(String(input.origem ?? ""));
+    if (!origem) {
+      return {
+        ok: false as const,
+        erro: "O Connector local não foi confirmado. A configuração não foi alterada e nenhum journal foi modificado.",
+      };
+    }
+    const pendencias = await lerPendenciasConector(origem, sessao.empresaId);
+    const troca = decidirTrocaAmbiente({
+      ambienteAtual: atual.ambiente,
+      ambienteNovo: ambiente,
+      statuses: pendencias.statuses,
+      motorOcupado: pendencias.motorOcupado,
+      consultaOk: pendencias.consultaOk,
+    });
+    if (!troca.pode) {
+      return { ok: false as const, erro: troca.motivo };
+    }
+  }
   try {
     const admin = createAdminClient();
     const { error } = await admin.from("tef_motor_empresas").upsert(
@@ -127,6 +153,32 @@ export async function salvarConfiguracaoMotor(input: { habilitado: boolean; ambi
     return { ok: true as const };
   } catch {
     return { ok: false as const, erro: "A configuração TEF por empresa ainda não está disponível neste ambiente." };
+  }
+}
+
+async function lerPendenciasConector(origem: string, empresaId: string) {
+  try {
+    const resposta = await fetch(new URL("/tef/csharp", origem), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comando: "pendencias", empresaId }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const corpo = (await resposta.json().catch(() => null)) as {
+      codigo?: unknown;
+      ilegivel?: unknown;
+      statuses?: unknown;
+      motorOcupado?: unknown;
+    } | null;
+    if (!corpo || corpo.codigo !== "pendencias_lidas" || corpo.ilegivel === true) {
+      return { consultaOk: false, statuses: [] as string[], motorOcupado: false };
+    }
+    const statuses = Array.isArray(corpo.statuses)
+      ? corpo.statuses.filter((item): item is string => typeof item === "string")
+      : [];
+    return { consultaOk: true, statuses, motorOcupado: corpo.motorOcupado === true };
+  } catch {
+    return { consultaOk: false, statuses: [] as string[], motorOcupado: false };
   }
 }
 

@@ -100,13 +100,14 @@ test("o fluxo operacional não depende do Connector antigo em 127.0.0.1:18281", 
   }
   assert.equal(existsSync(join(raiz, "print-agent", "src", "homologacao-servidor.mjs")), false);
   const servidor = readFileSync(join(raiz, "print-agent", "src", "server.mjs"), "utf8");
+  assert.match(servidor, /\/tef\/csharp/);
   for (const rota of [
     "/tef/homologacao/pinpad",
     "/tef/homologacao/menu",
     "/tef/homologacao/identidade",
     "/tef/homologacao/instalacao",
   ]) {
-    assert.equal(servidor.includes(rota), true, rota);
+    assert.equal(servidor.includes(rota), false, rota);
   }
   const exigeDescoberta = [
     "components/pdv/tef-pinpad-diagnostico.tsx",

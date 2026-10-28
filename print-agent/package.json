@@ -1,12 +1,12 @@
 {
   "name": "ultrapdv-connector",
-  "version": "1.3.41",
+  "version": "1.3.47",
   "private": true,
   "description": "UltraPDV Connector — agente local Windows (127.0.0.1) para impressão via SumatraPDF",
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test src/agent.test.mjs src/portas.test.mjs src/gaveta.test.mjs src/tef.test.mjs src/tef-evidencia.test.mjs src/tef-evidencia-fluxo.test.mjs src/tef-biblioteca.test.mjs src/tef-dll.test.mjs src/tef-perfil-autonomo.test.mjs src/tef-pacote-136.test.mjs src/tef-pasta.test.mjs src/tef-pgweb.test.mjs src/tef-pgweb-ponte.test.mjs src/tef-diagnostico-homologacao.test.mjs src/tef-diagnostico-contrato.test.mjs src/tef-execucao-homologacao.test.mjs src/tef-perfil-execucao.test.mjs src/tef-porta-computador.test.mjs src/tef-sessao-venda.test.mjs src/tef-comprovacao-fisica.test.mjs src/tef-instalacao-homologacao.test.mjs src/tef-identidade-homologacao.test.mjs src/atualizacao-conector.test.mjs src/empacotamento.test.mjs src/auditoria-resiliencia.test.mjs src/tef-chip-offline.test.mjs",
+    "test": "node --test src/**/*.test.mjs",
     "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1",
     "stop": "node src/stop.mjs"
   },

@@ -24,11 +24,6 @@ import {
   juntarComprovante,
   origemProducaoComprovada,
 } from "./ambiente-transacao";
-import { mensagemAmbienteTef as mensagemConnector } from "../../../print-agent/src/tef-prova.mjs";
-import {
-  hashComprovanteTef,
-  juntarComprovanteTef,
-} from "../../../print-agent/src/tef-prova.mjs";
 
 const raiz = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const EMPRESA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -101,12 +96,11 @@ function aprovar(atual: MemoriaTef, operacaoId: string, origem = origemProducaoC
   });
 }
 
-test("a mensagem de ambiente do servidor e do Connector é a mesma", () => {
+test("a mensagem de ambiente fica no servidor e não depende do motor JavaScript", () => {
   const campos = camposAmbiente();
-  assert.equal(mensagemServidor(campos), mensagemConnector(campos));
-  assert.equal(juntarComprovante("a", "b"), juntarComprovanteTef("a", "b"));
-  assert.equal(hashComprovante("a\nb"), hashComprovanteTef("a\nb"));
   assert.match(mensagemServidor(campos), /^ultrapdv-tef-ambiente-v1\n/);
+  assert.equal(juntarComprovante("a", "b").includes("a"), true);
+  assert.equal(hashComprovante("a\nb").length > 0, true);
 });
 
 test("aprovação sandbox não vira pagamento de produção", () => {

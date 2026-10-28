@@ -57,10 +57,7 @@ export function decidirAmbienteCobranca(input: {
   liberada: boolean;
   comando: string;
 }): { ok: true; ambiente: 0 | 1; finalidade?: "venda_producao" } | { ok: false; erro: string } {
-  if (input.ambienteEmpresa === "producao" && input.comando === "cancelar") {
-    return { ok: false, erro: "O cancelamento de produção não foi iniciado." };
-  }
-  if (input.ambienteEmpresa === "producao" && (input.comando === "vender" || input.comando === "confirmar")) {
+  if (input.ambienteEmpresa === "producao" && (input.comando === "vender" || input.comando === "confirmar" || input.comando === "cancelar")) {
     if (!input.liberada) {
       return { ok: false, erro: "A produção TEF não está habilitada. Nenhuma cobrança foi iniciada." };
     }

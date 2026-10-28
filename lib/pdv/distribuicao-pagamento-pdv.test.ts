@@ -8,8 +8,10 @@ import { avaliarPagamentosPdv } from "./pagamentos-teto";
 import {
   aplicarDigitoMonetarioPdv,
   aplicarValorFormaPdv,
+  atalhoCampoPagamentoPdv,
   centavosParaInputPdv,
   formaAposNavegacaoPdv,
+  ordenarFormasCheckoutPdv,
   pagamentosAberturaPdv,
   preencherRestanteAoSelecionarPdv,
   textoParaCentavosPdv,
@@ -216,10 +218,52 @@ test("7. F2 no pagamento continua concluindo a venda", () => {
   assert.match(shell, /dinheiroAutomatico/);
   assert.match(shell, /formaAposNavegacaoPdv/);
   assert.match(shell, /preencherRestanteAoSelecionarPdv/);
-  assert.match(shell, /restanteCentavos === 0/);
+  assert.match(shell, /event\.key === "F10"/);
+  assert.match(shell, /atalhoCampoPagamentoPdv/);
+  assert.match(shell, /ajustarDinheiro: false/);
+  assert.match(shell, /setDinheiroAutomatico\(false\)/);
+  assert.match(shell, /modalPagamento && \([\s\S]*?h-dvh w-full/);
+  assert.doesNotMatch(shell, /concluirVenda\(\);\s*return;\s*\}\s*if \(formaSelecionadaId\)/);
   assert.doesNotMatch(
     shell.slice(shell.indexOf("data-pagamento-formas")),
     /usarRestante\(forma\.id\)/
+  );
+});
+
+test("editar um campo não redistribui os outros", () => {
+  const editado = aplicarValorFormaPdv({
+    formas,
+    pagamentos: [
+      { formaPagamentoId: "dinheiro", valorTexto: "200,00" },
+      { formaPagamentoId: "pix", valorTexto: "150,00" },
+      { formaPagamentoId: "debito", valorTexto: "0,00" },
+      { formaPagamentoId: "credito", valorTexto: "0,00" },
+    ],
+    totalCentavos: 100000,
+    dinheiroAutomatico: true,
+    formaPagamentoId: "debito",
+    valorTexto: "250,00",
+    ajustarDinheiro: false,
+  });
+  assert.equal(textoParaCentavosPdv(editado.pagamentos.find((item) => item.formaPagamentoId === "dinheiro")?.valorTexto ?? ""), 20000);
+  assert.equal(textoParaCentavosPdv(editado.pagamentos.find((item) => item.formaPagamentoId === "pix")?.valorTexto ?? ""), 15000);
+  assert.equal(textoParaCentavosPdv(editado.pagamentos.find((item) => item.formaPagamentoId === "debito")?.valorTexto ?? ""), 25000);
+});
+
+test("atalhos e ordem visual do caixa", () => {
+  assert.equal(atalhoCampoPagamentoPdv("F4"), "dinheiro");
+  assert.equal(atalhoCampoPagamentoPdv("F5"), "pix");
+  assert.equal(atalhoCampoPagamentoPdv("F6"), "debito");
+  assert.equal(atalhoCampoPagamentoPdv("F7"), "credito");
+  assert.equal(atalhoCampoPagamentoPdv("F8"), null);
+  assert.deepEqual(
+    ordenarFormasCheckoutPdv(formas, {
+      dinheiroId: "dinheiro",
+      pixId: "pix",
+      debitoId: "debito",
+      creditoId: "credito",
+    }).map((forma) => forma.id),
+    ["dinheiro", "pix", "debito", "credito"]
   );
 });
 

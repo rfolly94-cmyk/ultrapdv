@@ -2,7 +2,7 @@ export type TentativaMotorConfirmada = {
   idempotencyKey: string;
   chave: string;
   valorCentavos: number;
-  modalidade: "debito" | "credito";
+  modalidade: "debito" | "credito" | "pix";
   origem: string;
   producao: boolean;
 };
@@ -72,7 +72,7 @@ export function lerTentativaMotor(storage: { getItem(chave: string): string | nu
     const bruto = storage.getItem("ultrapdv.tef.motor.confirmado");
     if (!bruto) return null;
     const valor = JSON.parse(bruto) as Partial<TentativaMotorConfirmada>;
-    if (valor.modalidade !== "debito" && valor.modalidade !== "credito") return null;
+    if (valor.modalidade !== "debito" && valor.modalidade !== "credito" && valor.modalidade !== "pix") return null;
     if (!valor.idempotencyKey || !valor.chave || !valor.origem) return null;
     return {
       idempotencyKey: valor.idempotencyKey,

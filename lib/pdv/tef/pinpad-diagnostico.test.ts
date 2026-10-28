@@ -191,12 +191,10 @@ test("o Connector 1.3.19 não recebe porta manual e não fixa COM7", () => {
     fileURLToPath(new URL("../../../print-agent/src/server.mjs", import.meta.url)),
     "utf8"
   );
-  const rota = servidor.slice(
-    servidor.indexOf('url.pathname === "/tef/pinpad/testar-comunicacao"'),
-    servidor.indexOf('url.pathname === "/tef/inicializar"')
-  );
-  assert.match(rota, /chave !== "acao"/);
-  assert.equal(rota.includes("COM7"), false);
+  assert.equal(servidor.includes('url.pathname === "/tef/pinpad/testar-comunicacao"'), false);
+  assert.equal(servidor.includes('url.pathname === "/tef/inicializar"'), false);
+  assert.equal(servidor.includes("COM7"), false);
+  assert.match(servidor, /\/tef\/csharp/);
   assert.equal(
     existsSync(fileURLToPath(new URL("../../../tef-agent/UltraPDVTef.lpr", import.meta.url))),
     false
