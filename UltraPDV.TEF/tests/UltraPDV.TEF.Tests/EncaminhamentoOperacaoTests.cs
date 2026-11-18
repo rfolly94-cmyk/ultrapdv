@@ -22,5 +22,13 @@ public class EncaminhamentoOperacaoTests
         Assert.False(EncaminhamentoOperacao.ChaveCompativel("configurar", "ins:ponto", true));
         Assert.True(EncaminhamentoOperacao.ChaveCompativel("instalar", "ins:ponto", true));
         Assert.False(EncaminhamentoOperacao.ChaveCompativel("instalar", "cfg:ponto", true));
+
+        Assert.True(EncaminhamentoOperacao.Tentar("administrar", "PWOPER_ADMIN", out var administracao));
+        Assert.Equal(OperacaoPgWeb.Administracao, administracao);
+        Assert.Equal(0x20, administracao);
+        Assert.False(EncaminhamentoOperacao.Tentar("administrar", "PWOPER_SALE", out _));
+        Assert.False(EncaminhamentoOperacao.Tentar("administrar", "PWOPER_COMMTEST", out _));
+        Assert.True(EncaminhamentoOperacao.ChaveCompativel("administrar", "adm:teste", false));
+        Assert.False(EncaminhamentoOperacao.ChaveCompativel("administrar", "venda:teste", false));
     }
 }

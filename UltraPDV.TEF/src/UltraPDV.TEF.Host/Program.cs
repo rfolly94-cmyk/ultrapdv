@@ -50,6 +50,19 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
         };
     }
 
+    if (comando.Comando == "encerrar_pendencia_administrativa")
+    {
+        if (comando.EmpresaId is null || comando.TerminalId is null)
+        {
+            return new RespostaHost("resultado", false, false, false, "EMPRESA_AUSENTE", "A empresa e o terminal precisam ser resolvidos pelo UltraPDV.", false, false, null, null, false, null);
+        }
+
+        var contextoPendencia = new ContextoEmpresa("connector", comando.EmpresaId.Value, comando.TerminalId.Value, "", CodigosPgWeb.AmbienteTeste, "", "homologacao", comando.Diretorio ?? "");
+        var motorPendencia = new MotorPayGo(new RepositorioJournal(comando.RaizJournals ?? @"C:\ProgramData\UltraPDV\tef-empresas"), new CoordenadorSessao());
+        var encerrada = motorPendencia.EncerrarPendenciasAdministrativas(contextoPendencia);
+        return new RespostaHost("resultado", false, false, false, encerrada.Situacao, encerrada.Mensagem, false, false, null, null, false, null);
+    }
+
     if (comando.Comando == "vincular")
     {
         if (comando.EmpresaId is null || comando.TerminalId is null || comando.VendaId is null || string.IsNullOrWhiteSpace(comando.Chave))
@@ -92,19 +105,19 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
 
     var producao = comando.Ambiente == CodigosPgWeb.AmbienteProducao;
     var vendaProducao = producao && comando.AutorizaVendaProducao && comando.Comando is "vender" or "confirmar" or "cancelar";
-    if (producao && comando.Comando is not ("instalar" or "configurar") && !vendaProducao)
+    if (producao && comando.Comando is not ("instalar" or "configurar" or "administrar") && !vendaProducao)
     {
         return new RespostaHost("resultado", false, false, false, "PRODUCAO_NAO_AUTORIZADA", "Produção não está autorizada. Nenhuma cobrança foi iniciada.", false, false, null, null, false, null);
     }
 
-    if (comando.Comando is "instalar" or "configurar")
+    if (comando.Comando is "instalar" or "configurar" or "administrar")
     {
         if (!EncaminhamentoOperacao.Tentar(comando.Comando, comando.OperacaoNativa, out var operacaoNativa))
         {
             return new RespostaHost("resultado", false, false, false, "operacao_divergente", "O comando não corresponde à operação nativa. Nenhuma transação foi iniciada.", false, false, null, null, false, null);
         }
 
-        if ((comando.Comando == "configurar" && operacaoNativa != OperacaoPgWeb.Configuracao) || (comando.Comando == "instalar" && operacaoNativa != OperacaoPgWeb.Instalacao))
+        if ((comando.Comando == "configurar" && operacaoNativa != OperacaoPgWeb.Configuracao) || (comando.Comando == "instalar" && operacaoNativa != OperacaoPgWeb.Instalacao) || (comando.Comando == "administrar" && operacaoNativa != OperacaoPgWeb.Administracao))
         {
             return new RespostaHost("resultado", false, false, false, "operacao_divergente", "O comando não corresponde à operação nativa. Nenhuma transação foi iniciada.", false, false, null, null, false, null);
         }
@@ -123,9 +136,31 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
             }
         }
 
+        if (comando.Comando == "administrar" && comando.ValorCentavos is > 0)
+        {
+            return new RespostaHost("resultado", false, false, false, "valor_invalido", "O menu administrativo não aceita valor. Nenhuma cobrança foi iniciada.", false, false, null, null, false, null);
+        }
+
         if (comando.Ambiente == CodigosPgWeb.AmbienteProducao && comando.Comando == "instalar" && !comando.ServidorComercialValidado)
         {
             return new RespostaHost("resultado", false, false, false, "servidor_nao_validado", "O servidor comercial de produção ainda não foi confirmado pela biblioteca. A instalação não foi iniciada.", false, false, null, null, false, null);
+        }
+    }
+
+    var pontoContexto = "";
+    var servidorContexto = producao ? "producao" : "homologacao";
+    if (!producao && comando.Comando == "instalar")
+    {
+        var ponto = DadosInstalacaoHomologacao.Ponto(comando.Ponto);
+        var servidor = DadosInstalacaoHomologacao.Servidor(comando.Servidor);
+        if (ponto.Length > 0)
+        {
+            pontoContexto = ponto;
+        }
+
+        if (servidor.Length > 0)
+        {
+            servidorContexto = servidor;
         }
     }
 
@@ -135,14 +170,18 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
         comando.TerminalId.Value,
         comando.Cnpj ?? "",
         producao ? CodigosPgWeb.AmbienteProducao : CodigosPgWeb.AmbienteTeste,
-        "",
-        producao ? "producao" : "homologacao",
+        pontoContexto,
+        servidorContexto,
         comando.Diretorio);
     var motor = new MotorPayGo(new RepositorioJournal(comando.RaizJournals ?? Path.GetDirectoryName(comando.Diretorio)!), new CoordenadorSessao());
     var biblioteca = new BibliotecaNativaPgWeb();
     if (vendaProducao)
     {
         biblioteca.AutorizarVendaProducao(BibliotecaNativaPgWeb.FraseVendaProducao);
+    }
+    else if (producao && comando.Comando == "administrar")
+    {
+        biblioteca.AutorizarAdministracaoProducao(BibliotecaNativaPgWeb.FraseAdministracaoProducao);
     }
     else if (producao)
     {
@@ -160,6 +199,7 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
         "vender" => motor.Vender(pedido, biblioteca, captura),
         "instalar" => motor.Instalar(pedido, biblioteca, captura),
         "configurar" => motor.Configurar(pedido, biblioteca, captura),
+        "administrar" => motor.Administrar(pedido, biblioteca, captura),
         "cancelar" => motor.Cancelar(pedido, biblioteca, captura),
         "confirmar" => motor.Confirmar(new PedidoConfirmacao(contexto, pedido.ChaveIdempotencia, ConfirmacaoPgWeb.Automatica), biblioteca),
         "recuperar" => Recuperar(motor, contexto),
@@ -168,11 +208,15 @@ static RespostaHost Executar(ComandoHost comando, JsonSerializerOptions json)
     var recebido = biblioteca.EhNativa && resultado.PagamentoRecebido;
     var confirmada = biblioteca.EhNativa && resultado.ConfirmacaoChamada && resultado.PagamentoRecebido;
     var comprovantes = confirmada ? motor.Comprovantes(contexto, pedido.ChaveIdempotencia) : null;
+    var comprovanteInstalacao = resultado.Situacao == "instalada" && !resultado.PagamentoRecebido
+        ? motor.ComprovanteInstalacao(contexto, pedido.ChaveIdempotencia)
+        : null;
     return new RespostaHost("resultado", recebido, resultado.ConfirmacaoChamada, biblioteca.EhNativa, resultado.Situacao, resultado.Mensagem, false, confirmada, null, null, false, pedido.ChaveIdempotencia)
     {
         ServidorValidado = resultado.ServidorValidado,
         CodigoNativo = resultado.Codigo,
         Comprovantes = comprovantes,
+        ComprovanteInstalacao = comprovanteInstalacao,
     };
 }
 
@@ -193,6 +237,7 @@ internal sealed record ComandoHost(string Comando, Guid? EmpresaId, Guid? Termin
     public bool AutorizaPinPadProducao { get; init; }
     public bool AutorizaVendaProducao { get; init; }
     public bool ServidorComercialValidado { get; init; }
+    public string? Servidor { get; init; }
     public string? EnderecoComercial { get; init; }
     public string? OperacaoNativa { get; init; }
     public string? RaizJournalsAlheia { get; init; }
@@ -218,6 +263,7 @@ internal sealed record RespostaHost(
     public string? VendaId { get; init; }
     public DadosFiscaisVenda? Fiscal { get; init; }
     public ComprovantesTef? Comprovantes { get; init; }
+    public string? ComprovanteInstalacao { get; init; }
 }
 
 file sealed class CapturaLinha : ICapturaOperador

@@ -36,10 +36,15 @@ public static class CodigosPgWeb
 public static class OperacaoPgWeb
 {
     public const byte Instalacao = 0x01;
+
+    /// <summary>PWOPER_ADMIN. O teste de comunicação é uma opção do menu devolvido pela biblioteca.</summary>
     public const byte Administracao = 0x20;
     public const byte Venda = 0x21;
     public const byte CancelamentoVenda = 0x22;
     public const byte Configuracao = 0xFD;
+
+    /// <summary>PWOPER_MAINTENANCE. A versão da biblioteca fecha o PIN-pad e apaga os arquivos do terminal.</summary>
+    public const byte Manutencao = 0xFE;
 }
 
 public static class ConfirmacaoPgWeb
@@ -51,11 +56,20 @@ public static class ConfirmacaoPgWeb
 
 public static class InformacaoPgWeb
 {
+    /// <summary>
+    /// PWINFO_TOTAMNT. Com PWINFO_CURREXP igual a 2, o valor é inteiro em centavos, sem separador.
+    /// </summary>
     public const ushort ValorTotal = 0x25;
     public const ushort Moeda = 0x26;
+    /// <summary>PWINFO_CURREXP. O valor 2 indica que os montantes estão em centavos.</summary>
+    public const ushort ExpoenteMoeda = 0x27;
     public const ushort TipoCartao = 0x29;
     public const ushort NumeroRequisicao = 0x32;
     public const ushort SistemaAutorizador = 0x35;
+    /// <summary>
+    /// PWINFO_VIRTMERCH. Menu de adquirente pedido depois que a operação administrativa já foi aceita.
+    /// O valor deste menu não vem de PW_iGetOperationsEx.
+    /// </summary>
     public const ushort EstabelecimentoVirtual = 0x36;
     public const ushort TipoFinanciamento = 0x3B;
     public const ushort Parcelas = 0x3C;
@@ -76,6 +90,11 @@ public static class InformacaoPgWeb
     public const ushort ComprovanteEstabelecimento = 0x53;
     public const ushort ComprovanteCliente = 0x54;
     public const ushort ComprovanteReduzido = 0x55;
+    /// <summary>
+    /// PWINFO_TRNORIGAMNT. Valor original de um cancelamento ou de uma confirmação de pré-autorização.
+    /// Usa a mesma unidade de PWINFO_TOTAMNT.
+    /// </summary>
+    public const ushort ValorTransacaoOriginal = 0x60;
 
     /// <summary>
     /// PWINFO_AUTHPOSQRCODE. Payload da carteira quando a biblioteca pede PWDAT_DSPQRCODE.
@@ -88,12 +107,19 @@ public static class InformacaoPgWeb
     /// O comprovante reduzido não entra nesta soma.
     /// </summary>
     public const string CapacidadeComViasDiferenciadas = "12";
+    /// <summary>PWINFO_POSID. Identificador do ponto de captura.</summary>
+    public const ushort PontoCaptura = 0x11;
     public const ushort EnderecoAutorizador = 0x05;
     public const ushort PortaAutorizador = 0x07;
     public const ushort DestinoTcpIp = 0x1B;
     public const ushort UsuarioTecnico = 0xF6;
     public const ushort UsaPinPad = 0x7F01;
     public const ushort PortaPinPad = 0x7F02;
+
+    /// <summary>
+    /// PWINFO_LOCALINFO2. Menu de PWOPER_ADMIN devolvido à automação, no formato de PW_iGetOperationsEx.
+    /// </summary>
+    public const ushort LocalInfo2 = 0x7F03;
 
     public const string Credito = "1";
     public const string Debito = "2";

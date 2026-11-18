@@ -275,6 +275,18 @@ test("instalação confirmada pela biblioteca não vira pagamento", () => {
   assert.equal(resultado.ok, false);
   assert.equal(resultado.codigo, "instalada");
   assert.equal(resultado.comprovantes, null);
+  assert.equal(resultado.comprovanteInstalacao, "");
+  const comVia = interpretarRespostaMotor({
+    fase: "resultado",
+    codigo: "instalada",
+    nativo: true,
+    confirmada: false,
+    pagamentoRecebido: false,
+    comprovanteInstalacao: "VIA LOJA\nINSTALACAO",
+  });
+  assert.equal(comVia.pagamentoRecebido, false);
+  assert.equal(comVia.comprovantes, null);
+  assert.equal(comVia.comprovanteInstalacao, "VIA LOJA\nINSTALACAO");
 });
 
 test("as vias só seguem depois da confirmação e permanecem separadas", () => {

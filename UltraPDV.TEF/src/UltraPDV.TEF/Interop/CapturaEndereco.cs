@@ -13,7 +13,11 @@ public static class CapturaEndereco
         var partes = new List<string>();
         Adicionar(partes, previa);
         Adicionar(partes, prompt);
-        Adicionar(partes, mascara);
+        if (identificador is not (InformacaoPgWeb.ValorTotal or InformacaoPgWeb.ValorTransacaoOriginal))
+        {
+            Adicionar(partes, mascara);
+        }
+
         Adicionar(partes, validacao);
         if (identificador == InformacaoPgWeb.DestinoTcpIp)
         {

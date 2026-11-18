@@ -8,11 +8,23 @@ public interface IBibliotecaPgWeb
 
     bool InstalacaoProducaoAutorizada { get; }
 
+    /// <summary>
+    /// Autoriza somente PWOPER_ADMIN no diretório de produção. Não autoriza venda.
+    /// </summary>
+    bool AdministracaoProducaoAutorizada => false;
+
     short DefinirAmbiente(short ambiente);
 
     short Inicializar(string diretorioTrabalho);
 
     short NovaTransacao(byte operacao);
+
+    /// <summary>
+    /// PW_iGetOperationsEx. O tamanho da estrutura é o layout medido de 72 bytes.
+    /// A implementação padrão não consulta a DLL e devolve lista vazia.
+    /// </summary>
+    (short Codigo, IReadOnlyList<OperacaoDisponivel> Operacoes) ListarOperacoes(byte tipoOperacao)
+        => (CodigosPgWeb.Ok, Array.Empty<OperacaoDisponivel>());
 
     short AdicionarParametro(ushort identificador, string valor);
 

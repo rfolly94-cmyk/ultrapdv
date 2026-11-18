@@ -29,6 +29,17 @@ public static class EncaminhamentoOperacao
             return true;
         }
 
+        if (comando == "administrar")
+        {
+            if (OperacaoConflita(operacaoInformada, "PWOPER_ADMIN"))
+            {
+                return false;
+            }
+
+            operacao = OperacaoPgWeb.Administracao;
+            return true;
+        }
+
         return false;
     }
 
@@ -53,6 +64,11 @@ public static class EncaminhamentoOperacao
             }
 
             return !producao || texto.StartsWith("ins:", StringComparison.Ordinal);
+        }
+
+        if (comando == "administrar")
+        {
+            return texto.StartsWith("adm:", StringComparison.Ordinal);
         }
 
         return true;

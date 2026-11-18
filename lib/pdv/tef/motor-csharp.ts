@@ -22,6 +22,7 @@ export type RespostaMotorCsharp = {
     rede: string;
     quando: string;
   } | null;
+  comprovanteInstalacao: string;
   qrcode: string;
 };
 
@@ -62,8 +63,16 @@ export function interpretarRespostaMotor(corpo: unknown): RespostaMotorCsharp {
     codigoNativo,
     servidorValidado: resposta.servidorValidado === true,
     comprovantes: comprovantesDaResposta(resposta, confirmada && pagamentoEfetivo),
+    comprovanteInstalacao: comprovanteInstalacaoDaResposta(resposta, pagamentoEfetivo),
     qrcode: textoViaMotor(resposta.qrcode),
   };
+}
+
+function comprovanteInstalacaoDaResposta(resposta: Record<string, unknown>, pagamentoEfetivo: boolean) {
+  if (pagamentoEfetivo || resposta.codigo !== "instalada") return "";
+  const texto = typeof resposta.comprovanteInstalacao === "string" ? resposta.comprovanteInstalacao.replace(/\0/g, "") : "";
+  if (!texto.trim() || texto.length > 4096) return "";
+  return texto;
 }
 
 function textoViaMotor(valor: unknown) {
@@ -268,7 +277,7 @@ export function decidirTratamentoComprovante(input: {
 
 export async function cobrarPeloMotorCsharp(entrada: {
   origem: string | null;
-  comando?: "vender" | "instalar" | "configurar" | "cancelar" | "confirmar" | "recuperar" | "responder" | "situacao" | "pinpad";
+  comando?: "vender" | "instalar" | "configurar" | "cancelar" | "confirmar" | "recuperar" | "responder" | "situacao" | "pinpad" | "administrar" | "encerrar_pendencia_administrativa";
   modalidade?: string;
   valorCentavos?: number;
   parcelas?: number;

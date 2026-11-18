@@ -79,6 +79,12 @@ public sealed class MotorPayGo
     private int _abortPinPad;
     private string _destinoTcpIpEnviado = "";
     private string _enderecoEsperado = "";
+    private byte _operacao;
+    private bool _manutencaoSelecionada;
+    private string _pontoCadastrado = "";
+    private string _servidorCadastrado = "";
+    private string _recusaMenu = "";
+    private IReadOnlyList<OperacaoDisponivel> _operacoesDisponiveis = Array.Empty<OperacaoDisponivel>();
 
     public MotorPayGo(RepositorioJournal journals, CoordenadorSessao sessoes)
     {
@@ -90,6 +96,11 @@ public sealed class MotorPayGo
 
     public ResultadoMotor Vender(PedidoVenda pedido, IBibliotecaPgWeb biblioteca, ICapturaOperador? captura)
     {
+        if (InstalacaoRevogada(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId))
+        {
+            return Recusa(CodigosPgWeb.NotInst, "ponto_nao_instalado", null, "O ponto de captura não está instalado. Nenhuma cobrança foi iniciada.");
+        }
+
         return ExecutarOperacao(pedido, OperacaoPgWeb.Venda, biblioteca, captura, incluirValor: true);
     }
 
@@ -127,11 +138,6 @@ public sealed class MotorPayGo
             return Recusa(CodigosPgWeb.InvParam, "chave_de_configuracao", null, "A chave de configuração não pode iniciar a instalação. Nenhuma transação foi iniciada.");
         }
 
-        if (PontoInstalado(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId))
-        {
-            return new ResultadoMotor(true, false, false, CodigosPgWeb.Ok, "instalada", ReferenciaInstalacao(pedido.Contexto), null, "O ponto deste terminal já está instalado. Nenhuma nova instalação foi iniciada.");
-        }
-
         return ExecutarOperacao(pedido, OperacaoPgWeb.Instalacao, biblioteca, captura, incluirValor: false);
     }
 
@@ -143,6 +149,26 @@ public sealed class MotorPayGo
         }
 
         return ExecutarOperacao(pedido, OperacaoPgWeb.Configuracao, biblioteca, captura, incluirValor: false);
+    }
+
+    public ResultadoMotor Administrar(PedidoVenda pedido, IBibliotecaPgWeb biblioteca, ICapturaOperador? captura)
+    {
+        if (!pedido.ChaveIdempotencia.StartsWith("adm:", StringComparison.Ordinal))
+        {
+            return Recusa(CodigosPgWeb.InvParam, "chave_de_administracao", null, "A chave não pertence ao menu administrativo. Nenhuma transação foi iniciada.");
+        }
+
+        if (pedido.ValorCentavos != 0)
+        {
+            return Recusa(CodigosPgWeb.InvParam, "valor_invalido", null, "O menu administrativo não aceita valor. Nenhuma cobrança foi iniciada.");
+        }
+
+        if (!PontoInstalado(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId))
+        {
+            return Recusa(CodigosPgWeb.NotInst, "ponto_nao_instalado", null, "O ponto deste terminal não está instalado. O menu administrativo não foi iniciado.");
+        }
+
+        return ExecutarOperacao(pedido, OperacaoPgWeb.Administracao, biblioteca, captura, incluirValor: false);
     }
 
     public ResultadoMotor Cancelar(PedidoVenda pedido, IBibliotecaPgWeb biblioteca, ICapturaOperador? captura)
@@ -243,6 +269,60 @@ public sealed class MotorPayGo
         return _journals.Pendencias(contexto.EmpresaId, contexto.TerminalId);
     }
 
+    public ResultadoMotor EncerrarPendenciasAdministrativas(ContextoEmpresa contexto)
+    {
+        var pendencias = _journals.Pendencias(contexto.EmpresaId, contexto.TerminalId);
+        if (pendencias.Count == 0)
+        {
+            return Recusa(CodigosPgWeb.Ok, "sem_pendencia_administrativa", null, "Não há pendência administrativa para encerrar. Nenhuma cobrança foi iniciada.");
+        }
+
+        if (pendencias.Any(journal => !PendenciaAdministrativaSemCobranca(journal)))
+        {
+            return Recusa(
+                CodigosPgWeb.FromHostPendTrn,
+                "pendencia_financeira_preservada",
+                null,
+                "Há pendência financeira neste terminal. Ela se resolve confirmando ou desfazendo a transação na biblioteca. Nenhuma pendência foi encerrada.");
+        }
+
+        foreach (var journal in pendencias)
+        {
+            _journals.Atualizar(journal with
+            {
+                Status = "recusada",
+                PagamentoRecebido = false,
+                ConfirmacaoChamada = false,
+                AtualizadoEm = DateTimeOffset.UtcNow,
+            });
+        }
+
+        _sessoes.Encerrar(contexto.EmpresaId);
+        return new ResultadoMotor(
+            false,
+            false,
+            false,
+            CodigosPgWeb.Ok,
+            "pendencia_administrativa_encerrada",
+            null,
+            null,
+            "A pendência administrativa foi encerrada. Não havia pagamento nem confirmação exigida pelo Pay&Go. O terminal pode cobrar de novo.");
+    }
+
+    private static bool PendenciaAdministrativaSemCobranca(JournalOperacao journal)
+    {
+        return journal.Operacao == "administracao"
+            && journal.Status == "resultado_desconhecido"
+            && journal.ValorCentavos == 0
+            && !journal.PagamentoRecebido
+            && !journal.ConfirmacaoChamada
+            && string.IsNullOrEmpty(journal.NumeroRequisicao)
+            && string.IsNullOrEmpty(journal.ReferenciaLocal)
+            && string.IsNullOrEmpty(journal.ReferenciaExterna)
+            && string.IsNullOrEmpty(journal.AutorizacaoFiscal)
+            && journal.ConfirmacaoExigida is null or "" or "0";
+    }
+
     public DadosFiscaisVenda? DadosFiscais(ContextoEmpresa contexto, string? chave)
     {
         if (string.IsNullOrWhiteSpace(chave))
@@ -279,7 +359,7 @@ public sealed class MotorPayGo
             return null;
         }
 
-        if (venda.Status != "confirmada" || !venda.PagamentoRecebido || !venda.ConfirmacaoChamada)
+        if (venda.Operacao == "instalacao" || venda.Status != "confirmada" || !venda.PagamentoRecebido || !venda.ConfirmacaoChamada)
         {
             return null;
         }
@@ -298,8 +378,36 @@ public sealed class MotorPayGo
         return new ComprovantesTef(venda.ViaEstabelecimento, venda.ViaCliente, rede, venda.AtualizadoEm.ToString("o"));
     }
 
+    public string? ComprovanteInstalacao(ContextoEmpresa contexto, string? chave)
+    {
+        if (string.IsNullOrWhiteSpace(chave))
+        {
+            return null;
+        }
+
+        var journal = _journals.Buscar(contexto.EmpresaId, contexto.TerminalId, chave);
+        if (journal is null || journal.EmpresaId != contexto.EmpresaId || journal.TerminalId != contexto.TerminalId)
+        {
+            return null;
+        }
+
+        if (journal.Operacao != "instalacao" || journal.Status != "instalada" || journal.PagamentoRecebido)
+        {
+            return null;
+        }
+
+        var vias = new[] { journal.ViaEstabelecimento, journal.ViaCliente }
+            .Where(via => !string.IsNullOrWhiteSpace(via))
+            .Select(via => via!.Trim())
+            .Distinct(StringComparer.Ordinal);
+        var texto = string.Join("\n", vias);
+        return texto.Length == 0 ? null : texto;
+    }
+
     public (string Codigo, string Mensagem, Guid? VendaId) Consultar(ContextoEmpresa contexto, string? chave, int? valorCentavos)
     {
+        EncerrarInstalacoesAbandonadas(contexto.EmpresaId, contexto.TerminalId);
+        ConciliarPontoAusente(contexto);
         var journals = _journals.Listar(contexto.EmpresaId, contexto.TerminalId);
         var instalado = journals.Any(journal => journal.Status == "instalada");
         var semVenda = journals.Count(journal => journal.Operacao == "venda" && journal.Status == "confirmada" && journal.PagamentoRecebido && journal.VendaId is null);
@@ -318,7 +426,9 @@ public sealed class MotorPayGo
                 ? contexto.Ambiente == CodigosPgWeb.AmbienteProducao
                     ? "Ponto de produção instalado."
                     : "Ponto de homologação instalado."
-                : "Ponto não instalado.";
+                : journals.Any(journal => journal.Operacao == "instalacao" && journal.Status == "desinstalada")
+                    ? "O ponto de captura não está instalado. A manutenção removeu a instalação. Uma nova instalação é necessária."
+                    : "Ponto não instalado.";
         if (!string.IsNullOrWhiteSpace(chave))
         {
             var venda = journals.FirstOrDefault(journal => journal.ChaveIdempotencia == chave);
@@ -402,8 +512,9 @@ public sealed class MotorPayGo
 
         if (biblioteca.EhNativa && !biblioteca.OperacaoFinanceiraAutorizada)
         {
-            var operacaoLocal = operacao is OperacaoPgWeb.Instalacao or OperacaoPgWeb.Configuracao;
-            if (!operacaoLocal || !biblioteca.InstalacaoProducaoAutorizada)
+            var instalacao = operacao is OperacaoPgWeb.Instalacao or OperacaoPgWeb.Configuracao && biblioteca.InstalacaoProducaoAutorizada;
+            var administracao = operacao == OperacaoPgWeb.Administracao && biblioteca.AdministracaoProducaoAutorizada;
+            if (!instalacao && !administracao)
             {
                 return Recusa(CodigosPgWeb.InvCall, "autorizacao_ausente", null, "A operação financeira não foi autorizada.");
             }
@@ -411,11 +522,32 @@ public sealed class MotorPayGo
 
         _destinoTcpIpInformado = false;
         _destinoTcpIpEnviado = "";
+        _recusaMenu = "";
+        _operacoesDisponiveis = Array.Empty<OperacaoDisponivel>();
+        _operacao = operacao;
         _producao = pedido.Contexto.Ambiente == CodigosPgWeb.AmbienteProducao;
+        _manutencaoSelecionada = false;
+        _pontoCadastrado = "";
+        _servidorCadastrado = "";
+        if (!_producao && operacao == OperacaoPgWeb.Instalacao)
+        {
+            _pontoCadastrado = DadosInstalacaoHomologacao.Ponto(pedido.Contexto.PontoCaptura);
+            _servidorCadastrado = DadosInstalacaoHomologacao.Servidor(pedido.Contexto.Servidor);
+        }
         _enderecoEsperado = pedido.EnderecoComercial?.Trim() ?? "";
         EncerrarInstalacoesAbandonadas(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId);
-        if (_journals.Pendencias(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId).Count > 0)
+        var pendencias = _journals.Pendencias(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId);
+        if (pendencias.Count > 0)
         {
+            if (operacao != OperacaoPgWeb.Instalacao && pendencias.All(PendenciaAdministrativaSemCobranca))
+            {
+                return Recusa(
+                    CodigosPgWeb.FromHostPendTrn,
+                    "pendencia_administrativa",
+                    null,
+                    "Há uma operação administrativa sem cobrança neste terminal. O Pay&Go não pediu confirmação e nenhum pagamento foi recebido. Encerre essa pendência para cobrar de novo. Nenhuma nova cobrança foi iniciada.");
+            }
+
             var texto = operacao == OperacaoPgWeb.Instalacao
                 ? "Há pendência financeira deste terminal. A instalação não foi iniciada."
                 : "Há pendência desta empresa neste terminal. Nenhuma nova cobrança foi iniciada.";
@@ -458,7 +590,7 @@ public sealed class MotorPayGo
         var marcaLog = operacao == OperacaoPgWeb.Instalacao
             ? MarcaLogAmbiente.Criar(pedido.Contexto.DiretorioDados)
             : MarcaLogAmbiente.Vazia;
-        var ambiente = AplicarAmbienteSePendente(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId, biblioteca, pedido.Contexto.Ambiente);
+        var ambiente = AplicarAmbienteSePendente(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId, biblioteca, pedido.Contexto.Ambiente, operacao == OperacaoPgWeb.Instalacao);
         if (ambiente != CodigosPgWeb.Ok)
         {
             if (operacao == OperacaoPgWeb.Instalacao)
@@ -476,6 +608,17 @@ public sealed class MotorPayGo
             }
 
             return Falha(emCurso, biblioteca, ambiente, "ambiente_recusado", pedido);
+        }
+
+        if (operacao == OperacaoPgWeb.Administracao)
+        {
+            var listagem = biblioteca.ListarOperacoes(CatalogoAdministrativo.TipoLista);
+            if (listagem.Codigo != CodigosPgWeb.Ok)
+            {
+                return Falha(emCurso, biblioteca, listagem.Codigo, "operacao_indisponivel", pedido);
+            }
+
+            _operacoesDisponiveis = listagem.Operacoes;
         }
 
         var transacao = biblioteca.NovaTransacao(operacao);
@@ -576,6 +719,11 @@ public sealed class MotorPayGo
                     var capturaCodigo = ResponderCaptura(biblioteca, captura, capturas[indice], (ushort)indice);
                     if (capturaCodigo == CodigosPgWeb.Cancel)
                     {
+                        if (capturas[indice].TipoDeDado == TipoDadoPgWeb.Menu)
+                        {
+                            return InterromperMenuDaAutomacao(emCurso, biblioteca, pedido);
+                        }
+
                         AbortarPinPadUmaVez(biblioteca);
                         operadorCancelou = true;
                         break;
@@ -676,6 +824,106 @@ public sealed class MotorPayGo
         return _journals.Listar(empresaId, terminalId).Any(journal => journal.Status == "instalada");
     }
 
+    private bool InstalacaoRevogada(Guid empresaId, Guid terminalId)
+    {
+        var journals = _journals.Listar(empresaId, terminalId);
+        var instalada = journals.Any(journal => journal.Status == "instalada");
+        var desinstalada = journals.Any(journal => journal.Operacao == "instalacao" && journal.Status == "desinstalada");
+        return desinstalada && !instalada;
+    }
+
+    private void ConciliarPontoAusente(ContextoEmpresa contexto)
+    {
+        var instaladas = _journals.Listar(contexto.EmpresaId, contexto.TerminalId)
+            .Where(journal => journal.Status == "instalada" && !journal.PagamentoRecebido && journal.Operacao is null or "instalacao")
+            .ToList();
+        if (instaladas.Count == 0 || !RetornoPosteriorDePontoAusente(contexto.DiretorioDados, instaladas.Max(journal => journal.AtualizadoEm)))
+        {
+            return;
+        }
+
+        RevogarInstalacao(contexto.EmpresaId, contexto.TerminalId);
+    }
+
+    private static bool RetornoPosteriorDePontoAusente(string diretorioDados, DateTimeOffset instaladoEm)
+    {
+        if (string.IsNullOrWhiteSpace(diretorioDados))
+        {
+            return false;
+        }
+
+        var pasta = Path.Combine(diretorioDados, "Log");
+        if (!Directory.Exists(pasta))
+        {
+            return false;
+        }
+
+        try
+        {
+            foreach (var arquivo in Directory.EnumerateFiles(pasta, "comms_*.log"))
+            {
+                var nome = Path.GetFileNameWithoutExtension(arquivo);
+                if (nome.Length < 6 || !DateTime.TryParseExact(nome[^6..], "yyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dia))
+                {
+                    continue;
+                }
+
+                foreach (var linha in File.ReadLines(arquivo))
+                {
+                    if (!linha.Contains("<-2498>", StringComparison.Ordinal) || linha.Length < 8)
+                    {
+                        continue;
+                    }
+
+                    if (!TimeSpan.TryParseExact(linha[..8], "hh\\:mm\\:ss", System.Globalization.CultureInfo.InvariantCulture, out var hora))
+                    {
+                        continue;
+                    }
+
+                    var quando = new DateTimeOffset(dia.Year, dia.Month, dia.Day, hora.Hours, hora.Minutes, hora.Seconds, TimeSpan.Zero);
+                    if (quando > instaladoEm.ToUniversalTime())
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private void RevogarInstalacao(Guid empresaId, Guid terminalId)
+    {
+        foreach (var journal in _journals.Listar(empresaId, terminalId))
+        {
+            if (journal.Status != "instalada" || journal.PagamentoRecebido || journal.Operacao == "venda")
+            {
+                continue;
+            }
+
+            if (journal.Operacao is not null && journal.Operacao != "instalacao")
+            {
+                continue;
+            }
+
+            _journals.Atualizar(journal with
+            {
+                Status = "desinstalada",
+                PagamentoRecebido = false,
+                ConfirmacaoChamada = false,
+                AtualizadoEm = DateTimeOffset.UtcNow,
+            });
+        }
+    }
+
     private ResultadoMotor ReconhecerPontoExistente(JournalOperacao emCurso, PedidoVenda pedido, short ambienteGravado)
     {
         _journals.Atualizar(emCurso with
@@ -724,9 +972,9 @@ public sealed class MotorPayGo
         return ambiente == CodigosPgWeb.AmbienteProducao ? "PROD" : "TESTE";
     }
 
-    private short AplicarAmbienteSePendente(Guid empresaId, Guid terminalId, IBibliotecaPgWeb biblioteca, short ambiente)
+    private short AplicarAmbienteSePendente(Guid empresaId, Guid terminalId, IBibliotecaPgWeb biblioteca, short ambiente, bool verificarBiblioteca = false)
     {
-        if (PontoInstalado(empresaId, terminalId))
+        if (!verificarBiblioteca && PontoInstalado(empresaId, terminalId))
         {
             return CodigosPgWeb.Ok;
         }
@@ -775,6 +1023,11 @@ public sealed class MotorPayGo
             return "cancelamento";
         }
 
+        if (operacao == OperacaoPgWeb.Administracao)
+        {
+            return "administracao";
+        }
+
         return "configuracao";
     }
 
@@ -817,8 +1070,14 @@ public sealed class MotorPayGo
             return ConcluirConfiguracao(atualizado, biblioteca, pedido, exigida, mensagem);
         }
 
+        if (operacao == OperacaoPgWeb.Administracao)
+        {
+            return ConcluirAdministracao(atualizado, biblioteca, pedido, exigida, mensagem);
+        }
+
         if (operacao == OperacaoPgWeb.Instalacao)
         {
+            atualizado = ComComprovantes(atualizado, biblioteca);
             if (!biblioteca.EhNativa)
             {
                 _journals.Atualizar(atualizado with { Status = "simulada_sem_pagamento", PagamentoRecebido = false });
@@ -940,6 +1199,22 @@ public sealed class MotorPayGo
         return RegistrarInterrupcao(emCurso, biblioteca, pedido, mensagem);
     }
 
+    private ResultadoMotor InterromperMenuDaAutomacao(JournalOperacao emCurso, IBibliotecaPgWeb biblioteca, PedidoVenda pedido)
+    {
+        if (!string.IsNullOrWhiteSpace(_recusaMenu))
+        {
+            return RegistrarInterrupcao(emCurso, biblioteca, pedido, _recusaMenu);
+        }
+
+        var mensagem = LerTexto(biblioteca, InformacaoPgWeb.MensagemResultado);
+        if (!TextoIndicaCancelamento(mensagem))
+        {
+            mensagem = "OPERAÇÃO CANCELADA";
+        }
+
+        return RegistrarInterrupcao(emCurso, biblioteca, pedido, mensagem);
+    }
+
     private ResultadoMotor RegistrarInterrupcao(JournalOperacao emCurso, IBibliotecaPgWeb biblioteca, PedidoVenda pedido, string? mensagemBiblioteca)
     {
         _ = biblioteca;
@@ -958,6 +1233,16 @@ public sealed class MotorPayGo
     private static bool TextoIndicaCancelamento(string? mensagem)
     {
         return (mensagem ?? "").Contains("CANCELAD", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool EhCancelamentoDeTransacaoAnterior(OpcaoCaptura opcao)
+    {
+        return TextoDeCancelamento(opcao.Texto) || TextoDeCancelamento(opcao.Valor);
+    }
+
+    private static bool TextoDeCancelamento(string texto)
+    {
+        return texto.Trim().Equals("CANCELAMENTO", StringComparison.OrdinalIgnoreCase);
     }
 
     private short ResponderCaptura(IBibliotecaPgWeb biblioteca, ICapturaOperador? captura, PwGetData pedido, ushort indice)
@@ -994,7 +1279,12 @@ public sealed class MotorPayGo
                 return ContinuarPinPad(biblioteca, captura, biblioteca.RemoverCartao());
             case TipoDadoPgWeb.Menu:
                 var opcoes = TextoCaptura.OpcoesValidas(ref pedido);
-                if (opcoes.Count == 1)
+                if (_operacao == OperacaoPgWeb.Administracao)
+                {
+                    return ResponderMenuAdministrativo(biblioteca, captura, pedido, opcoes);
+                }
+
+                if (opcoes.Count == 1 && !EhCancelamentoDeTransacaoAnterior(opcoes[0]))
                 {
                     return biblioteca.AdicionarParametro(pedido.Identificador, opcoes[0].Valor);
                 }
@@ -1129,6 +1419,82 @@ public sealed class MotorPayGo
         };
     }
 
+    private ResultadoMotor ConcluirAdministracao(JournalOperacao atualizado, IBibliotecaPgWeb biblioteca, PedidoVenda pedido, string? exigida, string? mensagem)
+    {
+        if (!biblioteca.EhNativa)
+        {
+            _journals.Atualizar(atualizado with { Status = "simulada_sem_pagamento", PagamentoRecebido = false, ConfirmacaoChamada = false });
+            return new ResultadoMotor(false, false, false, CodigosPgWeb.Ok, "simulacao_nao_e_administracao", atualizado.Identificador, null, mensagem ?? "A simulação não executa o menu administrativo.");
+        }
+
+        var relatorio = RelatorioAdministrativo(biblioteca, mensagem);
+        if (exigida == "1")
+        {
+            var confirmacao = biblioteca.Confirmar(
+                ConfirmacaoPgWeb.Automatica,
+                atualizado.NumeroRequisicao ?? "",
+                atualizado.ReferenciaLocal ?? "",
+                atualizado.ReferenciaExterna ?? "",
+                atualizado.EstabelecimentoVirtual ?? "",
+                atualizado.SistemaAutorizador ?? "");
+            var aceita = confirmacao == CodigosPgWeb.Ok;
+            _journals.Atualizar(ComVias(atualizado, relatorio) with
+            {
+                Status = aceita ? "administrativa" : "recusada",
+                ConfirmacaoChamada = true,
+                PagamentoRecebido = false,
+            });
+            _sessoes.Encerrar(pedido.Contexto.EmpresaId);
+            var texto = string.IsNullOrWhiteSpace(relatorio.Texto) ? "A biblioteca encerrou o menu administrativo." : relatorio.Texto;
+            return AvaliarManutencao(new ResultadoMotor(aceita, false, true, confirmacao, aceita ? "administrativa" : "administracao_recusada", atualizado.Identificador, null, aceita ? texto : "A biblioteca não confirmou o menu administrativo. Nenhuma cobrança foi iniciada."), biblioteca, pedido);
+        }
+
+        var concluida = exigida == "0";
+        _journals.Atualizar(ComVias(atualizado, relatorio) with { Status = concluida ? "administrativa" : "recusada", PagamentoRecebido = false, ConfirmacaoChamada = false });
+        _sessoes.Encerrar(pedido.Contexto.EmpresaId);
+        return AvaliarManutencao(new ResultadoMotor(concluida, false, false, CodigosPgWeb.Ok, concluida ? "administrativa" : "administracao_recusada", atualizado.Identificador, null, relatorio.Texto.Length > 0 ? relatorio.Texto : (concluida ? "A biblioteca concluiu o menu administrativo. Nenhuma cobrança foi iniciada." : "A biblioteca não concluiu o menu administrativo. Nenhuma cobrança foi iniciada.")), biblioteca, pedido);
+    }
+
+    private ResultadoMotor AvaliarManutencao(ResultadoMotor resultado, IBibliotecaPgWeb biblioteca, PedidoVenda pedido)
+    {
+        if (resultado.Situacao != "administrativa" || !_manutencaoSelecionada || !string.IsNullOrWhiteSpace(LerTexto(biblioteca, InformacaoPgWeb.PontoCaptura)))
+        {
+            return resultado;
+        }
+
+        RevogarInstalacao(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId);
+        return resultado with
+        {
+            Concluida = false,
+            PagamentoRecebido = false,
+            Situacao = "ponto_nao_instalado",
+            Mensagem = "A manutenção removeu a instalação do ponto de captura. O PinPad e os parâmetros de comunicação deixaram de valer. Uma nova instalação é necessária. Nenhuma cobrança foi iniciada.",
+        };
+    }
+
+    private (string? Loja, string? Cliente, string Texto) RelatorioAdministrativo(IBibliotecaPgWeb biblioteca, string? mensagem)
+    {
+        var loja = TextoOuNulo(LerTextoAmplo(biblioteca, InformacaoPgWeb.ComprovanteEstabelecimento));
+        var cliente = TextoOuNulo(LerTextoAmplo(biblioteca, InformacaoPgWeb.ComprovanteCliente));
+        var reduzido = TextoOuNulo(LerTextoAmplo(biblioteca, InformacaoPgWeb.ComprovanteReduzido));
+        var partes = new[] { mensagem, loja, cliente, reduzido }.Where(parte => !string.IsNullOrWhiteSpace(parte)).Select(parte => parte!.Trim());
+        return (loja, cliente, string.Join("\n", partes));
+    }
+
+    private static JournalOperacao ComVias(JournalOperacao atualizado, (string? Loja, string? Cliente, string Texto) relatorio)
+    {
+        return atualizado with
+        {
+            ViaEstabelecimento = relatorio.Loja ?? atualizado.ViaEstabelecimento,
+            ViaCliente = relatorio.Cliente ?? atualizado.ViaCliente,
+        };
+    }
+
+    private static string? TextoOuNulo(string? valor)
+    {
+        return string.IsNullOrWhiteSpace(valor) ? null : valor.Trim();
+    }
+
     private ResultadoMotor ConcluirSemPagamento(JournalOperacao atualizado, IBibliotecaPgWeb biblioteca, PedidoVenda pedido, string? exigida, string? mensagem, string statusOk)
     {
         if (!biblioteca.EhNativa)
@@ -1171,8 +1537,73 @@ public sealed class MotorPayGo
         return new ResultadoMotor(concluida, false, false, CodigosPgWeb.Ok, concluida ? statusOk : "execucao_recusada", atualizado.Identificador, null, mensagem ?? (concluida ? "A biblioteca concluiu a operação." : "A biblioteca não informou o resultado."));
     }
 
+    private short ResponderMenuAdministrativo(IBibliotecaPgWeb biblioteca, ICapturaOperador? captura, PwGetData pedido, IReadOnlyList<OpcaoCaptura> opcoes)
+    {
+        if (opcoes.Count == 0)
+        {
+            return CodigosPgWeb.InvParam;
+        }
+
+        if (captura is null || !captura.TentarResponder(pedido, out var valor) || string.IsNullOrWhiteSpace(valor))
+        {
+            return CodigosPgWeb.Cancel;
+        }
+
+        if (!opcoes.Any(opcao => opcao.Valor == valor))
+        {
+            captura.DefinirAviso("Escolha uma opção devolvida pela biblioteca. Nenhum índice foi enviado.");
+            return CodigosPgWeb.Cancel;
+        }
+
+        if (pedido.Identificador != InformacaoPgWeb.LocalInfo2)
+        {
+            return biblioteca.AdicionarParametro(pedido.Identificador, valor);
+        }
+
+        var nativa = _operacoesDisponiveis.FirstOrDefault(item => item.Valor == valor);
+        if (nativa is null)
+        {
+            var textoBiblioteca = LerTexto(biblioteca, InformacaoPgWeb.MensagemResultado);
+            _recusaMenu = string.IsNullOrWhiteSpace(textoBiblioteca)
+                ? "A adquirente não habilitou esta operação. Nenhum valor foi enviado."
+                : textoBiblioteca.Trim();
+            return CodigosPgWeb.Cancel;
+        }
+
+        if (CatalogoAdministrativo.Financeira(nativa.Tipo) && !biblioteca.OperacaoFinanceiraAutorizada)
+        {
+            _recusaMenu = "Esta operação financeira exige autorização explícita. Nenhum valor foi enviado.";
+            return CodigosPgWeb.Cancel;
+        }
+
+        if (CatalogoAdministrativo.AlteraTerminal(nativa.Tipo) && _producao && !biblioteca.InstalacaoProducaoAutorizada)
+        {
+            _recusaMenu = "Esta operação altera parâmetros do terminal e exige autorização explícita. Nenhum valor foi enviado.";
+            return CodigosPgWeb.Cancel;
+        }
+
+        if (nativa.Tipo == OperacaoPgWeb.Manutencao)
+        {
+            _manutencaoSelecionada = true;
+        }
+
+        return biblioteca.AdicionarParametro(pedido.Identificador, nativa.Valor);
+    }
+
     private short ResponderDigitacao(IBibliotecaPgWeb biblioteca, ICapturaOperador? captura, PwGetData pedido)
     {
+        if (_operacao == OperacaoPgWeb.Instalacao && !_producao && pedido.Identificador == InformacaoPgWeb.PontoCaptura && _pontoCadastrado.Length > 0)
+        {
+            return biblioteca.AdicionarParametro(pedido.Identificador, _pontoCadastrado);
+        }
+
+        if (_operacao == OperacaoPgWeb.Instalacao && !_producao && pedido.Identificador == InformacaoPgWeb.DestinoTcpIp && _servidorCadastrado.Length > 0)
+        {
+            _destinoTcpIpInformado = true;
+            _destinoTcpIpEnviado = _servidorCadastrado;
+            return biblioteca.AdicionarParametro(pedido.Identificador, _servidorCadastrado);
+        }
+
         for (var tentativa = 0; tentativa < 4; tentativa++)
         {
             if (captura is null || !captura.TentarResponder(pedido, out var valor))
@@ -1217,6 +1648,17 @@ public sealed class MotorPayGo
                 return biblioteca.AdicionarParametro(pedido.Identificador, valor);
             }
 
+            if (ValorCentavos.EhMontante(pedido.Identificador))
+            {
+                if (!ValorCentavos.Tentar(valor, out var centavos))
+                {
+                    captura?.DefinirAviso("Informe o valor em reais, como 12.345,67. O valor não foi enviado.");
+                    continue;
+                }
+
+                return biblioteca.AdicionarParametro(pedido.Identificador, centavos);
+            }
+
             return biblioteca.AdicionarParametro(pedido.Identificador, valor);
         }
 
@@ -1230,9 +1672,23 @@ public sealed class MotorPayGo
 
     private ResultadoMotor Falha(JournalOperacao journal, IBibliotecaPgWeb biblioteca, short codigo, string situacao, PedidoVenda pedido)
     {
-        var status = situacao == "resultado_desconhecido" ? "resultado_desconhecido" : "recusada";
-        _journals.Atualizar(journal with { Status = status, AtualizadoEm = DateTimeOffset.UtcNow, PagamentoRecebido = false, ConfirmacaoChamada = false });
-        if (situacao == "resultado_desconhecido")
+        var confirmacaoExigida = LerTexto(biblioteca, InformacaoPgWeb.ConfirmacaoRequerida);
+        var administrativaEncerrada = journal.Operacao == "administracao"
+            && journal.ValorCentavos == 0
+            && !journal.PagamentoRecebido
+            && codigo == CodigosPgWeb.FromHost
+            && confirmacaoExigida != "1";
+        var status = situacao == "resultado_desconhecido" && !administrativaEncerrada ? "resultado_desconhecido" : "recusada";
+        var situacaoFinal = administrativaEncerrada ? "recusada" : situacao;
+        _journals.Atualizar(journal with
+        {
+            Status = status,
+            AtualizadoEm = DateTimeOffset.UtcNow,
+            PagamentoRecebido = false,
+            ConfirmacaoChamada = false,
+            ConfirmacaoExigida = confirmacaoExigida,
+        });
+        if (status == "resultado_desconhecido")
         {
             _sessoes.MarcarPendencia(pedido.PinPadId, pedido.Contexto.EmpresaId);
         }
@@ -1245,6 +1701,15 @@ public sealed class MotorPayGo
         var mensagem = string.IsNullOrWhiteSpace(detalhe)
             ? $"A biblioteca retornou {codigo}. A operação não foi confirmada."
             : detalhe;
+        if (codigo == CodigosPgWeb.NotInst && (journal.Operacao == "venda" || situacao == "transacao_recusada"))
+        {
+            RevogarInstalacao(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId);
+            situacaoFinal = "ponto_nao_instalado";
+            if (!mensagem.Contains("nova instalação", StringComparison.OrdinalIgnoreCase))
+            {
+                mensagem += " Nenhuma cobrança foi iniciada. Uma nova instalação é necessária.";
+            }
+        }
         if (codigo == CodigosPgWeb.ConfigRequired && !_destinoTcpIpInformado)
         {
             mensagem += " A biblioteca reutilizou o endereço já gravado e não solicitou PWINFO_DESTTCPIP. O retorno final é PWRET_CONFIGREQUIRED. A troca desse endereço é PWOPER_CONFIG, somente quando essa operação for iniciada manualmente.";
@@ -1253,7 +1718,7 @@ public sealed class MotorPayGo
         {
             mensagem += " O valor de PWINFO_DESTTCPIP foi enviado. Esse campo único precisa estar em host:porta. A biblioteca não abriu outro campo de porta.";
         }
-        return new ResultadoMotor(false, false, false, codigo, situacao, journal.Identificador, null, mensagem);
+        return new ResultadoMotor(false, false, false, codigo, situacaoFinal, journal.Identificador, null, mensagem);
     }
 
     private static JournalOperacao ComDadosFiscais(JournalOperacao journal, IBibliotecaPgWeb biblioteca)
@@ -1400,9 +1865,14 @@ public sealed class MotorPayGo
             return null;
         }
 
-        var texto = Encoding.ASCII.GetString(buffer);
-        var fim = texto.IndexOf('\0');
-        return (fim >= 0 ? texto[..fim] : texto).Trim();
+        var fim = buffer.IndexOf((byte)0);
+        if (fim <= 0)
+        {
+            return null;
+        }
+
+        var texto = Encoding.Latin1.GetString(buffer[..fim]).Trim();
+        return string.IsNullOrWhiteSpace(texto) ? null : texto;
     }
 
     private static ResultadoMotor Recusa(short codigo, string situacao, string? identificador, string mensagem)

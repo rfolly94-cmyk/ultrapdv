@@ -73,6 +73,14 @@ public static class TextoCaptura
         }
     }
 
+    public static unsafe void EscreverTextoMenu(ref PwGetData dados, int indice, string texto)
+    {
+        fixed (byte* destino = dados.TextoMenu)
+        {
+            Escrever(destino + (indice * 41), 41, texto);
+        }
+    }
+
     public static unsafe string Ansi(byte* origem, int capacidade)
     {
         var tamanho = 0;

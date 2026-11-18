@@ -5,6 +5,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { RecursoNaoContratado } from "@/components/plataforma/recurso-nao-contratado";
 import { obterPermissoesSessao } from "@/lib/permissoes/sessao";
 import { TefConfiguracaoEmpresa } from "@/components/pdv/tef-configuracao-empresa";
+import { TefMenuAdministrativo } from "@/components/pdv/tef-menu-administrativo";
 import { TefMotorCsharpPainel } from "@/components/pdv/tef-motor-csharp";
 import { formatarCnpj } from "@/lib/pdv/tef/assistente-instalacao";
 import { carregarConfiguracaoMotor, identidadeEmpresaSessao } from "@/lib/pdv/tef/politica-empresa-servidor";
@@ -91,7 +92,7 @@ export default async function ConfiguracaoTefPage() {
               </div>
               <div>
                 <dt className="text-zinc-500">Instalação</dt>
-                <dd className="font-medium text-zinc-950">Lida neste computador, sem repetir a instalação</dd>
+                <dd className="font-medium text-zinc-950">Lida neste computador. Se a biblioteca não tiver mais o ponto, a instalação pode ser repetida.</dd>
               </div>
               <div>
                 <dt className="text-zinc-500">Ambiente ativo</dt>
@@ -115,6 +116,7 @@ export default async function ConfiguracaoTefPage() {
               />
             ) : null}
             {plano.permitido && motor.ambiente !== "producao" ? <TefMotorCsharpPainel /> : null}
+            {plano.permitido ? <TefMenuAdministrativo /> : null}
           </section>
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold text-zinc-950">O que permanece</h2>

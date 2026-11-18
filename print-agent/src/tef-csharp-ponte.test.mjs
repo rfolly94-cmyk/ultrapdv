@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { continuarCaptura, diretorioEmpresaTef, diretorioProducaoEmpresaTef, normalizarRespostaMotor, pedidoLocalDoMotor, respostaImediataDeInterrupcao } from "./tef-csharp-ponte.mjs";
+import { continuarCaptura, dadosInstalacaoHomologacao, diretorioEmpresaTef, diretorioProducaoEmpresaTef, normalizarRespostaMotor, pedidoLocalDoMotor, respostaImediataDeInterrupcao } from "./tef-csharp-ponte.mjs";
 
 test("vínculo de produção não autoriza nova venda", () => {
   const empresa = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -90,6 +90,97 @@ test("captura não recebe pagamento e remove autorização do pedido", () => {
   }, { raiz: "C:\\temp\\ultrapdv-tef-empresas" });
   assert.equal(pedido.pedido.autorizacao, undefined);
   assert.equal(pedido.pedido.ponto, undefined);
+});
+
+test("menu administrativo de produção fica isolado e não autoriza venda", () => {
+  const empresa = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const terminal = "11111111-1111-1111-1111-111111111111";
+  const raiz = "C:\\temp\\ultrapdv-tef-empresas";
+  const bloqueado = pedidoLocalDoMotor({ comando: "administrar", ambiente: 0, empresaId: empresa, terminalId: terminal, chave: "adm:teste" }, { raiz });
+  assert.equal(bloqueado.bloqueado, true);
+  const pedido = pedidoLocalDoMotor({ comando: "administrar", ambiente: 0, finalidade: "administracao_producao", empresaId: empresa, terminalId: terminal, chave: "adm:teste", operacaoNativa: "PWOPER_ADMIN", ponto: "segredo", autorizaVendaProducao: true }, { raiz });
+  assert.equal(pedido.bloqueado, false);
+  assert.equal(pedido.pedido.comando, "administrar");
+  assert.equal(pedido.pedido.operacaoNativa, "PWOPER_ADMIN");
+  assert.equal(pedido.pedido.ambiente, 0);
+  assert.equal(pedido.pedido.autorizaVendaProducao, false);
+  assert.equal(pedido.pedido.ponto, "");
+  assert.match(pedido.pedido.diretorio, /\\producao\\Data$/);
+  const troca = pedidoLocalDoMotor({ comando: "administrar", ambiente: 0, finalidade: "administracao_producao", empresaId: empresa, terminalId: terminal, chave: "adm:teste", operacaoNativa: "PWOPER_SALE" }, { raiz });
+  assert.equal(troca.bloqueado, true);
+  const homologacao = pedidoLocalDoMotor({ comando: "administrar", empresaId: empresa, terminalId: terminal, chave: "adm:teste" }, { raiz });
+  assert.equal(homologacao.bloqueado, false);
+  assert.equal(homologacao.pedido.ambiente, 1);
+  assert.equal(homologacao.pedido.operacaoNativa, "PWOPER_ADMIN");
+  assert.match(homologacao.pedido.diretorio, /\\Data$/);
+  assert.equal(homologacao.pedido.diretorio.includes("\\producao\\"), false);
+  assert.equal(homologacao.pedido.ponto, "");
+  assert.equal(homologacao.pedido.servidor, "");
+});
+
+test("instalação de homologação reaproveita ponto e servidor válidos", () => {
+  const empresa = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const terminal = "11111111-1111-1111-1111-111111111111";
+  const raiz = "C:\\temp\\ultrapdv-tef-empresas";
+  const pedido = pedidoLocalDoMotor({
+    comando: "instalar",
+    empresaId: empresa,
+    terminalId: terminal,
+    ponto: "200001",
+    servidor: "homolog.teste:31735",
+  }, { raiz });
+  assert.equal(pedido.bloqueado, false);
+  assert.equal(pedido.pedido.ponto, "200001");
+  assert.equal(pedido.pedido.servidor, "homolog.teste:31735");
+  const invalido = pedidoLocalDoMotor({
+    comando: "instalar",
+    empresaId: empresa,
+    terminalId: terminal,
+    ponto: "ponto com espaço",
+    servidor: "comercio.example:31735",
+  }, { raiz });
+  assert.equal(invalido.pedido.ponto, "");
+  assert.equal(invalido.pedido.servidor, "");
+  const venda = pedidoLocalDoMotor({
+    comando: "vender",
+    empresaId: empresa,
+    terminalId: terminal,
+    ponto: "200001",
+    servidor: "homolog.teste:31735",
+  }, { raiz });
+  assert.equal(venda.pedido.ponto, "");
+  assert.equal(venda.pedido.servidor, "");
+  assert.deepEqual(dadosInstalacaoHomologacao("instalar", "200001", "homolog.teste:31735"), {
+    ponto: "200001",
+    servidor: "homolog.teste:31735",
+  });
+  const resposta = normalizarRespostaMotor({
+    fase: "resultado",
+    codigo: "instalada",
+    nativo: true,
+    confirmada: false,
+    pagamentoRecebido: false,
+    comprovanteInstalacao: "VIA LOJA\nINSTALACAO",
+  });
+  assert.equal(resposta.pagamentoRecebido, false);
+  assert.equal(resposta.comprovantes, null);
+  assert.equal(resposta.comprovanteInstalacao, "VIA LOJA\nINSTALACAO");
+});
+
+test("encerrar pendência administrativa não abre transação", () => {
+  const empresa = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const terminal = "11111111-1111-4111-8111-111111111111";
+  const raiz = "C:\\temp\\ultrapdv-tef";
+  const homologacao = pedidoLocalDoMotor({ comando: "encerrar_pendencia_administrativa", empresaId: empresa, terminalId: terminal }, { raiz });
+  assert.equal(homologacao.bloqueado, false);
+  assert.equal(homologacao.pedido.comando, "encerrar_pendencia_administrativa");
+  assert.equal(homologacao.pedido.ambiente, 1);
+  assert.match(homologacao.pedido.diretorio, /\\Data$/);
+  const producao = pedidoLocalDoMotor({ comando: "encerrar_pendencia_administrativa", ambiente: 0, finalidade: "consulta_producao", empresaId: empresa, terminalId: terminal }, { raiz });
+  assert.equal(producao.bloqueado, false);
+  assert.equal(producao.pedido.comando, "encerrar_pendencia_administrativa");
+  assert.equal(producao.pedido.ambiente, 0);
+  assert.equal(producao.pedido.autorizaVendaProducao, false);
 });
 
 test("instalação de produção fica isolada e venda continua bloqueada", () => {

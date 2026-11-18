@@ -82,14 +82,17 @@ public class LayoutNativoTests
     }
 
     [Fact]
-    public void OperationsEx_com_bool_int_nao_entra_na_camada_nativa()
+    public void OperationsEx_entra_na_camada_nativa_com_o_layout_medido_de_72_bytes()
     {
         var medicao = Medicao.Ler(Path.Combine(Raiz, "native", "medicoes", "windows-natural.txt"));
         Assert.Equal(medicao.Tamanho("PW_OperationsEx"), Marshal.SizeOf<HipoteseOperationsExBoolInt>());
-        Assert.Equal(64, (int)Marshal.OffsetOf<HipoteseOperationsExBoolInt>(nameof(HipoteseOperationsExBoolInt.Preferencial)));
-        Assert.Equal(68, (int)Marshal.OffsetOf<HipoteseOperationsExBoolInt>(nameof(HipoteseOperationsExBoolInt.ModoPagamento)));
+        Assert.Equal(72, Marshal.SizeOf<PwOperationsEx>());
+        Assert.Equal(64, (int)Marshal.OffsetOf<PwOperationsEx>(nameof(PwOperationsEx.Preferencial)));
+        Assert.Equal(68, (int)Marshal.OffsetOf<PwOperationsEx>(nameof(PwOperationsEx.ModoPagamento)));
         Assert.Equal(69, Marshal.SizeOf<HipoteseOperationsExPack1>());
-        Assert.DoesNotContain("PwOperationsEx", Fonte("BibliotecaNativaPgWeb.cs"));
+        var fonte = Fonte("BibliotecaNativaPgWeb.cs");
+        Assert.Contains("PW_iGetOperationsEx", fonte);
+        Assert.Contains("PwOperationsEx.TamanhoMedido", fonte);
     }
 
     [Fact]

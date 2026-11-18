@@ -7,10 +7,11 @@ import { interpretarRespostaMotor } from "@/lib/pdv/tef/motor-csharp";
 import { avaliarInicioCobranca } from "@/lib/pdv/tef/politica-empresa";
 import { carregarConfiguracaoMotor } from "@/lib/pdv/tef/politica-empresa-servidor";
 import { carregarSinaisCobranca } from "@/lib/pdv/tef/sinais-cobranca";
+import { lerPerfilHomologacaoEmpresa, lerServidoresPayGoEmpresa } from "@/lib/pdv/tef/persistencia";
 
 export const dynamic = "force-dynamic";
 
-const COMANDOS = new Set(["vender", "instalar", "configurar", "cancelar", "confirmar", "recuperar", "responder", "situacao", "pinpad", "vincular", "pendencias"]);
+const COMANDOS = new Set(["vender", "instalar", "configurar", "cancelar", "confirmar", "recuperar", "responder", "situacao", "pinpad", "vincular", "pendencias", "administrar", "encerrar_pendencia_administrativa"]);
 
 export async function POST(request: Request) {
   const sessao = await obterPermissoesSessao();
@@ -70,7 +71,18 @@ export async function POST(request: Request) {
 
   const config = await carregarConfiguracaoMotor(sessao.empresaId);
   let ambiente: 0 | 1 = 1;
-  let finalidade: "venda_producao" | "vinculo_producao" | undefined;
+  let finalidade: "venda_producao" | "vinculo_producao" | "administracao_producao" | "consulta_producao" | undefined;
+  const chaveInformada = typeof corpo?.chave === "string" ? corpo.chave : "";
+  if (comando === "administrar" && !chaveInformada.startsWith("adm:")) {
+    return Response.json(interpretarRespostaMotor({
+      codigo: "chave_de_administracao",
+      erro: "A chave não pertence ao menu administrativo. Nenhuma transação foi iniciada.",
+    }));
+  }
+  if ((comando === "situacao" || comando === "administrar" || comando === "encerrar_pendencia_administrativa") && config.ambiente === "producao") {
+    ambiente = 0;
+    finalidade = comando === "administrar" ? "administracao_producao" : "consulta_producao";
+  }
   if (comando === "vincular") {
     ambiente = config.ambiente === "producao" ? 0 : 1;
     finalidade = config.ambiente === "producao" ? "vinculo_producao" : undefined;
@@ -106,6 +118,31 @@ export async function POST(request: Request) {
     modalidade = nativa.modalidade;
   }
 
+  if (comando === "vender" && ambiente === 1) {
+    const carregado = await carregarSinaisCobranca(origem, sessao.empresaId);
+    const inicioCobranca = avaliarInicioCobranca(carregado.config, carregado.sinais);
+    if (!inicioCobranca.pode) {
+      return Response.json(interpretarRespostaMotor({
+        codigo: carregado.sinais.pontoInstalado ? "VENDA_BLOQUEADA" : "ponto_nao_instalado",
+        erro: inicioCobranca.mensagem || "O ponto de captura não está instalado. Nenhuma cobrança foi iniciada.",
+      }));
+    }
+  }
+
+  let ponto = "";
+  let servidor = "";
+  if (comando === "instalar" && ambiente === 1) {
+    try {
+      const perfil = await lerPerfilHomologacaoEmpresa(sessao.empresaId);
+      const servidores = await lerServidoresPayGoEmpresa(sessao.empresaId);
+      ponto = perfil.pontoHomologacao;
+      servidor = servidores.servidorHomologacao;
+    } catch {
+      ponto = "";
+      servidor = "";
+    }
+  }
+
   try {
     const resposta = await fetch(new URL("/tef/csharp", url), {
       method: "POST",
@@ -116,13 +153,15 @@ export async function POST(request: Request) {
         cnpj,
         ambiente,
         finalidade,
-        modalidade,
-        valorCentavos: corpo?.valorCentavos,
-        parcelas: corpo?.parcelas,
+        modalidade: comando === "administrar" ? undefined : modalidade,
+        valorCentavos: comando === "administrar" ? 0 : corpo?.valorCentavos,
+        parcelas: comando === "administrar" ? undefined : corpo?.parcelas,
         chave: corpo?.chave,
+        operacaoNativa: comando === "administrar" ? "PWOPER_ADMIN" : undefined,
         sessao: corpo?.sessao,
         valor: corpo?.valor,
         cancelar: corpo?.cancelar === true,
+        ...(comando === "instalar" && ambiente === 1 ? { ponto, servidor } : {}),
       }),
       signal: AbortSignal.timeout(300000),
     });

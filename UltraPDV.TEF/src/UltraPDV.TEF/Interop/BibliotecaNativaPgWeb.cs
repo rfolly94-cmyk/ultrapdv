@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace UltraPDV.TEF.Interop;
 
@@ -13,6 +14,7 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
     public const string FraseHomologacao = "AUTORIZO_OPERACAO_HOMOLOGACAO_PAYGO";
     public const string FraseInstalacaoProducao = "AUTORIZO_INSTALACAO_PRODUCAO_PAYGO";
     public const string FraseVendaProducao = "AUTORIZO_VENDA_PRODUCAO_PAYGO";
+    public const string FraseAdministracaoProducao = "AUTORIZO_ADMINISTRACAO_PRODUCAO_PAYGO";
 
     private static readonly object Trava = new();
     private static bool _resolverRegistrado;
@@ -20,6 +22,7 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
     private bool _autorizada;
     private bool _instalacaoProducao;
     private bool _vendaProducao;
+    private bool _administracaoProducao;
 
     public BibliotecaNativaPgWeb()
     {
@@ -30,9 +33,11 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
 
     public bool OperacaoFinanceiraAutorizada => _vendaProducao
         ? _ambiente == CodigosPgWeb.AmbienteProducao
-        : _autorizada && _ambiente == CodigosPgWeb.AmbienteTeste && !_instalacaoProducao;
+        : _autorizada && _ambiente == CodigosPgWeb.AmbienteTeste && !_instalacaoProducao && !_administracaoProducao;
 
-    public bool InstalacaoProducaoAutorizada => _instalacaoProducao && !_vendaProducao;
+    public bool InstalacaoProducaoAutorizada => _instalacaoProducao && !_vendaProducao && !_administracaoProducao;
+
+    public bool AdministracaoProducaoAutorizada => _administracaoProducao && !_vendaProducao && !_instalacaoProducao;
 
     public IReadOnlyList<string> Chamadas => _chamadas;
 
@@ -42,6 +47,7 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
     {
         _instalacaoProducao = false;
         _vendaProducao = false;
+        _administracaoProducao = false;
         _autorizada = string.Equals(frase, FraseHomologacao, StringComparison.Ordinal);
         if (_autorizada)
         {
@@ -53,21 +59,32 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
     {
         _autorizada = false;
         _vendaProducao = false;
+        _administracaoProducao = false;
         _ambiente = -1;
         _instalacaoProducao = string.Equals(frase, FraseInstalacaoProducao, StringComparison.Ordinal);
+    }
+
+    public void AutorizarAdministracaoProducao(string frase)
+    {
+        _autorizada = false;
+        _vendaProducao = false;
+        _instalacaoProducao = false;
+        _ambiente = -1;
+        _administracaoProducao = string.Equals(frase, FraseAdministracaoProducao, StringComparison.Ordinal);
     }
 
     public void AutorizarVendaProducao(string frase)
     {
         _autorizada = false;
         _instalacaoProducao = false;
+        _administracaoProducao = false;
         _vendaProducao = string.Equals(frase, FraseVendaProducao, StringComparison.Ordinal);
         _ambiente = _vendaProducao ? CodigosPgWeb.AmbienteProducao : (short)-1;
     }
 
     public short DefinirAmbiente(short ambiente)
     {
-        if (_instalacaoProducao || _vendaProducao)
+        if (_instalacaoProducao || _vendaProducao || _administracaoProducao)
         {
             if (ambiente != CodigosPgWeb.AmbienteProducao)
             {
@@ -112,6 +129,51 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
         ExigirAutorizacao();
         _chamadas.Add("PW_iNewTransac");
         return PW_iNewTransac(operacao);
+    }
+
+    public unsafe (short Codigo, IReadOnlyList<OperacaoDisponivel> Operacoes) ListarOperacoes(byte tipoOperacao)
+    {
+        _chamadas.Add("PW_iGetOperationsEx");
+        var tamanho = Marshal.SizeOf<PwOperationsEx>();
+        if (tamanho != PwOperationsEx.TamanhoMedido)
+        {
+            throw new InvalidOperationException("PW_OperationsEx não está no layout medido de 72 bytes. A listagem não foi chamada.");
+        }
+
+        var buffer = new PwOperationsEx[40];
+        short quantidade = (short)buffer.Length;
+        var codigo = PW_iGetOperationsEx(tipoOperacao, buffer, (short)tamanho, ref quantidade);
+        if (codigo != CodigosPgWeb.Ok || quantidade <= 0)
+        {
+            return (codigo, Array.Empty<OperacaoDisponivel>());
+        }
+
+        var limite = Math.Min(quantidade, buffer.Length);
+        var lista = new List<OperacaoDisponivel>(limite);
+        for (var indice = 0; indice < limite; indice++)
+        {
+            var item = buffer[indice];
+            lista.Add(new OperacaoDisponivel(
+                item.Tipo,
+                TextoNativo(item.Nome, 21),
+                TextoNativo(item.Autorizador, 21),
+                TextoNativo(item.Valor, 21),
+                item.Preferencial != 0,
+                item.ModoPagamento));
+        }
+
+        return (codigo, lista);
+    }
+
+    private static unsafe string TextoNativo(byte* origem, int tamanho)
+    {
+        var usado = 0;
+        while (usado < tamanho && origem[usado] != 0)
+        {
+            usado++;
+        }
+
+        return Encoding.Latin1.GetString(origem, usado).Trim();
     }
 
     public short AdicionarParametro(ushort identificador, string valor)
@@ -240,7 +302,7 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
 
     private void ExigirAutorizacao()
     {
-        if (!OperacaoFinanceiraAutorizada && !_instalacaoProducao && !_vendaProducao)
+        if (!OperacaoFinanceiraAutorizada && !_instalacaoProducao && !_vendaProducao && !_administracaoProducao)
         {
             throw new AutorizacaoAusenteException();
         }
@@ -277,6 +339,9 @@ public sealed class BibliotecaNativaPgWeb : IBibliotecaPgWeb
 
     [DllImport("PGWebLib.dll", CallingConvention = CallingConvention.StdCall)]
     private static extern short PW_iNewTransac(byte operacao);
+
+    [DllImport("PGWebLib.dll", CallingConvention = CallingConvention.StdCall)]
+    private static extern short PW_iGetOperationsEx(byte tipo, [Out] PwOperationsEx[] operacoes, short tamanhoEstrutura, ref short quantidade);
 
     [DllImport("PGWebLib.dll", CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
     private static extern short PW_iAddParam(ushort identificador, string valor);

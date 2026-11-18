@@ -370,7 +370,32 @@ test("impressão de teste chama Sumatra com argumentos separados e limpa tempor�
   assert.deepEqual(argsUsados.slice(0, 3), ["-print-to", "ELGIN i9", "-silent"]);
   assert.equal(argsUsados.includes("-print-settings"), true);
   assert.match(argsUsados[4], /2x/);
+  assert.match(argsUsados[4], /shrink/);
+  assert.doesNotMatch(argsUsados[4], /\bfit\b/);
   assert.equal(removidos.length, 1);
+});
+
+test("bobina 58 mm e 80 mm não ampliam a página", () => {
+  for (const papel of ["58mm", "80mm"]) {
+    const args = montarArgsSumatra({
+      impressora: "ELGIN i9",
+      arquivo: "C:\\tmp\\doc.pdf",
+      copias: 1,
+      papel,
+    });
+    const ajustes = args[4];
+    assert.match(ajustes, /shrink/);
+    assert.doesNotMatch(ajustes, /\bfit\b/);
+    assert.doesNotMatch(ajustes, /paper=/);
+  }
+  const a4 = montarArgsSumatra({
+    impressora: "HP",
+    arquivo: "C:\\tmp\\doc.pdf",
+    papel: "a4",
+  });
+  assert.match(a4[4], /paper=A4/);
+  assert.match(a4[4], /shrink/);
+  assert.doesNotMatch(a4[4], /\bfit\b/);
 });
 
 test("erro de impressão ainda limpa temporário e o servidor segue vivo", async () => {
@@ -998,9 +1023,9 @@ test("log de impressão registra motor, exit code e apaga o temporário", async 
   assert.equal(removidos.length, 1);
 });
 
-test("versão 1.3.47 e faixa de portas 18181–18190 permanecem", () => {
+test("versão 1.3.54 e faixa de portas 18181–18190 permanecem", () => {
   const versao = JSON.parse(fonte("../version.json"));
-  assert.equal(versao.version, "1.3.47");
+  assert.equal(versao.version, "1.3.54");
   assert.equal(versao.agenteTef, "");
   const pagina = fonte("pagina-status.html");
   assert.match(pagina, /id="rodapeConector"/);

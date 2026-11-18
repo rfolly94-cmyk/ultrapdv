@@ -11,12 +11,12 @@ public static class PoliticaComandoProducao
             return false;
         }
 
-        if (comando is "situacao" or "vincular")
+        if (comando is "situacao" or "vincular" or "encerrar_pendencia_administrativa")
         {
             return comando == "vincular" && !DiretorioIsolado(diretorio);
         }
 
-        if (comando is "instalar" or "configurar" && DiretorioIsolado(diretorio))
+        if (comando is "instalar" or "configurar" or "administrar" && DiretorioIsolado(diretorio))
         {
             return false;
         }

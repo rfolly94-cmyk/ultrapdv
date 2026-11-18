@@ -847,6 +847,8 @@ export function PdvShell({
   ] = useState<
     string | null
   >(null);
+  const [codigoErroPagamento, setCodigoErroPagamento] = useState("");
+  const [encerrandoPendencia, setEncerrandoPendencia] = useState(false);
 
   const [
     ultimaVenda,
@@ -2217,6 +2219,21 @@ export function PdvShell({
     );
   }
 
+  async function encerrarPendenciaAdministrativa() {
+    if (!conectorOrigem || encerrandoPendencia) return;
+    setEncerrandoPendencia(true);
+    try {
+      const resultado = await cobrarPeloMotorCsharp({
+        origem: conectorOrigem,
+        comando: "encerrar_pendencia_administrativa",
+      });
+      setCodigoErroPagamento(resultado.codigo);
+      setErroPagamento(resultado.erro);
+    } finally {
+      setEncerrandoPendencia(false);
+    }
+  }
+
   function concluirVenda(pagamentosInformados?: PagamentoDigitado[] | unknown) {
     const informados = Array.isArray(pagamentosInformados) ? pagamentosInformados : undefined;
     const pagamentosDaConclusao = informados
@@ -2237,6 +2254,7 @@ export function PdvShell({
     setErroPagamento(
       null
     );
+    setCodigoErroPagamento("");
 
     if (
       carrinho.length === 0
@@ -2597,6 +2615,7 @@ export function PdvShell({
           }
           if (!resultadoMotor.pagamentoRecebido) {
             setEstadoConclusaoTef(resultadoMotor.codigo.includes("desconhecido") ? "resultado_desconhecido" : "recusada");
+            setCodigoErroPagamento(resultadoMotor.codigo);
             setErroPagamento(resultadoMotor.erro);
             return;
           }
@@ -4725,6 +4744,16 @@ export function PdvShell({
             {erroPagamento && (
               <div className="mt-3 whitespace-pre-line rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
                 {erroPagamento}
+                {codigoErroPagamento === "pendencia_administrativa" ? (
+                  <button
+                    type="button"
+                    disabled={encerrandoPendencia}
+                    className="mt-3 block rounded bg-zinc-900 px-3 py-2 font-semibold text-white disabled:bg-zinc-400"
+                    onClick={() => void encerrarPendenciaAdministrativa()}
+                  >
+                    {encerrandoPendencia ? "Encerrando..." : "Encerrar pendência administrativa"}
+                  </button>
+                ) : null}
                 {tefPendencias.length > 0 ? (
                   <p className="mt-2">Cobrança bloqueada. A pendência permanece. A conferência fica em Configurações, Financeiro, TEF.</p>
                 ) : null}

@@ -74,6 +74,98 @@ public class FluxoPayGoTests : IDisposable
     }
 
     [Fact]
+    public void Host_encerra_administracao_sem_confirmacao_e_nao_bloqueia_cobranca()
+    {
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.ProximaExecucao = CodigosPgWeb.FromHost;
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "TRANSACAO NAO ENCONTRADA";
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var motor = new MotorPayGo(journals, new CoordenadorSessao());
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:host", 0, "", 1, "pinpad");
+
+        var resultado = motor.Administrar(pedido, biblioteca, null);
+        var journal = journals.Buscar(_empresaA, _terminalA, "adm:host");
+        var seguinte = motor.Vender(Pedido(_empresaA, _terminalA, "debito-depois", InformacaoPgWeb.Debito, 1), BibliotecaDeVenda(), null);
+
+        Assert.Equal("recusada", resultado.Situacao);
+        Assert.Contains("TRANSACAO NAO ENCONTRADA", resultado.Mensagem);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.Equal("recusada", journal?.Status);
+        Assert.NotEqual("pendencia_administrativa", seguinte.Situacao);
+        Assert.NotEqual("pendencia_anterior", seguinte.Situacao);
+    }
+
+    [Fact]
+    public void Administracao_com_confirmacao_exigida_permanece_desconhecida()
+    {
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.ProximaExecucao = CodigosPgWeb.FromHost;
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "1";
+        new RepositorioJournal(_raiz).Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var motor = CriarMotor();
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:pendente", 0, "", 1, "pinpad");
+
+        var resultado = motor.Administrar(pedido, biblioteca, null);
+        var seguinte = motor.Vender(Pedido(_empresaA, _terminalA, "debito-bloqueado", InformacaoPgWeb.Debito, 1), BibliotecaDeVenda(), null);
+
+        Assert.Equal("resultado_desconhecido", resultado.Situacao);
+        Assert.Equal("pendencia_anterior", seguinte.Situacao);
+    }
+
+    [Fact]
+    public void Operador_encerra_pendencia_administrativa_sem_cobranca()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "adm-antiga", "adm:antiga", "resultado_desconhecido", 0, false, false, DateTimeOffset.UtcNow, Operacao: "administracao"));
+        var motor = CriarMotor();
+
+        var encerrada = motor.EncerrarPendenciasAdministrativas(Contexto(_empresaA, _terminalA));
+        var journal = journals.Buscar(_empresaA, _terminalA, "adm:antiga");
+        var seguinte = motor.Vender(Pedido(_empresaA, _terminalA, "debito-livre", InformacaoPgWeb.Debito, 1), BibliotecaDeVenda(), null);
+
+        Assert.Equal("pendencia_administrativa_encerrada", encerrada.Situacao);
+        Assert.Equal("recusada", journal?.Status);
+        Assert.False(journal?.PagamentoRecebido);
+        Assert.NotEqual("pendencia_administrativa", seguinte.Situacao);
+        Assert.NotEqual("pendencia_anterior", seguinte.Situacao);
+    }
+
+    [Fact]
+    public void Operador_nao_encerra_venda_com_resultado_desconhecido()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "venda-desconhecida", "venda-desconhecida", "resultado_desconhecido", 6500, false, false, DateTimeOffset.UtcNow, Operacao: "venda"));
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "adm-antiga", "adm:antiga", "resultado_desconhecido", 0, false, false, DateTimeOffset.UtcNow, Operacao: "administracao"));
+        var motor = CriarMotor();
+
+        var encerrada = motor.EncerrarPendenciasAdministrativas(Contexto(_empresaA, _terminalA));
+
+        Assert.Equal("pendencia_financeira_preservada", encerrada.Situacao);
+        Assert.Equal("resultado_desconhecido", journals.Buscar(_empresaA, _terminalA, "venda-desconhecida")?.Status);
+        Assert.Equal("resultado_desconhecido", journals.Buscar(_empresaA, _terminalA, "adm:antiga")?.Status);
+    }
+
+    [Fact]
+    public void Cobranca_avisa_pendencia_administrativa_sem_iniciar_transacao()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "adm-antiga", "adm:antiga", "resultado_desconhecido", 0, false, false, DateTimeOffset.UtcNow, Operacao: "administracao"));
+        var biblioteca = BibliotecaDeVenda();
+
+        var resultado = CriarMotor().Vender(Pedido(_empresaA, _terminalA, "debito-novo", InformacaoPgWeb.Debito, 1), biblioteca, null);
+
+        Assert.Equal("pendencia_administrativa", resultado.Situacao);
+        Assert.Contains("Encerre essa pendência", resultado.Mensagem);
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.StartsWith("PW_iNewTransac", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Consulta_le_o_ponto_e_a_venda_confirmada_sem_biblioteca()
     {
         var journals = new RepositorioJournal(_raiz);
@@ -148,8 +240,12 @@ public class FluxoPayGoTests : IDisposable
         Assert.Equal("ponto_instalado", consulta.Codigo);
         Assert.Contains("homologação", consulta.Mensagem);
         Assert.Equal("instalada", repetida.Situacao);
-        Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada == "PW_iSetEnvironment"));
-        Assert.Null(new RepositorioJournal(_raiz).Buscar(_empresaA, _terminalA, "instala-de-novo"));
+        Assert.False(repetida.PagamentoRecebido);
+        Assert.Equal(2, biblioteca.Chamadas.Count(chamada => chamada == "PW_iSetEnvironment"));
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.StartsWith("PW_iNewTransac", StringComparison.Ordinal));
+        var repetidaJournal = new RepositorioJournal(_raiz).Buscar(_empresaA, _terminalA, "instala-de-novo");
+        Assert.Equal("instalada", repetidaJournal?.Status);
+        Assert.False(repetidaJournal!.PagamentoRecebido);
     }
 
     [Fact]
@@ -354,7 +450,8 @@ public class FluxoPayGoTests : IDisposable
         Assert.Equal("interrompida", recusa.Situacao);
         Assert.False(recusa.PagamentoRecebido);
         Assert.Contains("CANCELADA", recusa.Mensagem);
-        Assert.Contains("PW_iPPAbort", biblioteca.Chamadas);
+        Assert.DoesNotContain("PW_iPPAbort", biblioteca.Chamadas);
+        Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada == "PW_iExecTransac"));
         Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
 
         var seguinte = BibliotecaDeVenda();
@@ -384,7 +481,8 @@ public class FluxoPayGoTests : IDisposable
         Assert.False(resultado.PagamentoRecebido);
         Assert.False(resultado.ConfirmacaoChamada);
         Assert.Equal("OPERACAO CANCELADA", resultado.Mensagem);
-        Assert.Contains("PW_iPPAbort", biblioteca.Chamadas);
+        Assert.DoesNotContain("PW_iPPAbort", biblioteca.Chamadas);
+        Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada == "PW_iExecTransac"));
         Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
         Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada.StartsWith("PW_iNewTransac", StringComparison.Ordinal)));
     }
@@ -393,10 +491,10 @@ public class FluxoPayGoTests : IDisposable
     public void Cancelamento_depois_da_autorizacao_desfaz_e_nao_recebe_pagamento()
     {
         var biblioteca = BibliotecaDeVenda();
-        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
-        biblioteca.ValoresMenu = ["01", "02"];
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Cartao;
+        biblioteca.BloquearEventoAteAbortar = true;
         biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "TRANSACAO AUTORIZADA";
-        var resultado = CriarMotor().Vender(Pedido(_empresaA, _terminalA, "menu-desfazer", InformacaoPgWeb.Debito, 1), biblioteca, new CapturaQueCancela());
+        var resultado = CriarMotor().Vender(Pedido(_empresaA, _terminalA, "menu-desfazer", InformacaoPgWeb.Debito, 1), biblioteca, new CapturaCancelaNoPinPad());
 
         Assert.Equal("interrompida", resultado.Situacao);
         Assert.False(resultado.PagamentoRecebido);
@@ -415,7 +513,7 @@ public class FluxoPayGoTests : IDisposable
         biblioteca.OperacaoFinanceiraAutorizada = true;
         biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
         biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "TRANSACAO AUTORIZADA";
-        var resultado = CriarMotor().Vender(Pedido(_empresaA, _terminalA, "menu-aprovada", InformacaoPgWeb.Debito, 1), biblioteca, new CapturaQueCancela());
+        var resultado = CriarMotor().Vender(Pedido(_empresaA, _terminalA, "menu-aprovada", InformacaoPgWeb.Debito, 1), biblioteca, new CapturaFixa("01"));
 
         Assert.Equal("aprovada_sem_confirmacao", resultado.Situacao);
         Assert.True(resultado.PagamentoRecebido);
@@ -806,6 +904,354 @@ public class FluxoPayGoTests : IDisposable
         Assert.DoesNotContain(pinpad.Parametros, item => item.Identificador == 0x7F50);
     }
 
+    [Fact]
+    public void Menu_administrativo_encaminha_a_opcao_da_biblioteca_sem_cobranca()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var motor = CriarMotor();
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
+        biblioteca.IdentificadorCaptura = 0x1F;
+        biblioteca.ValoresMenu = ["Teste de comunicação", "Outra opção"];
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "COMUNICACAO OK";
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:teste", 0, "", 1, "pinpad");
+
+        var resultado = motor.Administrar(pedido, biblioteca, new CapturaFixa("Teste de comunicação"));
+
+        Assert.Equal("administrativa", resultado.Situacao);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.False(resultado.ConfirmacaoChamada);
+        Assert.Equal("COMUNICACAO OK", resultado.Mensagem);
+        Assert.Contains("PW_iNewTransac:20", biblioteca.Chamadas);
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.Contains(":21", StringComparison.Ordinal) || chamada.Contains(":14", StringComparison.Ordinal));
+        Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ValorTotal);
+        Assert.Equal("Teste de comunicação", biblioteca.UltimoValor);
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor is "14" or "20" or "0x14");
+        var journal = journals.Buscar(_empresaA, _terminalA, "adm:teste");
+        Assert.Equal("administracao", journal?.Operacao);
+        Assert.Equal("administrativa", journal?.Status);
+        Assert.False(journal?.PagamentoRecebido);
+        Assert.Null(journal?.ViaCliente);
+        Assert.Null(journal?.ViaEstabelecimento);
+    }
+
+    [Fact]
+    public void Manutencao_sem_ponto_revoga_a_instalacao_e_pede_nova()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var venda = new JournalOperacao(_empresaA, _terminalA, Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "venda-antiga", "venda-antiga", "confirmada", 100, true, true, DateTimeOffset.UtcNow, Operacao: "venda");
+        journals.Gravar(venda);
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
+        biblioteca.IdentificadorCaptura = InformacaoPgWeb.LocalInfo2;
+        biblioteca.ValoresMenu = ["254"];
+        biblioteca.TextosMenu = ["MANUTENÇÃO"];
+        biblioteca.OperacoesListadas = [new OperacaoDisponivel(OperacaoPgWeb.Manutencao, "MANUTENÇÃO", "", "254", false, 0)];
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "TRANSACAO OK";
+        var motor = CriarMotor();
+
+        var resultado = motor.Administrar(new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:manutencao", 0, "", 1, "pinpad"), biblioteca, new CapturaFixa("254"));
+        var consulta = motor.Consultar(Contexto(_empresaA, _terminalA), null, null);
+        var seguinte = motor.Vender(Pedido(_empresaA, _terminalA, "venda-depois", InformacaoPgWeb.Debito, 1), biblioteca, null);
+
+        Assert.Equal("ponto_nao_instalado", resultado.Situacao);
+        Assert.Contains("nova instalação", resultado.Mensagem);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.False(resultado.ConfirmacaoChamada);
+        Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.Contains(":21", StringComparison.Ordinal));
+        Assert.Equal("desinstalada", journals.Buscar(_empresaA, _terminalA, "instala")?.Status);
+        Assert.False(journals.Buscar(_empresaA, _terminalA, "instala")!.PagamentoRecebido);
+        Assert.Equal("confirmada", journals.Buscar(_empresaA, _terminalA, "venda-antiga")?.Status);
+        Assert.True(journals.Buscar(_empresaA, _terminalA, "venda-antiga")!.PagamentoRecebido);
+        Assert.Equal("ponto_nao_instalado", consulta.Codigo);
+        Assert.Contains("nova instalação", consulta.Mensagem);
+        Assert.Equal("ponto_nao_instalado", seguinte.Situacao);
+        Assert.False(seguinte.PagamentoRecebido);
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.Contains(":21", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Manutencao_que_ainda_informa_o_ponto_mantem_a_instalacao()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
+        biblioteca.IdentificadorCaptura = InformacaoPgWeb.LocalInfo2;
+        biblioteca.ValoresMenu = ["254"];
+        biblioteca.OperacoesListadas = [new OperacaoDisponivel(OperacaoPgWeb.Manutencao, "MANUTENÇÃO", "", "254", false, 0)];
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "TRANSACAO OK";
+        biblioteca.Resultados[InformacaoPgWeb.PontoCaptura] = "200001";
+        var motor = CriarMotor();
+
+        var resultado = motor.Administrar(new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:manutencao-ok", 0, "", 1, "pinpad"), biblioteca, new CapturaFixa("254"));
+
+        Assert.Equal("administrativa", resultado.Situacao);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.Equal("instalada", journals.Buscar(_empresaA, _terminalA, "instala")?.Status);
+        Assert.Equal("ponto_instalado", motor.Consultar(Contexto(_empresaA, _terminalA), null, null).Codigo);
+    }
+
+    [Fact]
+    public void Venda_com_biblioteca_sem_ponto_nao_cobra_e_nao_repete()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.CodigoNovaTransacao = CodigosPgWeb.NotInst;
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "PONTO DE CAPTURA NAO INSTALADO";
+        var motor = CriarMotor();
+
+        var primeira = motor.Vender(Pedido(_empresaA, _terminalA, "venda-ausente", InformacaoPgWeb.Debito, 1), biblioteca, null);
+        var segunda = motor.Vender(Pedido(_empresaA, _terminalA, "venda-bloqueada", InformacaoPgWeb.Debito, 1), biblioteca, null);
+
+        Assert.Equal("ponto_nao_instalado", primeira.Situacao);
+        Assert.Contains("PONTO DE CAPTURA NAO INSTALADO", primeira.Mensagem);
+        Assert.Contains("nova instalação", primeira.Mensagem);
+        Assert.False(primeira.PagamentoRecebido);
+        Assert.False(primeira.ConfirmacaoChamada);
+        Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
+        Assert.Equal("desinstalada", journals.Buscar(_empresaA, _terminalA, "instala")?.Status);
+        Assert.Equal("recusada", journals.Buscar(_empresaA, _terminalA, "venda-ausente")?.Status);
+        Assert.Equal("ponto_nao_instalado", segunda.Situacao);
+        Assert.False(segunda.PagamentoRecebido);
+        Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada.StartsWith("PW_iNewTransac", StringComparison.Ordinal)));
+        Assert.Null(journals.Buscar(_empresaA, _terminalA, "venda-bloqueada"));
+    }
+
+    [Fact]
+    public void Instalacao_desinstalada_reusa_cadastro_pinpad_e_comprovante()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "desinstalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.Sequencia = new Queue<BibliotecaRoteiro.PassoCaptura>([
+            new() { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.PontoCaptura },
+            new() { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.DestinoTcpIp },
+            new() { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.UsuarioTecnico },
+        ]);
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "INSTALACAO OK";
+        biblioteca.Resultados[InformacaoPgWeb.ComprovanteEstabelecimento] = "VIA LOJA\nINSTALACAO";
+        biblioteca.Resultados[InformacaoPgWeb.ComprovanteCliente] = "VIA CLIENTE\nINSTALACAO";
+        var contexto = Contexto(_empresaA, _terminalA) with { PontoCaptura = "200001", Servidor = "homolog.teste:31735" };
+        var captura = new CapturaContadaComValor();
+        var motor = CriarMotor();
+
+        var resultado = motor.Instalar(new PedidoVenda(contexto, null, "reinstala", 0, "", 1, "pinpad"), biblioteca, captura);
+        var journal = journals.Buscar(_empresaA, _terminalA, "reinstala");
+
+        Assert.Equal("instalada", resultado.Situacao);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.False(resultado.ConfirmacaoChamada);
+        Assert.Contains("PW_iNewTransac:01", biblioteca.Chamadas);
+        Assert.Contains("PW_iSetEnvironment", biblioteca.Chamadas);
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.PontoCaptura && item.Valor == "200001");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.DestinoTcpIp && item.Valor == "homolog.teste:31735");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.UsaPinPad && item.Valor == "1");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.PortaPinPad && item.Valor == "0");
+        Assert.Equal(1, captura.Apresentacoes);
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.UsuarioTecnico && item.Valor == "digitado-pelo-operador");
+        Assert.Equal("VIA LOJA\nINSTALACAO", journal?.ViaEstabelecimento);
+        Assert.Equal("VIA CLIENTE\nINSTALACAO", journal?.ViaCliente);
+        Assert.Equal("VIA LOJA\nINSTALACAO\nVIA CLIENTE\nINSTALACAO", motor.ComprovanteInstalacao(contexto, "reinstala"));
+        Assert.Null(motor.Comprovantes(contexto, "reinstala"));
+        Assert.Equal("ponto_instalado", motor.Consultar(contexto, null, null).Codigo);
+    }
+
+    [Fact]
+    public void Consulta_reconhece_ponto_ausente_registrado_pela_biblioteca_sem_nova_transacao()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, new DateTimeOffset(2026, 10, 28, 10, 51, 58, TimeSpan.Zero), Operacao: "instalacao"));
+        var venda = journals.Gravar(new JournalOperacao(_empresaA, _terminalA, Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "venda-antiga", "venda-antiga", "confirmada", 100, true, true, DateTimeOffset.UtcNow, Operacao: "venda"));
+        var pasta = Path.Combine(DiretorioDados(_empresaA), "Log");
+        Directory.CreateDirectory(pasta);
+        File.WriteAllText(Path.Combine(pasta, "comms_261118.log"), "09:23:36 PW_iNewTransac(0x21) <-2498>" + Environment.NewLine);
+        var motor = CriarMotor();
+
+        var consulta = motor.Consultar(Contexto(_empresaA, _terminalA), null, null);
+
+        Assert.Equal("ponto_nao_instalado", consulta.Codigo);
+        Assert.Contains("nova instalação", consulta.Mensagem);
+        Assert.Equal("desinstalada", journals.Buscar(_empresaA, _terminalA, "instala")?.Status);
+        Assert.Equal("confirmada", journals.Buscar(_empresaA, _terminalA, venda.ChaveIdempotencia)?.Status);
+        Assert.True(journals.Buscar(_empresaA, _terminalA, venda.ChaveIdempotencia)!.PagamentoRecebido);
+    }
+
+    [Fact]
+    public void Consulta_nao_revoga_instalacao_por_retorno_anterior()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, new DateTimeOffset(2026, 11, 18, 15, 0, 0, TimeSpan.Zero), Operacao: "instalacao"));
+        var pasta = Path.Combine(DiretorioDados(_empresaA), "Log");
+        Directory.CreateDirectory(pasta);
+        File.WriteAllText(Path.Combine(pasta, "comms_261118.log"), "09:23:36 PW_iNewTransac(0x21) <-2498>" + Environment.NewLine);
+
+        var consulta = CriarMotor().Consultar(Contexto(_empresaA, _terminalA), null, null);
+
+        Assert.Equal("ponto_instalado", consulta.Codigo);
+        Assert.Equal("instalada", journals.Buscar(_empresaA, _terminalA, "instala")?.Status);
+    }
+
+    [Fact]
+    public void Esc_no_menu_administrativo_cancela_sem_escolher_cancelamento_nem_cobrar()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
+        biblioteca.IdentificadorCaptura = 0x1F;
+        biblioteca.ValoresMenu = ["1", "2"];
+        biblioteca.TextosMenu = ["Teste de comunicação", "CANCELAMENTO"];
+        biblioteca.Roteiro = new Queue<short>([CodigosPgWeb.MoreData, CodigosPgWeb.Cancel]);
+        biblioteca.Resultados[InformacaoPgWeb.MensagemResultado] = "OPERAÇÃO CANCELADA";
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:esc", 0, "", 1, "pinpad");
+
+        var resultado = CriarMotor().Administrar(pedido, biblioteca, new CapturaQueCancela());
+
+        Assert.Equal("interrompida", resultado.Situacao);
+        Assert.Equal("OPERAÇÃO CANCELADA", resultado.Mensagem);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.False(resultado.ConfirmacaoChamada);
+        Assert.Contains("PW_iNewTransac:20", biblioteca.Chamadas);
+        Assert.DoesNotContain("PW_iPPAbort", biblioteca.Chamadas);
+        Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada == "PW_iExecTransac"));
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.Contains(":21", StringComparison.Ordinal));
+        Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor is "1" or "2" or "CANCELAMENTO");
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ValorTotal);
+        var journal = journals.Buscar(_empresaA, _terminalA, "adm:esc");
+        Assert.Equal("administracao", journal?.Operacao);
+        Assert.Equal("interrompida", journal?.Status);
+        Assert.False(journal?.PagamentoRecebido);
+        Assert.Null(journal?.ViaCliente);
+        var instalacao = journals.Buscar(_empresaA, _terminalA, "instala");
+        Assert.Equal("instalada", instalacao?.Status);
+    }
+
+    [Fact]
+    public void Esc_no_menu_0x7F03_cancela_sem_rede_sem_transacao_e_sem_repetir_o_menu()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var anterior = journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "venda-anterior", "venda-anterior", "confirmada", 100, true, true, DateTimeOffset.UtcNow, Operacao: "venda"));
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.RepetirMenuSemResposta = true;
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
+        biblioteca.IdentificadorCaptura = InformacaoPgWeb.LocalInfo2;
+        biblioteca.ValoresMenu = ["CIELO", "REDE"];
+        biblioteca.TextosMenu = ["Cielo", "Rede"];
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:esc-7f03", 0, "", 1, "pinpad");
+        var captura = new CapturaContada();
+
+        var resultado = CriarMotor().Administrar(pedido, biblioteca, captura);
+
+        Assert.Equal("interrompida", resultado.Situacao);
+        Assert.Equal(CodigosPgWeb.Cancel, resultado.Codigo);
+        Assert.Equal("OPERAÇÃO CANCELADA", resultado.Mensagem);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.False(resultado.ConfirmacaoChamada);
+        Assert.Equal(1, captura.Apresentacoes);
+        Assert.Equal(1, biblioteca.MenusDevolvidos);
+        Assert.Equal(1, biblioteca.Chamadas.Count(chamada => chamada == "PW_iExecTransac"));
+        Assert.Contains("PW_iNewTransac:20", biblioteca.Chamadas);
+        Assert.DoesNotContain("PW_iPPAbort", biblioteca.Chamadas);
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada.Contains(":21", StringComparison.Ordinal) || chamada.Contains(":22", StringComparison.Ordinal));
+        Assert.DoesNotContain("PW_iConfirmation", biblioteca.Chamadas);
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.LocalInfo2);
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor is "CIELO" or "REDE" or "1" or "2");
+        Assert.Contains(biblioteca.InformacoesLidas, informacao => informacao == InformacaoPgWeb.MensagemResultado);
+        var journal = journals.Buscar(_empresaA, _terminalA, "adm:esc-7f03");
+        Assert.Equal("administracao", journal?.Operacao);
+        Assert.Equal("interrompida", journal?.Status);
+        Assert.False(journal?.PagamentoRecebido);
+        Assert.Equal("instalada", journals.Buscar(_empresaA, _terminalA, "instala")?.Status);
+        Assert.Equal("confirmada", journals.Buscar(_empresaA, _terminalA, "venda-anterior")?.Status);
+        Assert.Equal(anterior.Identificador, journals.Buscar(_empresaA, _terminalA, "venda-anterior")?.Identificador);
+    }
+
+    [Fact]
+    public void Opcao_unica_de_cancelamento_nao_e_enviada_sem_o_operador()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = true;
+        biblioteca.TipoCaptura = TipoDadoPgWeb.Menu;
+        biblioteca.ValoresMenu = ["9"];
+        biblioteca.TextosMenu = ["CANCELAMENTO"];
+        biblioteca.Roteiro = new Queue<short>([CodigosPgWeb.MoreData, CodigosPgWeb.Cancel]);
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "0";
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:so-cancelamento", 0, "", 1, "pinpad");
+
+        var resultado = CriarMotor().Administrar(pedido, biblioteca, new CapturaQueCancela());
+
+        Assert.Equal("interrompida", resultado.Situacao);
+        Assert.Equal("OPERAÇÃO CANCELADA", resultado.Mensagem);
+        Assert.False(resultado.PagamentoRecebido);
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor == "9" || item.Valor == "CANCELAMENTO");
+    }
+
+    [Fact]
+    public void Menu_administrativo_sem_ponto_instalado_nao_chama_a_biblioteca()
+    {
+        var motor = CriarMotor();
+        var biblioteca = BibliotecaDeVenda();
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:teste", 0, "", 1, "pinpad");
+
+        var resultado = motor.Administrar(pedido, biblioteca, new CapturaFixa("1"));
+
+        Assert.Equal("ponto_nao_instalado", resultado.Situacao);
+        Assert.Empty(biblioteca.Chamadas);
+    }
+
+    [Fact]
+    public void Administracao_de_producao_nao_autoriza_venda()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresaA, _terminalA, null, "ponto", "instala", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var motor = CriarMotor();
+        var biblioteca = BibliotecaDeVenda();
+        biblioteca.EhNativa = true;
+        biblioteca.OperacaoFinanceiraAutorizada = false;
+        biblioteca.AdministracaoProducaoAutorizada = true;
+        biblioteca.Resultados[InformacaoPgWeb.ConfirmacaoRequerida] = "1";
+        var pedido = new PedidoVenda(Contexto(_empresaA, _terminalA), null, "adm:teste", 0, "", 1, "pinpad");
+
+        var administrativo = motor.Administrar(pedido, biblioteca, null);
+
+        Assert.Equal("administrativa", administrativo.Situacao);
+        Assert.False(administrativo.PagamentoRecebido);
+        Assert.True(administrativo.ConfirmacaoChamada);
+        var venda = motor.Vender(Pedido(_empresaA, _terminalA, "venda:teste", InformacaoPgWeb.Debito, 1), biblioteca, null);
+        Assert.Equal("autorizacao_ausente", venda.Situacao);
+        Assert.False(venda.PagamentoRecebido);
+        Assert.DoesNotContain(biblioteca.Chamadas, chamada => chamada == "PW_iNewTransac:21");
+    }
+
     private MotorPayGo MotorRapido()
     {
         var motor = CriarMotor();
@@ -912,6 +1358,32 @@ public class FluxoPayGoTests : IDisposable
         }
     }
 
+    private sealed class CapturaContadaComValor : ICapturaOperador
+    {
+        public int Apresentacoes { get; private set; }
+
+        public bool TentarResponder(PwGetData pedido, out string valor)
+        {
+            Apresentacoes++;
+            _ = pedido;
+            valor = "digitado-pelo-operador";
+            return true;
+        }
+    }
+
+    private sealed class CapturaContada : ICapturaOperador
+    {
+        public int Apresentacoes { get; private set; }
+
+        public bool TentarResponder(PwGetData pedido, out string valor)
+        {
+            Apresentacoes++;
+            _ = pedido;
+            valor = "";
+            return false;
+        }
+    }
+
     private sealed class CapturaQuePedeCancelamento : ICapturaOperador
     {
         public bool ConsumirCancelamento() => true;
@@ -963,6 +1435,8 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
 
     public bool InstalacaoProducaoAutorizada => false;
 
+    public bool AdministracaoProducaoAutorizada { get; set; }
+
     public List<string> Chamadas { get; } = new();
 
     public List<(ushort Identificador, string Valor)> Parametros { get; } = new();
@@ -978,6 +1452,26 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
     public string? ValorMenuUnico { get; set; }
 
     public string[]? ValoresMenu { get; set; }
+
+    public string[]? TextosMenu { get; set; }
+
+    public short CodigoListagem { get; set; } = CodigosPgWeb.Ok;
+
+    public List<OperacaoDisponivel>? OperacoesListadas { get; set; }
+
+    public Queue<PassoCaptura>? Sequencia { get; set; }
+
+    public sealed class PassoCaptura
+    {
+        public byte Tipo { get; init; }
+        public ushort Identificador { get; init; }
+        public string[]? Valores { get; init; }
+        public string[]? Textos { get; init; }
+    }
+
+    public bool RepetirMenuSemResposta { get; set; }
+
+    public int MenusDevolvidos { get; private set; }
 
     public string? UltimoValor { get; private set; }
 
@@ -1019,10 +1513,41 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
         return string.IsNullOrWhiteSpace(diretorioTrabalho) ? CodigosPgWeb.InvParam : CodigosPgWeb.Ok;
     }
 
+    public short? CodigoNovaTransacao { get; set; }
+
     public short NovaTransacao(byte operacao)
     {
         Chamadas.Add("PW_iNewTransac:" + operacao.ToString("X2"));
-        return CodigosPgWeb.Ok;
+        return CodigoNovaTransacao ?? CodigosPgWeb.Ok;
+    }
+
+    public (short Codigo, IReadOnlyList<OperacaoDisponivel> Operacoes) ListarOperacoes(byte tipoOperacao)
+    {
+        Chamadas.Add("PW_iGetOperationsEx");
+        if (CodigoListagem != CodigosPgWeb.Ok)
+        {
+            return (CodigoListagem, Array.Empty<OperacaoDisponivel>());
+        }
+
+        if (OperacoesListadas is not null)
+        {
+            return (CodigoListagem, OperacoesListadas);
+        }
+
+        if (ValoresMenu is not { Length: > 0 })
+        {
+            return (CodigoListagem, Array.Empty<OperacaoDisponivel>());
+        }
+
+        var lista = new List<OperacaoDisponivel>(ValoresMenu.Length);
+        for (var indice = 0; indice < ValoresMenu.Length; indice++)
+        {
+            var nome = TextosMenu is { Length: > 0 } && indice < TextosMenu.Length ? TextosMenu[indice] : ValoresMenu[indice];
+            lista.Add(new OperacaoDisponivel(0, nome, "", ValoresMenu[indice], false, 0));
+        }
+
+        _ = tipoOperacao;
+        return (CodigoListagem, lista);
     }
 
     public short AdicionarParametro(ushort identificador, string valor)
@@ -1037,6 +1562,39 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
     public short Executar(PwGetData[] capturas, ref short quantidade)
     {
         Chamadas.Add("PW_iExecTransac");
+        if (RepetirMenuSemResposta)
+        {
+            MenusDevolvidos++;
+            if (MenusDevolvidos > 3)
+            {
+                quantidade = 0;
+                return CodigosPgWeb.Cancel;
+            }
+
+            capturas[0].TipoDeDado = TipoCaptura == 0 ? TipoDadoPgWeb.Menu : TipoCaptura;
+            capturas[0].Identificador = IdentificadorCaptura == 0 ? InformacaoPgWeb.LocalInfo2 : IdentificadorCaptura;
+            PreencherMenu(ref capturas[0]);
+            quantidade = 1;
+            return CodigosPgWeb.MoreData;
+        }
+
+        if (Sequencia is { Count: > 0 })
+        {
+            var passo = Sequencia.Dequeue();
+            capturas[0] = default;
+            capturas[0].TipoDeDado = passo.Tipo;
+            capturas[0].Identificador = passo.Identificador;
+            if (passo.Valores is { Length: > 0 })
+            {
+                ValoresMenu = passo.Valores;
+                TextosMenu = passo.Textos;
+                PreencherMenu(ref capturas[0]);
+            }
+
+            quantidade = 1;
+            return CodigosPgWeb.MoreData;
+        }
+
         if (Roteiro is { Count: > 0 })
         {
             var codigo = Roteiro.Dequeue();
@@ -1077,6 +1635,10 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
             for (var indice = 0; indice < captura.NumeroOpcoesMenu; indice++)
             {
                 TextoCaptura.EscreverValorMenu(ref captura, indice, ValoresMenu[indice]);
+                if (TextosMenu is { Length: > 0 } && indice < TextosMenu.Length)
+                {
+                    TextoCaptura.EscreverTextoMenu(ref captura, indice, TextosMenu[indice]);
+                }
             }
 
             return;
@@ -1155,7 +1717,12 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
 
     public short LerSenhaPinPad(ushort indice) => CodigosPgWeb.Ok;
 
-    public short LerDadoPinPad(ushort indice) => CodigosPgWeb.Ok;
+    public short LerDadoPinPad(ushort indice)
+    {
+        Chamadas.Add("PW_iPPGetData");
+        _ = indice;
+        return CodigosPgWeb.Ok;
+    }
 
     public short LoopPinPad(Span<byte> display)
     {

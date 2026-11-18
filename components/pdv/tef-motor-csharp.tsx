@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
+import { imprimirComprovanteInstalacao } from "@/app/configuracoes/financeiro/tef/imprimir-comprovante-instalacao";
 import { cobrarPeloMotorCsharp, instalacaoAceita, pontoInstaladoNaSituacao, type RespostaMotorCsharp } from "@/lib/pdv/tef/motor-csharp";
 
 export function TefMotorCsharpPainel() {
@@ -27,8 +28,15 @@ export function TefMotorCsharpPainel() {
       setPonto(pontoInstaladoNaSituacao(resposta.codigo) ? "Ponto de homologação instalado." : "Ponto não instalado.");
       setConciliacao(resposta.erro.includes("sem venda no PDV") ? resposta.erro : "");
     })();
+    function aoMudarPonto(event: Event) {
+      const detalhe = (event as CustomEvent<string>).detail;
+      if (detalhe === "ausente") setPonto("Ponto não instalado. Uma nova instalação é necessária.");
+      if (detalhe === "instalado") setPonto("Ponto de homologação instalado.");
+    }
+    window.addEventListener("ultrapdv-tef-ponto", aoMudarPonto);
     return () => {
       ativo = false;
+      window.removeEventListener("ultrapdv-tef-ponto", aoMudarPonto);
     };
   }, []);
 
@@ -60,7 +68,15 @@ export function TefMotorCsharpPainel() {
       setEtapa(resposta);
       if (instalacaoAceita(resposta)) {
         setPonto("Ponto de homologação instalado.");
-        setAviso(resposta.erro.includes("já está instalado") ? resposta.erro : "Ponto de homologação instalado com sucesso");
+        window.dispatchEvent(new CustomEvent("ultrapdv-tef-ponto", { detail: "instalado" }));
+        if (resposta.comprovanteInstalacao) {
+          const impresso = await imprimirComprovanteInstalacao(resposta.comprovanteInstalacao);
+          setAviso(impresso.ok
+            ? "Ponto de homologação instalado. O comprovante da instalação foi enviado para a impressora."
+            : `Ponto de homologação instalado. ${impresso.erro}`);
+        } else {
+          setAviso(resposta.erro.includes("já está instalado") ? resposta.erro : "Ponto de homologação instalado com sucesso");
+        }
         return;
       }
       if (
@@ -79,7 +95,7 @@ export function TefMotorCsharpPainel() {
   return (
     <div className="mt-5 space-y-3 border-t border-zinc-200 pt-4">
       <p className="text-sm text-zinc-600">
-        A instalação usa homologação. O ponto e a senha técnica são pedidos pela biblioteca e não ficam gravados nesta página. Produção continua fechada.
+        A instalação usa homologação e pode ser repetida quando o ponto não está instalado. O ponto e o servidor já cadastrados entram se forem válidos. A senha técnica só é enviada se a biblioteca pedir. Produção continua fechada.
       </p>
       <p className="text-sm font-semibold text-zinc-950">{ponto}</p>
       {conciliacao ? <p className="text-sm text-zinc-700">{conciliacao}</p> : null}
@@ -131,6 +147,9 @@ export function TefMotorCsharpPainel() {
             Continuar
           </button>
         </form>
+      ) : null}
+      {etapa?.comprovanteInstalacao ? (
+        <pre className="whitespace-pre-wrap rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-800">{etapa.comprovanteInstalacao}</pre>
       ) : null}
       {aviso ? <p className="text-sm text-zinc-700">{aviso}</p> : null}
       {!aviso && !erro && etapa && etapa.fase !== "captura" ? <p className="text-sm text-zinc-700">{etapa.erro}</p> : null}

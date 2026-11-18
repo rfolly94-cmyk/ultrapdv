@@ -34,6 +34,10 @@ public class CapturaEnderecoTests : IDisposable
         Assert.DoesNotContain("31735", prompt);
         Assert.DoesNotContain("https://", prompt);
 
+        var valorOriginal = CapturaEndereco.Montar("VALOR TRANS. ORIG.", "@.@@@.@@@.@@@,@@", "", "DADO NAO CONFERE!", InformacaoPgWeb.ValorTransacaoOriginal, null);
+        Assert.Equal("VALOR TRANS. ORIG. DADO NAO CONFERE!", valorOriginal);
+        Assert.DoesNotContain("@", valorOriginal);
+
         var porta = CapturaEndereco.Montar("PORTA", "", "", "", InformacaoPgWeb.PortaAutorizador, null);
         Assert.Contains("PWINFO_AUTPORT", porta);
         Assert.DoesNotContain("host:porta", porta);

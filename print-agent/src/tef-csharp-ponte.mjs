@@ -1,6 +1,6 @@
 import path from "node:path";
 
-const COMANDOS_FINANCEIROS = new Set(["vender", "instalar", "configurar", "cancelar", "confirmar"]);
+const COMANDOS_FINANCEIROS = new Set(["vender", "instalar", "configurar", "cancelar", "confirmar", "administrar"]);
 
 export function diretorioEmpresaTef(raiz, empresaId, terminalId) {
   if (!/^[0-9a-f-]{36}$/i.test(String(empresaId ?? "")) || !/^[0-9a-f-]{36}$/i.test(String(terminalId ?? ""))) {
@@ -99,7 +99,37 @@ export function normalizarRespostaMotor(bruto, sessao) {
     vendaId: typeof resposta.vendaId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(resposta.vendaId) ? resposta.vendaId : null,
     fiscal: fiscalDoMotor(resposta.fiscal),
     comprovantes: comprovantesDoMotor(resposta, recebido),
+    comprovanteInstalacao: textoComprovanteInstalacao(resposta.comprovanteInstalacao),
     qrcode: textoVia(resposta.qrCode),
+  };
+}
+
+function textoComprovanteInstalacao(valor) {
+  const texto = typeof valor === "string" ? valor.replace(/\0/g, "") : "";
+  if (!texto.trim() || texto.length > 4096) return "";
+  return texto;
+}
+
+const PONTO_HOMOLOGACAO = /^[A-Za-z0-9._-]{1,40}$/;
+const SERVIDOR_HOMOLOGACAO = /tpgweb\.io|pos-transac-sb|sandbox|homolog/i;
+
+export function dadosInstalacaoHomologacao(comando, ponto, servidor) {
+  if (comando !== "instalar") return { ponto: "", servidor: "" };
+  const pontoTexto = String(ponto ?? "").trim();
+  const servidorTexto = String(servidor ?? "").trim();
+  const separador = servidorTexto.lastIndexOf(":");
+  const host = separador > 0 ? servidorTexto.slice(0, separador) : "";
+  const porta = separador > 0 ? Number(servidorTexto.slice(separador + 1)) : 0;
+  const servidorValido = separador > 0
+    && separador === servidorTexto.indexOf(":")
+    && SERVIDOR_HOMOLOGACAO.test(host)
+    && Number.isInteger(porta)
+    && porta >= 1
+    && porta <= 65535
+    && servidorTexto.length <= 50;
+  return {
+    ponto: PONTO_HOMOLOGACAO.test(pontoTexto) ? pontoTexto : "",
+    servidor: servidorValido ? servidorTexto : "",
   };
 }
 
@@ -153,6 +183,8 @@ function chaveVenda(valor) {
 
 export function pedidoLocalDoMotor(corpo, caminhos) {
   const pedido = corpo && typeof corpo === "object" ? { ...corpo } : { comando: "status" };
+  const pontoInformado = pedido.ponto;
+  const servidorInformado = pedido.servidor;
   delete pedido.autorizacao;
   delete pedido.ponto;
   delete pedido.servidor;
@@ -167,8 +199,9 @@ export function pedidoLocalDoMotor(corpo, caminhos) {
       (finalidade === "instalacao_producao" && comando === "instalar") ||
       (finalidade === "configuracao_producao" && comando === "configurar") ||
       (finalidade === "pinpad_producao" && comando === "pinpad") ||
-      (finalidade === "consulta_producao" && comando === "situacao") ||
+      (finalidade === "consulta_producao" && (comando === "situacao" || comando === "encerrar_pendencia_administrativa")) ||
       (finalidade === "vinculo_producao" && comando === "vincular") ||
+      (finalidade === "administracao_producao" && comando === "administrar") ||
       vendaAutorizada;
     if (!permitido) {
       return { bloqueado: true };
@@ -180,6 +213,9 @@ export function pedidoLocalDoMotor(corpo, caminhos) {
     if (comando === "instalar" && (!chave.startsWith("ins:") || pedido.operacaoNativa === "PWOPER_CONFIG")) {
       return { bloqueado: true };
     }
+    if (comando === "administrar" && (!chave.startsWith("adm:") || (pedido.operacaoNativa && pedido.operacaoNativa !== "PWOPER_ADMIN"))) {
+      return { bloqueado: true };
+    }
     const producao = diretorioProducaoEmpresaTef(caminhos.raiz, pedido.empresaId, pedido.terminalId);
     const journalsConfiguracao = path.resolve(producao.raizJournals, "configuracao");
     const configuracao = comando === "configurar";
@@ -188,7 +224,7 @@ export function pedidoLocalDoMotor(corpo, caminhos) {
       pedido: {
         ...pedido,
         comando: comando === "vincular" ? "vincular" : configuracao ? "configurar" : comando === "instalar" ? "instalar" : comando,
-        operacaoNativa: configuracao ? "PWOPER_CONFIG" : comando === "instalar" ? "PWOPER_INSTALL" : "",
+        operacaoNativa: configuracao ? "PWOPER_CONFIG" : comando === "instalar" ? "PWOPER_INSTALL" : comando === "administrar" ? "PWOPER_ADMIN" : "",
         ambiente: 0,
         diretorio: producao.diretorio,
         raizJournals: configuracao ? journalsConfiguracao : producao.raizJournals,
@@ -201,7 +237,7 @@ export function pedidoLocalDoMotor(corpo, caminhos) {
       },
     };
   }
-  if (!COMANDOS_FINANCEIROS.has(pedido.comando) && pedido.comando !== "recuperar" && pedido.comando !== "situacao" && pedido.comando !== "pinpad" && pedido.comando !== "vincular") {
+  if (!COMANDOS_FINANCEIROS.has(pedido.comando) && pedido.comando !== "recuperar" && pedido.comando !== "situacao" && pedido.comando !== "pinpad" && pedido.comando !== "vincular" && pedido.comando !== "encerrar_pendencia_administrativa") {
     return { bloqueado: false, pedido };
   }
   const locais = diretorioEmpresaTef(caminhos.raiz, pedido.empresaId, pedido.terminalId);
@@ -212,7 +248,8 @@ export function pedidoLocalDoMotor(corpo, caminhos) {
       ambiente: 1,
       diretorio: locais.diretorio,
       raizJournals: locais.raiz,
-      ponto: "",
+      ...dadosInstalacaoHomologacao(pedido.comando, pontoInformado, servidorInformado),
+      ...(pedido.comando === "administrar" ? { operacaoNativa: "PWOPER_ADMIN" } : {}),
     },
   };
 }
