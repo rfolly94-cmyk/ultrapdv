@@ -1573,6 +1573,7 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
 
             capturas[0].TipoDeDado = TipoCaptura == 0 ? TipoDadoPgWeb.Menu : TipoCaptura;
             capturas[0].Identificador = IdentificadorCaptura == 0 ? InformacaoPgWeb.LocalInfo2 : IdentificadorCaptura;
+            LiberarDigitacao(ref capturas[0]);
             PreencherMenu(ref capturas[0]);
             quantidade = 1;
             return CodigosPgWeb.MoreData;
@@ -1584,6 +1585,7 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
             capturas[0] = default;
             capturas[0].TipoDeDado = passo.Tipo;
             capturas[0].Identificador = passo.Identificador;
+            LiberarDigitacao(ref capturas[0]);
             if (passo.Valores is { Length: > 0 })
             {
                 ValoresMenu = passo.Valores;
@@ -1602,6 +1604,7 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
             {
                 capturas[0].TipoDeDado = TipoCaptura;
                 capturas[0].Identificador = IdentificadorCaptura == 0 ? InformacaoPgWeb.TipoCartao : IdentificadorCaptura;
+                LiberarDigitacao(ref capturas[0]);
                 PreencherMenu(ref capturas[0]);
                 quantidade = 1;
             }
@@ -1618,6 +1621,7 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
             _capturaEntregue = true;
             capturas[0].TipoDeDado = TipoCaptura;
             capturas[0].Identificador = IdentificadorCaptura == 0 ? InformacaoPgWeb.TipoCartao : IdentificadorCaptura;
+            LiberarDigitacao(ref capturas[0]);
             PreencherMenu(ref capturas[0]);
             quantidade = 1;
             return CodigosPgWeb.MoreData;
@@ -1625,6 +1629,14 @@ internal sealed class BibliotecaRoteiro : IBibliotecaPgWeb
 
         quantidade = 0;
         return ProximaExecucao;
+    }
+
+    private static void LiberarDigitacao(ref PwGetData captura)
+    {
+        if (captura.TipoDeDado is TipoDadoPgWeb.Digitado or TipoDadoPgWeb.AutenticacaoUsuario or TipoDadoPgWeb.CodigoBarras)
+        {
+            captura.TiposEntradaPermitidos = 7;
+        }
     }
 
     private void PreencherMenu(ref PwGetData captura)

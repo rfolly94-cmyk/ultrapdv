@@ -71,6 +71,30 @@ test("captura não recebe pagamento e remove autorização do pedido", () => {
   assert.equal(captura.sessao, "sessao-1");
   assert.equal(captura.opcoes[0].valor, "1");
   assert.equal(captura.qrcode, "");
+  assert.equal(captura.captura, null);
+
+  const mascarada = normalizarRespostaMotor({
+    tipo: "captura",
+    promptBiblioteca: "DATA",
+    mascara: "@@/@@/@@",
+    tiposEntrada: 1,
+    validacaoDado: 5,
+    oculto: true,
+    valorInicial: "segredo",
+  }, "sessao-mascara");
+  assert.equal(mascarada.captura.mascara, "@@/@@/@@");
+  assert.equal(mascarada.captura.valorInicial, "");
+  assert.equal(mascarada.captura.promptBiblioteca, "DATA");
+  assert.deepEqual(mascarada.captura.vendas, []);
+
+  const comVenda = normalizarRespostaMotor({
+    tipo: "captura",
+    promptBiblioteca: "REF",
+    tiposEntrada: 7,
+    vendas: [{ chave: "venda-52", valorCentavos: 200, data: "18/11/2026", referencia: "00052", requisicao: "0000000010", texto: "18/11/2026 · R$ 2,00 · REF 00052" }],
+  }, "sessao-venda");
+  assert.equal(comVenda.captura.vendas[0].referencia, "00052");
+  assert.equal(comVenda.captura.vendas[0].valorCentavos, 200);
 
   const comQr = normalizarRespostaMotor({
     tipo: "captura",

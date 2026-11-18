@@ -101,6 +101,7 @@ export function normalizarRespostaMotor(bruto, sessao) {
     comprovantes: comprovantesDoMotor(resposta, recebido),
     comprovanteInstalacao: textoComprovanteInstalacao(resposta.comprovanteInstalacao),
     qrcode: textoVia(resposta.qrCode),
+    captura: captura ? capturaNativa(resposta) : null,
   };
 }
 
@@ -108,6 +109,53 @@ function textoComprovanteInstalacao(valor) {
   const texto = typeof valor === "string" ? valor.replace(/\0/g, "") : "";
   if (!texto.trim() || texto.length > 4096) return "";
   return texto;
+}
+
+function capturaNativa(resposta) {
+  const presente = typeof resposta.tiposEntrada === "number" || typeof resposta.mascara === "string" || typeof resposta.promptBiblioteca === "string";
+  if (!presente) return null;
+  const oculto = resposta.oculto === true;
+  const texto = (valor) => (typeof valor === "string" ? valor.replace(/\0/g, "").trim() : "");
+  const numero = (valor) => (typeof valor === "number" && Number.isFinite(valor) ? valor : 0);
+  return {
+    promptBiblioteca: texto(resposta.promptBiblioteca),
+    mascara: texto(resposta.mascara),
+    tiposEntrada: numero(resposta.tiposEntrada),
+    tamanhoMinimo: numero(resposta.tamanhoMinimo),
+    tamanhoMaximo: numero(resposta.tamanhoMaximo),
+    valorMinimo: numero(resposta.valorMinimo),
+    valorMaximo: numero(resposta.valorMaximo),
+    validacaoDado: numero(resposta.validacaoDado),
+    aceitaNulo: resposta.aceitaNulo === true,
+    valorInicial: oculto ? "" : texto(resposta.valorInicial),
+    teclasAtalho: resposta.teclasAtalho === true,
+    mensagemValidacao: texto(resposta.mensagemValidacao),
+    mensagemConfirmacao: texto(resposta.mensagemConfirmacao),
+    mensagemDadoMaior: texto(resposta.mensagemDadoMaior),
+    mensagemDadoMenor: texto(resposta.mensagemDadoMenor),
+    itemInicial: numero(resposta.itemInicial),
+    mensagemPrevia: texto(resposta.mensagemPrevia),
+    tipoEntradaCodigoBarras: numero(resposta.tipoEntradaCodigoBarras),
+    sugestaoJournal: resposta.sugestaoJournal === true,
+    vendas: vendasDaCaptura(resposta.vendas),
+  };
+}
+
+function vendasDaCaptura(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista.slice(0, 20).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const texto = (valor) => (typeof valor === "string" ? valor.replace(/\0/g, "").trim() : "");
+    const chave = texto(item.chave);
+    const data = texto(item.data);
+    const referencia = texto(item.referencia);
+    const requisicao = texto(item.requisicao);
+    const rotulo = texto(item.texto);
+    const valorCentavos = typeof item.valorCentavos === "number" && Number.isFinite(item.valorCentavos) ? item.valorCentavos : 0;
+    if (!chave || chave.length > 80 || !/^\d{2}\/\d{2}\/\d{4}$/.test(data)) return [];
+    if (referencia.length > 50 || requisicao.length > 20 || valorCentavos < 0) return [];
+    return [{ chave, valorCentavos, data, referencia, requisicao, texto: rotulo.slice(0, 120) }];
+  });
 }
 
 const PONTO_HOMOLOGACAO = /^[A-Za-z0-9._-]{1,40}$/;

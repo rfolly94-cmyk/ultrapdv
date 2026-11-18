@@ -15,8 +15,8 @@ function ler(relativo) {
   return readFileSync(path.join(raizPacote, relativo), "utf8");
 }
 
-test("a versão 1.3.54 distribui a PGWebLib x64, o motor C# e não distribui o agente Pascal", () => {
-  assert.equal(versao, "1.3.54");
+test("a versão 1.3.56 distribui a PGWebLib x64, o motor C# e não distribui o agente Pascal", () => {
+  assert.equal(versao, "1.3.56");
   const pacote = JSON.parse(ler("tef-pacote.json"));
   const manifesto = JSON.parse(ler("version.json"));
   assert.equal(pacote.executavel, undefined);

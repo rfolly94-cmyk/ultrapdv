@@ -1,3 +1,5 @@
+import { capturaDaResposta, type CapturaBiblioteca } from "@/lib/pdv/tef/captura-administrativa";
+
 export type OpcaoMotor = { texto: string; valor: string };
 
 export type RespostaMotorCsharp = {
@@ -13,6 +15,7 @@ export type RespostaMotorCsharp = {
   oculto: boolean;
   opcoes: OpcaoMotor[];
   chave: string | null;
+  identificador: number | null;
   tipoDado: number | null;
   codigoNativo: number | null;
   servidorValidado: boolean;
@@ -24,6 +27,7 @@ export type RespostaMotorCsharp = {
   } | null;
   comprovanteInstalacao: string;
   qrcode: string;
+  captura: CapturaBiblioteca | null;
 };
 
 export function interpretarRespostaMotor(corpo: unknown): RespostaMotorCsharp {
@@ -59,12 +63,14 @@ export function interpretarRespostaMotor(corpo: unknown): RespostaMotorCsharp {
     oculto: resposta.oculto === true,
     opcoes,
     chave: typeof resposta.chave === "string" ? resposta.chave : null,
+    identificador: typeof resposta.identificador === "number" ? resposta.identificador : null,
     tipoDado: typeof resposta.tipoDado === "number" ? resposta.tipoDado : null,
     codigoNativo,
     servidorValidado: resposta.servidorValidado === true,
     comprovantes: comprovantesDaResposta(resposta, confirmada && pagamentoEfetivo),
     comprovanteInstalacao: comprovanteInstalacaoDaResposta(resposta, pagamentoEfetivo),
     qrcode: textoViaMotor(resposta.qrcode),
+    captura: fase === "captura" ? capturaDaResposta(resposta) : null,
   };
 }
 

@@ -22,6 +22,11 @@ public class ValorCentavosTests : IDisposable
     [InlineData("1,00", "100")]
     [InlineData("10,5", "1050")]
     [InlineData("10.50", "1050")]
+    [InlineData("2,00", "200")]
+    [InlineData("R$ 2,00", "200")]
+    [InlineData("0,02", "2")]
+    [InlineData("R$ 0,02", "2")]
+    [InlineData("200", "200")]
     [InlineData("1234567", "1234567")]
     [InlineData("1.234.567,89", "123456789")]
     [InlineData("12.345", "1234500")]
@@ -129,12 +134,113 @@ public class ValorCentavosTests : IDisposable
         Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor == "10,567");
     }
 
+    [Fact]
+    public void Centavos_ja_convertidos_nao_sao_multiplicados_de_novo()
+    {
+        Assert.True(ValorCentavos.Tentar("R$ 2,00", out var primeira));
+        Assert.Equal("200", primeira);
+        Assert.True(ValorCentavos.Tentar(primeira, out var segunda));
+        Assert.Equal("200", segunda);
+        Assert.True(ValorCentavos.Tentar("0,02", out var dois));
+        Assert.Equal("2", dois);
+        Assert.True(ValorCentavos.Tentar(dois, out var doisDeNovo));
+        Assert.Equal("2", doisDeNovo);
+    }
+
+    [Fact]
+    public void Cancelamento_administrativo_envia_valor_data_e_referencia_do_journal()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresa, _terminal, null, "ponto", "instala-seq", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var quando = new DateTimeOffset(2026, 11, 18, 13, 52, 0, TimeSpan.FromHours(-4));
+        var venda = new JournalOperacao(_empresa, _terminal, Guid.NewGuid(), "venda-original", "venda:52", "confirmada", 200, true, true, quando, "0000000010", "52", Operacao: "venda");
+        journals.Gravar(venda);
+        var sugestoes = SugestaoVendaOriginal.Montar(venda);
+        var biblioteca = BibliotecaAdministrativa(new[]
+        {
+            new BibliotecaRoteiro.PassoCaptura
+            {
+                Tipo = TipoDadoPgWeb.Menu,
+                Identificador = InformacaoPgWeb.LocalInfo2,
+                Valores = new[] { "34" },
+                Textos = new[] { "CANCELAMENTO" },
+            },
+            new BibliotecaRoteiro.PassoCaptura { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.ValorTransacaoOriginal },
+            new BibliotecaRoteiro.PassoCaptura { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.DataTransacaoOriginal },
+            new BibliotecaRoteiro.PassoCaptura { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.ReferenciaLocalOriginal },
+        });
+        var captura = new CapturaPorCampo(new Dictionary<ushort, string>
+        {
+            [InformacaoPgWeb.LocalInfo2] = "34",
+            [InformacaoPgWeb.ValorTransacaoOriginal] = sugestoes[InformacaoPgWeb.ValorTransacaoOriginal],
+            [InformacaoPgWeb.DataTransacaoOriginal] = sugestoes[InformacaoPgWeb.DataTransacaoOriginal],
+            [InformacaoPgWeb.ReferenciaLocalOriginal] = sugestoes[InformacaoPgWeb.ReferenciaLocalOriginal],
+        });
+
+        var resultado = new MotorPayGo(journals, new CoordenadorSessao()).Administrar(Pedido("adm:journal-52"), biblioteca, captura);
+
+        Assert.Equal("administrativa", resultado.Situacao);
+        Assert.Equal("2,00", captura.Sugestoes[InformacaoPgWeb.ValorTransacaoOriginal]);
+        Assert.Equal("18/11/2026", captura.Sugestoes[InformacaoPgWeb.DataTransacaoOriginal]);
+        Assert.Equal("52", captura.Sugestoes[InformacaoPgWeb.ReferenciaLocalOriginal]);
+        Assert.Equal("52", captura.Vendas[0].Referencia);
+        Assert.Equal(200, captura.Vendas[0].ValorCentavos);
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ValorTransacaoOriginal && item.Valor == "200");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.DataTransacaoOriginal && item.Valor == "181126");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ReferenciaLocalOriginal && item.Valor == "52");
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ValorTransacaoOriginal && item.Valor == "2");
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor is "18112026" or "43060" or "20000");
+    }
+
+    [Fact]
+    public void Valores_ja_convertidos_e_zeros_da_referencia_chegam_iguais_a_biblioteca()
+    {
+        var journals = new RepositorioJournal(_raiz);
+        journals.Gravar(new JournalOperacao(_empresa, _terminal, null, "ponto", "instala-wire", "instalada", 0, false, false, DateTimeOffset.UtcNow, Operacao: "instalacao"));
+        var biblioteca = BibliotecaAdministrativa(new[]
+        {
+            new BibliotecaRoteiro.PassoCaptura { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.ValorTransacaoOriginal },
+            new BibliotecaRoteiro.PassoCaptura { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.DataTransacaoOriginal },
+            new BibliotecaRoteiro.PassoCaptura { Tipo = TipoDadoPgWeb.Digitado, Identificador = InformacaoPgWeb.ReferenciaLocalOriginal },
+        });
+        var captura = new CapturaPorCampo(new Dictionary<ushort, string>
+        {
+            [InformacaoPgWeb.ValorTransacaoOriginal] = "200",
+            [InformacaoPgWeb.DataTransacaoOriginal] = "05/11/2026",
+            [InformacaoPgWeb.ReferenciaLocalOriginal] = "00052",
+        });
+
+        var resultado = new MotorPayGo(journals, new CoordenadorSessao()).Administrar(Pedido("adm:wire"), biblioteca, captura);
+
+        Assert.Equal("administrativa", resultado.Situacao);
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ValorTransacaoOriginal && item.Valor == "200");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.DataTransacaoOriginal && item.Valor == "051126");
+        Assert.Contains(biblioteca.Parametros, item => item.Identificador == InformacaoPgWeb.ReferenciaLocalOriginal && item.Valor == "00052");
+        Assert.DoesNotContain(biblioteca.Parametros, item => item.Valor == "20000" || item.Valor == "18112026");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_raiz))
         {
             Directory.Delete(_raiz, recursive: true);
         }
+    }
+
+    private static BibliotecaRoteiro BibliotecaAdministrativa(BibliotecaRoteiro.PassoCaptura[] passos)
+    {
+        return new BibliotecaRoteiro
+        {
+            EhNativa = true,
+            OperacaoFinanceiraAutorizada = true,
+            OperacoesListadas = new List<OperacaoDisponivel> { new(0x22, "CANCELAMENTO", "", "34", false, 0) },
+            Sequencia = new Queue<BibliotecaRoteiro.PassoCaptura>(passos),
+            Resultados =
+            {
+                [InformacaoPgWeb.ConfirmacaoRequerida] = "0",
+                [InformacaoPgWeb.MensagemResultado] = "VALOR RECEBIDO",
+            },
+        };
     }
 
     private PedidoVenda Pedido(string chave)
@@ -147,11 +253,17 @@ public class ValorCentavosTests : IDisposable
     {
         private readonly Dictionary<ushort, string> _valores;
         public string? Aviso { get; private set; }
+        public Dictionary<ushort, string> Sugestoes { get; } = new();
+        public List<VendaParaCaptura> Vendas { get; } = new();
 
         public CapturaPorCampo(Dictionary<ushort, string> valores)
         {
             _valores = valores;
         }
+
+        public void DefinirSugestao(ushort identificador, string valor) => Sugestoes[identificador] = valor;
+
+        public void DefinirVendas(IReadOnlyList<VendaParaCaptura> vendas) => Vendas.AddRange(vendas);
 
         public bool TentarResponder(PwGetData pedido, out string valor)
         {

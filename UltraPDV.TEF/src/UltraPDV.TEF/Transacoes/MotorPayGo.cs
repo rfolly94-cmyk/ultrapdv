@@ -54,6 +54,10 @@ public interface ICapturaOperador
     void ReceberQrCode(string payload) { }
 
     bool ConsumirCancelamento() => false;
+
+    void DefinirSugestao(ushort identificador, string valor) { }
+
+    void DefinirVendas(IReadOnlyList<VendaParaCaptura> vendas) { }
 }
 
 public sealed class EsperaBiblioteca
@@ -168,7 +172,34 @@ public sealed class MotorPayGo
             return Recusa(CodigosPgWeb.NotInst, "ponto_nao_instalado", null, "O ponto deste terminal não está instalado. O menu administrativo não foi iniciado.");
         }
 
+        if (captura is not null)
+        {
+            var vendas = VendasConfirmadas(pedido);
+            captura.DefinirVendas(vendas.Select(SugestaoVendaOriginal.Resumo).ToArray());
+            if (vendas.Count == 1)
+            {
+                foreach (var sugestao in SugestaoVendaOriginal.Montar(vendas[0]))
+                {
+                    captura.DefinirSugestao(sugestao.Key, sugestao.Value);
+                }
+            }
+        }
+
         return ExecutarOperacao(pedido, OperacaoPgWeb.Administracao, biblioteca, captura, incluirValor: false);
+    }
+
+    private IReadOnlyList<JournalOperacao> VendasConfirmadas(PedidoVenda pedido)
+    {
+        return _journals.Listar(pedido.Contexto.EmpresaId, pedido.Contexto.TerminalId)
+            .Where(journal => journal.EmpresaId == pedido.Contexto.EmpresaId
+                && journal.TerminalId == pedido.Contexto.TerminalId
+                && journal.Operacao == "venda"
+                && journal.Status == "confirmada"
+                && journal.PagamentoRecebido
+                && journal.ValorCentavos > 0)
+            .OrderByDescending(journal => journal.AtualizadoEm)
+            .Take(20)
+            .ToArray();
     }
 
     public ResultadoMotor Cancelar(PedidoVenda pedido, IBibliotecaPgWeb biblioteca, ICapturaOperador? captura)
@@ -192,6 +223,14 @@ public sealed class MotorPayGo
         if (original.Operacao != "venda" || original.Status != "confirmada" || !original.PagamentoRecebido || original.ValorCentavos != pedido.ValorCentavos)
         {
             return Recusa(CodigosPgWeb.NoData, "cancelamento_sem_venda", original.Identificador, "Não há venda confirmada desta chave neste ambiente. Nenhum cancelamento foi iniciado.");
+        }
+
+        if (captura is not null)
+        {
+            foreach (var sugestao in SugestaoVendaOriginal.Montar(original))
+            {
+                captura.DefinirSugestao(sugestao.Key, sugestao.Value);
+            }
         }
 
         var resultado = ExecutarOperacao(
@@ -1659,7 +1698,24 @@ public sealed class MotorPayGo
                 return biblioteca.AdicionarParametro(pedido.Identificador, centavos);
             }
 
-            return biblioteca.AdicionarParametro(pedido.Identificador, valor);
+            if (!CapturaDigitada.Tentar(ref pedido, valor, out var preparado, out var erroCaptura))
+            {
+                captura?.DefinirAviso(erroCaptura);
+                continue;
+            }
+
+            if (pedido.TipoDeDado == TipoDadoPgWeb.CodigoBarras && pedido.Identificador == InformacaoPgWeb.CodigoBarras)
+            {
+                var codigo = biblioteca.AdicionarParametro(InformacaoPgWeb.CodigoBarras, preparado);
+                if (codigo != CodigosPgWeb.Ok)
+                {
+                    return codigo;
+                }
+
+                return biblioteca.AdicionarParametro(InformacaoPgWeb.ModoEntradaCodigoBarras, "1");
+            }
+
+            return biblioteca.AdicionarParametro(pedido.Identificador, preparado);
         }
 
         return CodigosPgWeb.Cancel;

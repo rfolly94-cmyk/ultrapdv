@@ -308,10 +308,12 @@ public class CapturaEnderecoTests : IDisposable
             {
                 capturas[0].Identificador = Primeiro;
                 capturas[0].TipoDeDado = TipoDadoPgWeb.Digitado;
+                capturas[0].TiposEntradaPermitidos = 7;
                 if (Segundo != 0)
                 {
                     capturas[1].Identificador = Segundo;
                     capturas[1].TipoDeDado = TipoDadoPgWeb.Digitado;
+                    capturas[1].TiposEntradaPermitidos = 7;
                     quantidade = 2;
                 }
                 else

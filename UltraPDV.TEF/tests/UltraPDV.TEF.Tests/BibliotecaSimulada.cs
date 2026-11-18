@@ -57,6 +57,7 @@ public sealed class BibliotecaSimulada : IBibliotecaPgWeb
             _etapa = 1;
             capturas[0].Identificador = InformacaoPgWeb.UsuarioTecnico;
             capturas[0].TipoDeDado = 17;
+            capturas[0].TiposEntradaPermitidos = 7;
             quantidade = 1;
             return CodigosPgWeb.MoreData;
         }

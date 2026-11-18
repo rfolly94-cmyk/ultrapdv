@@ -166,6 +166,7 @@ public class InstalacaoProducaoTests : IDisposable
                 _capturou = true;
                 capturas[0].Identificador = InformacaoPgWeb.UsuarioTecnico;
                 capturas[0].TipoDeDado = TipoDadoPgWeb.AutenticacaoUsuario;
+                capturas[0].TiposEntradaPermitidos = 7;
                 quantidade = 1;
                 return CodigosPgWeb.MoreData;
             }

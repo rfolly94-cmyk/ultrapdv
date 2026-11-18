@@ -13,11 +13,16 @@ import {
   pedidoCancelamentoMenu,
   promptTemMascaraDeValor,
   promptValorVisivel,
+  valorEnviadoPeloMenu,
   valorSemCaracteresEspeciais,
 } from "./menu-administrativo";
 
 const componente = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../components/pdv/tef-menu-administrativo.tsx"),
+  "utf8"
+);
+const capturaCampo = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../components/pdv/tef-captura-biblioteca.tsx"),
   "utf8"
 );
 
@@ -62,9 +67,13 @@ test("valor original aparece sem a máscara da biblioteca", () => {
   assert.equal(promptValorVisivel(venda), "VALOR DA VENDA: VALOR NAO PODE SER VAZIO");
   assert.equal(valorSemCaracteresEspeciais("12.345,67"), "1234567");
   assert.equal(valorSemCaracteresEspeciais("R$@.@@@.@@@.@@@,@@"), "");
+  assert.equal(valorEnviadoPeloMenu(0x60, "200"), "200");
+  assert.equal(valorEnviadoPeloMenu(0x60, "2,00"), "200");
+  assert.equal(valorEnviadoPeloMenu(0x78, "00052"), "00052");
+  assert.equal(capturaDeValor(0x49), true);
   assert.match(componente, /promptTemMascaraDeValor/);
   assert.match(componente, /promptValorVisivel/);
-  assert.match(componente, /valorSemCaracteresEspeciais/);
+  assert.match(componente, /valorEnviadoPeloMenu/);
 });
 
 test("campo digitado e pinpad usam o mesmo diálogo", () => {
@@ -73,8 +82,8 @@ test("campo digitado e pinpad usam o mesmo diálogo", () => {
   assert.equal(campoDigitadoAdministrativo(17), true);
   assert.equal(campoDigitadoAdministrativo(1), false);
   assert.equal(campoDigitadoAdministrativo(3), false);
-  assert.match(componente, /campoDigitadoAdministrativo/);
-  assert.match(componente, /data-tef-captura="digitada"/);
+  assert.match(componente, /TefCapturaBiblioteca/);
+  assert.match(capturaCampo, /data-tef-captura="digitada"/);
   assert.match(componente, /Aguardando o pinpad/);
   assert.match(componente, /whitespace-pre-wrap/);
 });

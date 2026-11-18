@@ -274,6 +274,8 @@ file sealed class CapturaLinha : ICapturaOperador
     private string? _aviso;
     private string? _qrCode;
     private bool _leitorIniciado;
+    private readonly Dictionary<ushort, string> _sugestoes = new();
+    private readonly List<VendaParaCaptura> _vendas = new();
 
     public CapturaLinha(JsonSerializerOptions json) => _json = json;
 
@@ -283,6 +285,26 @@ file sealed class CapturaLinha : ICapturaOperador
     {
         var texto = payload.Replace("\0", "", StringComparison.Ordinal).Trim();
         _qrCode = texto.Length is > 0 and <= 4096 ? texto : null;
+    }
+
+    public void DefinirSugestao(ushort identificador, string valor)
+    {
+        if (valor.Length > 0)
+        {
+            _sugestoes[identificador] = valor;
+        }
+    }
+
+    public void DefinirVendas(IReadOnlyList<VendaParaCaptura> vendas)
+    {
+        _vendas.Clear();
+        foreach (var venda in vendas.Take(20))
+        {
+            if (venda.Chave.Length is > 0 and <= 80 && venda.Referencia.Length <= 50 && venda.Requisicao.Length <= 20)
+            {
+                _vendas.Add(venda);
+            }
+        }
     }
 
     public bool ConsumirCancelamento()
@@ -302,6 +324,15 @@ file sealed class CapturaLinha : ICapturaOperador
 
     public bool TentarResponder(PwGetData pedido, out string valor)
     {
+        var oculto = pedido.OcultarDadosDigitados == 1 || pedido.TipoDeDado == TipoDadoPgWeb.AutenticacaoUsuario;
+        var inicial = oculto ? "" : TextoCaptura.ValorInicial(ref pedido);
+        var sugestaoJournal = false;
+        if (inicial.Length == 0 && !oculto && _sugestoes.TryGetValue(pedido.Identificador, out var sugestao))
+        {
+            inicial = sugestao;
+            sugestaoJournal = true;
+        }
+
         var evento = new EventoCaptura(
             "captura",
             CapturaEndereco.Montar(
@@ -313,10 +344,51 @@ file sealed class CapturaLinha : ICapturaOperador
                 _aviso),
             pedido.Identificador,
             pedido.TipoDeDado,
-            pedido.OcultarDadosDigitados == 1 || pedido.TipoDeDado == TipoDadoPgWeb.AutenticacaoUsuario,
+            oculto,
             TextoCaptura.OpcoesValidas(ref pedido).Select(opcao => new OpcaoHost(opcao.Texto, opcao.Valor)).ToArray(),
-            _qrCode);
+            _qrCode)
+        {
+            PromptBiblioteca = TextoCaptura.Prompt(ref pedido),
+            Mascara = TextoCaptura.Mascara(ref pedido),
+            TiposEntrada = pedido.TiposEntradaPermitidos,
+            TamanhoMinimo = pedido.TamanhoMinimo,
+            TamanhoMaximo = pedido.TamanhoMaximo,
+            ValorMinimo = pedido.ValorMinimo,
+            ValorMaximo = pedido.ValorMaximo,
+            ValidacaoDado = pedido.ValidacaoDado,
+            AceitaNulo = pedido.AceitaNulo == 1,
+            ValorInicial = inicial,
+            TeclasAtalho = pedido.TeclasAtalho == 1,
+            MensagemValidacao = TextoCaptura.Validacao(ref pedido),
+            MensagemConfirmacao = TextoCaptura.Confirmacao(ref pedido),
+            MensagemDadoMaior = TextoCaptura.DadoMaior(ref pedido),
+            MensagemDadoMenor = TextoCaptura.DadoMenor(ref pedido),
+            ItemInicial = pedido.ItemInicial,
+            MensagemPrevia = TextoCaptura.Previa(ref pedido),
+            TipoEntradaCodigoBarras = pedido.TipoEntradaCodigoBarras,
+            SugestaoJournal = sugestaoJournal,
+            Vendas = _vendas.ToArray(),
+            NumeroCapturas = pedido.NumeroCapturas,
+            OmiteAlerta = pedido.OmiteMensagemAlerta == 1,
+            IniciaPelaEsquerda = pedido.IniciaPelaEsquerda == 1,
+        };
         _qrCode = null;
+        if (!(oculto || pedido.TipoDeDado == TipoDadoPgWeb.AutenticacaoUsuario || pedido.Identificador is InformacaoPgWeb.SenhaLojista or InformacaoPgWeb.UsuarioTecnico))
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(new
+            {
+                diagnostico = "captura",
+                operacao = "administrativa",
+                identificador = pedido.Identificador,
+                tipo = pedido.TipoDeDado,
+                prompt = TextoCaptura.Prompt(ref pedido),
+                mascara = TextoCaptura.Mascara(ref pedido),
+                validacao = pedido.ValidacaoDado,
+                minimo = pedido.TamanhoMinimo,
+                maximo = pedido.TamanhoMaximo,
+                opcoes = pedido.NumeroOpcoesMenu,
+            }));
+        }
         Console.Out.WriteLine(JsonSerializer.Serialize(evento, _json));
         Console.Out.Flush();
         var linha = EsperarLinha();
@@ -407,7 +479,32 @@ file sealed class CapturaLinha : ICapturaOperador
     }
 }
 
-file sealed record EventoCaptura(string Tipo, string? Prompt, ushort Identificador, byte TipoDado, bool Oculto, OpcaoHost[] Opcoes, string? QrCode);
+file sealed record EventoCaptura(string Tipo, string? Prompt, ushort Identificador, byte TipoDado, bool Oculto, OpcaoHost[] Opcoes, string? QrCode)
+{
+    public string PromptBiblioteca { get; init; } = "";
+    public string Mascara { get; init; } = "";
+    public byte TiposEntrada { get; init; }
+    public byte TamanhoMinimo { get; init; }
+    public byte TamanhoMaximo { get; init; }
+    public uint ValorMinimo { get; init; }
+    public uint ValorMaximo { get; init; }
+    public byte ValidacaoDado { get; init; }
+    public bool AceitaNulo { get; init; }
+    public string ValorInicial { get; init; } = "";
+    public bool TeclasAtalho { get; init; }
+    public string MensagemValidacao { get; init; } = "";
+    public string MensagemConfirmacao { get; init; } = "";
+    public string MensagemDadoMaior { get; init; } = "";
+    public string MensagemDadoMenor { get; init; } = "";
+    public byte ItemInicial { get; init; }
+    public string MensagemPrevia { get; init; } = "";
+    public byte TipoEntradaCodigoBarras { get; init; }
+    public bool SugestaoJournal { get; init; }
+    public VendaParaCaptura[] Vendas { get; init; } = Array.Empty<VendaParaCaptura>();
+    public byte NumeroCapturas { get; init; }
+    public bool OmiteAlerta { get; init; }
+    public bool IniciaPelaEsquerda { get; init; }
+}
 
 file sealed record OpcaoHost(string Texto, string Valor);
 

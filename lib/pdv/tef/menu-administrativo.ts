@@ -35,8 +35,15 @@ export function campoDigitadoAdministrativo(tipoDado: number | null | undefined)
   return tipoDado === 2 || tipoDado === 12 || tipoDado === 17;
 }
 
+const MONTANTES = new Set([0x25, 0x49, 0x4a, 0x4d, 0x4e, 0x4f, 0x50, 0x60, 0xbf06]);
+
 export function capturaDeValor(identificador: number | null | undefined) {
-  return identificador === 0x25 || identificador === 0x60;
+  return identificador != null && MONTANTES.has(identificador);
+}
+
+export function valorEnviadoPeloMenu(identificador: number | null | undefined, valor: string) {
+  if (!capturaDeValor(identificador) || /^\d+$/.test(valor)) return valor;
+  return valorSemCaracteresEspeciais(valor);
 }
 
 export function promptTemMascaraDeValor(prompt: string) {

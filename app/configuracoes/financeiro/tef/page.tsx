@@ -116,7 +116,7 @@ export default async function ConfiguracaoTefPage() {
               />
             ) : null}
             {plano.permitido && motor.ambiente !== "producao" ? <TefMotorCsharpPainel /> : null}
-            {plano.permitido ? <TefMenuAdministrativo /> : null}
+            {plano.permitido ? <TefMenuAdministrativo homologacao={motor.ambiente !== "producao"} /> : null}
           </section>
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold text-zinc-950">O que permanece</h2>

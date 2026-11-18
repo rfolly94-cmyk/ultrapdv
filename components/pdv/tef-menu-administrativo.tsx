@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { TefCapturaBiblioteca } from "@/components/pdv/tef-captura-biblioteca";
 import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
 import {
   campoDigitadoAdministrativo,
@@ -12,22 +13,29 @@ import {
   pedidoCancelamentoMenu,
   promptTemMascaraDeValor,
   promptValorVisivel,
-  valorSemCaracteresEspeciais,
+  valorEnviadoPeloMenu,
 } from "@/lib/pdv/tef/menu-administrativo";
 import { cobrarPeloMotorCsharp, type RespostaMotorCsharp } from "@/lib/pdv/tef/motor-csharp";
 
-export function TefMenuAdministrativo() {
+export function TefMenuAdministrativo({ homologacao = false }: { homologacao?: boolean }) {
   const [origem, setOrigem] = useState<string | null>(null);
   const [instalado, setInstalado] = useState(false);
   const [consulta, setConsulta] = useState("Consultando o ponto neste computador.");
   const [ocupado, setOcupado] = useState(false);
   const [etapa, setEtapa] = useState<RespostaMotorCsharp | null>(null);
+  const [operacao, setOperacao] = useState("Menu administrativo");
   const [resultadoVisivel, setResultadoVisivel] = useState(false);
-  const [digitado, setDigitado] = useState("");
+  const [vendaChave, setVendaChave] = useState("");
   const chaveRef = useRef("");
   const ocupadoRef = useRef(false);
   const menuAbertoRef = useRef(false);
   const resultadoAbertoRef = useRef(false);
+  const etapaRef = useRef(etapa);
+  const responderRef = useRef<(valor: string) => void>(() => {});
+  etapaRef.current = etapa;
+  responderRef.current = (valor) => {
+    void executar("responder", valor);
+  };
   const cancelarRef = useRef<() => void>(() => {});
   const sairRef = useRef<() => void>(() => {});
 
@@ -80,6 +88,7 @@ export function TefMenuAdministrativo() {
       }
       if (comando === "administrar") {
         chaveRef.current = `adm:${crypto.randomUUID()}`;
+        setVendaChave("");
         setResultadoVisivel(false);
       }
       const resposta = await cobrarPeloMotorCsharp({
@@ -87,11 +96,10 @@ export function TefMenuAdministrativo() {
         comando,
         chave: chaveRef.current,
         sessao: etapa?.sessao,
-        valor: cancelar ? "" : (campoValor ? valorSemCaracteresEspeciais(valor) : valor),
+        valor: cancelar ? "" : valorEnviadoPeloMenu(etapa?.identificador, valor),
         ...(cancelar ? { cancelar: true } : {}),
       });
       setEtapa(resposta);
-      setDigitado("");
       if (resposta.fase !== "captura") {
         setResultadoVisivel(true);
         if (resposta.erro) setConsulta(resposta.erro);
@@ -146,7 +154,21 @@ export function TefMenuAdministrativo() {
         resultadoAberto: resultadoAbertoRef.current,
         aguardando: ocupadoRef.current,
       });
-      if (decisao.acao === "ignorar") return;
+      if (decisao.acao === "ignorar") {
+        const atual = etapaRef.current;
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+        const indice = Number(event.key) - 1;
+        if (atual?.captura?.teclasAtalho && indice >= 0 && indice < atual.opcoes.length) {
+          event.preventDefault();
+          responderRef.current(atual.opcoes[indice].valor);
+          return;
+        }
+        if (event.key === "Enter" && atual?.captura && atual.opcoes.length > 0 && atual.captura.itemInicial < atual.opcoes.length) {
+          event.preventDefault();
+          responderRef.current(atual.opcoes[atual.captura.itemInicial].valor);
+        }
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       if (decisao.acao === "cancelar-menu") {
@@ -166,7 +188,7 @@ export function TefMenuAdministrativo() {
         aria-modal="true"
         aria-labelledby="tef-menu-admin-titulo"
         data-tef-modal="administrativo"
-        className="flex max-h-[min(32rem,calc(100vh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        className="flex max-h-[min(40rem,calc(100vh-2rem))] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
       >
         <div className="border-b border-zinc-200 px-5 py-4">
           <h2 id="tef-menu-admin-titulo" className="text-base font-semibold text-zinc-950">Menu administrativo</h2>
@@ -175,43 +197,34 @@ export function TefMenuAdministrativo() {
           </p>
         </div>
         <div className="space-y-2 overflow-y-auto px-5 py-4">
-          {menuAberto ? etapa?.opcoes.map((opcao) => (
+          {menuAberto ? etapa?.opcoes.map((opcao, indice) => (
             <button
               key={`${opcao.valor}-${opcao.texto}`}
               type="button"
               disabled={ocupado}
-              className="block w-full rounded-lg border border-zinc-300 px-4 py-3 text-left text-sm disabled:opacity-40"
-              onClick={() => void executar("responder", opcao.valor)}
+              className={`block w-full rounded-lg border px-4 py-3 text-left text-sm disabled:opacity-40 ${etapa.captura && etapa.captura.itemInicial < etapa.opcoes.length && indice === etapa.captura.itemInicial ? "border-zinc-900" : "border-zinc-300"}`}
+              onClick={() => {
+                setOperacao(opcao.texto || "Menu administrativo");
+                void executar("responder", opcao.valor);
+              }}
             >
-              {opcao.texto || opcao.valor}
+              {etapa.captura?.teclasAtalho ? `${indice + 1}. ` : ""}{opcao.texto || opcao.valor}
             </button>
           )) : null}
           {campoDigitado ? (
-            <form
-              className="space-y-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void executar("responder", digitado);
-              }}
-            >
-              <input
-                data-tef-captura="digitada"
-                autoFocus
-                type={etapa?.oculto ? "password" : "text"}
-                value={digitado}
-                inputMode={campoValor ? "numeric" : undefined}
-                disabled={ocupado}
-                onChange={(event) => setDigitado(campoValor ? valorSemCaracteresEspeciais(event.target.value) : event.target.value)}
-                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
-              />
-              <button
-                type="submit"
-                disabled={ocupado || digitado.trim().length === 0}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-900 disabled:opacity-40"
-              >
-                Enviar
-              </button>
-            </form>
+            <TefCapturaBiblioteca
+              operacao={operacao}
+              tipoDado={etapa?.tipoDado ?? null}
+              identificador={etapa?.identificador ?? null}
+              prompt={etapa?.captura?.promptBiblioteca || promptVisivel}
+              oculto={etapa?.oculto === true}
+              captura={etapa?.captura ?? null}
+              ocupado={ocupado}
+              homologacao={homologacao}
+              vendaChave={vendaChave}
+              onVenda={setVendaChave}
+              onEnviar={(valor) => void executar("responder", valor)}
+            />
           ) : null}
           {menuAberto && etapa && etapa.opcoes.length === 0 && !campoDigitado ? (
             <p className="text-sm text-zinc-700">{promptVisivel || "Aguardando o pinpad."}</p>

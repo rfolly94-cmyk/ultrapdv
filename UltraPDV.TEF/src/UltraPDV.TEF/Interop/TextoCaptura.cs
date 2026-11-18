@@ -37,6 +37,38 @@ public static class TextoCaptura
         }
     }
 
+    public static unsafe string ValorInicial(ref PwGetData dados)
+    {
+        fixed (byte* origem = dados.ValorInicial)
+        {
+            return Ansi(origem, 41);
+        }
+    }
+
+    public static unsafe string Confirmacao(ref PwGetData dados)
+    {
+        fixed (byte* origem = dados.MensagemConfirmacao)
+        {
+            return Ansi(origem, 84);
+        }
+    }
+
+    public static unsafe string DadoMaior(ref PwGetData dados)
+    {
+        fixed (byte* origem = dados.MensagemDadoMaior)
+        {
+            return Ansi(origem, 84);
+        }
+    }
+
+    public static unsafe string DadoMenor(ref PwGetData dados)
+    {
+        fixed (byte* origem = dados.MensagemDadoMenor)
+        {
+            return Ansi(origem, 84);
+        }
+    }
+
     public static unsafe IReadOnlyList<OpcaoCaptura> Opcoes(ref PwGetData dados)
     {
         var quantidade = Math.Min(dados.NumeroOpcoesMenu, (byte)PwGetData.CapacidadeMenu);
@@ -56,6 +88,22 @@ public static class TextoCaptura
         }
 
         return opcoes;
+    }
+
+    public static unsafe void EscreverMascara(ref PwGetData dados, string valor)
+    {
+        fixed (byte* destino = dados.MascaraCaptura)
+        {
+            Escrever(destino, 41, valor);
+        }
+    }
+
+    public static unsafe void EscreverValorInicial(ref PwGetData dados, string valor)
+    {
+        fixed (byte* destino = dados.ValorInicial)
+        {
+            Escrever(destino, 41, valor);
+        }
     }
 
     public static IReadOnlyList<OpcaoCaptura> OpcoesValidas(ref PwGetData dados)

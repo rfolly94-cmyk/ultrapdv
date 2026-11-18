@@ -18,7 +18,7 @@ test("o motor instalado com o Connector tem prioridade sobre o repositório", ()
   const versao = JSON.parse(readFileSync(new URL("../version.json", import.meta.url), "utf8"));
   const pacote = JSON.parse(readFileSync(new URL("../tef-pacote.json", import.meta.url), "utf8"));
   const nsi = readFileSync(new URL("../installer/ultrapdv-connector.nsi", import.meta.url), "utf8");
-  assert.equal(versao.version, "1.3.54");
+  assert.equal(versao.version, "1.3.56");
   assert.equal(pacote.motor, "bin/tef/motor/UltraPDV.TEF.Host.exe");
   assert.equal(pacote.executavel, undefined);
   assert.match(nsi, /bin\\tef\\motor/);

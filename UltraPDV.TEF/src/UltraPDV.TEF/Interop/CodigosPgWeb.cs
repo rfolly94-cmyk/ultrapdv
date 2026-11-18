@@ -90,11 +90,25 @@ public static class InformacaoPgWeb
     public const ushort ComprovanteEstabelecimento = 0x53;
     public const ushort ComprovanteCliente = 0x54;
     public const ushort ComprovanteReduzido = 0x55;
+    /// <summary>PWINFO_DISCOUNTAMT. Desconto, na mesma unidade de PWINFO_TOTAMNT.</summary>
+    public const ushort Desconto = 0x49;
+    /// <summary>PWINFO_CASHBACKAMT.</summary>
+    public const ushort Saque = 0x4A;
+    /// <summary>PWINFO_BOARDINGTAX.</summary>
+    public const ushort TaxaEmbarque = 0x4D;
+    /// <summary>PWINFO_TIPAMOUNT.</summary>
+    public const ushort Gorjeta = 0x4E;
+    /// <summary>PWINFO_INSTALLM1AMT.</summary>
+    public const ushort ValorPrimeiraParcela = 0x4F;
+    /// <summary>PWINFO_INSTALLMAMNT.</summary>
+    public const ushort ValorDemaisParcelas = 0x50;
     /// <summary>
     /// PWINFO_TRNORIGAMNT. Valor original de um cancelamento ou de uma confirmação de pré-autorização.
     /// Usa a mesma unidade de PWINFO_TOTAMNT.
     /// </summary>
     public const ushort ValorTransacaoOriginal = 0x60;
+    /// <summary>PWINFO_DUEAMNT.</summary>
+    public const ushort ValorDevido = 0xBF06;
 
     /// <summary>
     /// PWINFO_AUTHPOSQRCODE. Payload da carteira quando a biblioteca pede PWDAT_DSPQRCODE.
@@ -112,7 +126,26 @@ public static class InformacaoPgWeb
     public const ushort EnderecoAutorizador = 0x05;
     public const ushort PortaAutorizador = 0x07;
     public const ushort DestinoTcpIp = 0x1B;
+    /// <summary>PWINFO_AUTHMNGTUSER. Senha do lojista em PWDAT_USERAUTH.</summary>
+    public const ushort SenhaLojista = 0xF5;
+    /// <summary>PWINFO_AUTHTECHUSER. Senha técnica em PWDAT_USERAUTH.</summary>
     public const ushort UsuarioTecnico = 0xF6;
+    /// <summary>PWINFO_TRNORIGDATE.</summary>
+    public const ushort DataTransacaoOriginal = 0x57;
+    /// <summary>PWINFO_TRNORIGNSU.</summary>
+    public const ushort NsuTransacaoOriginal = 0x58;
+    /// <summary>PWINFO_TRNORIGAUTH.</summary>
+    public const ushort AutorizacaoTransacaoOriginal = 0x62;
+    /// <summary>PWINFO_TRNORIGREQNUM. Número da requisição da venda original.</summary>
+    public const ushort RequisicaoTransacaoOriginal = 0x72;
+    /// <summary>PWINFO_TRNORIGTIME.</summary>
+    public const ushort HoraTransacaoOriginal = 0x73;
+    /// <summary>PWINFO_TRNORIGLOCREF. Referência local da venda original.</summary>
+    public const ushort ReferenciaLocalOriginal = 0x78;
+    /// <summary>PWINFO_BARCODENTMODE. 1 digitado, 2 lido.</summary>
+    public const ushort ModoEntradaCodigoBarras = 0xE9;
+    /// <summary>PWINFO_BARCODE.</summary>
+    public const ushort CodigoBarras = 0xEA;
     public const ushort UsaPinPad = 0x7F01;
     public const ushort PortaPinPad = 0x7F02;
 

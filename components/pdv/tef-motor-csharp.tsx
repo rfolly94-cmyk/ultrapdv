@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { TefCapturaBiblioteca } from "@/components/pdv/tef-captura-biblioteca";
 import { descobrirUltraPdvConector } from "@/lib/impressao/descobrir";
 import { imprimirComprovanteInstalacao } from "@/app/configuracoes/financeiro/tef/imprimir-comprovante-instalacao";
+import { campoDigitadoAdministrativo } from "@/lib/pdv/tef/menu-administrativo";
 import { cobrarPeloMotorCsharp, instalacaoAceita, pontoInstaladoNaSituacao, type RespostaMotorCsharp } from "@/lib/pdv/tef/motor-csharp";
 
 export function TefMotorCsharpPainel() {
@@ -132,21 +134,26 @@ export function TefMotorCsharpPainel() {
           ))}
         </div>
       ) : null}
-      {etapa?.fase === "captura" && etapa.opcoes.length === 0 ? (
-        <form
-          className="space-y-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const valor = String(new FormData(event.currentTarget).get("captura") ?? "");
-            void continuar("responder", valor);
-          }}
-        >
-          <p className="text-sm font-semibold text-zinc-950">{etapa.prompt || etapa.erro}</p>
-          <input name="captura" type={etapa.oculto ? "password" : "text"} autoComplete="off" className="h-10 w-full rounded border border-zinc-300 px-3" />
-          <button type="submit" className="rounded bg-zinc-900 px-3 py-2 text-sm font-semibold text-white">
+      {etapa?.fase === "captura" && etapa.opcoes.length === 0 && campoDigitadoAdministrativo(etapa.tipoDado) ? (
+        <TefCapturaBiblioteca
+          operacao="Instalação do ponto"
+          tipoDado={etapa.tipoDado}
+          identificador={etapa.identificador}
+          prompt={etapa.captura?.promptBiblioteca || etapa.prompt || etapa.erro}
+          oculto={etapa.oculto}
+          captura={etapa.captura}
+          ocupado={ocupado}
+          homologacao
+          onEnviar={(valor) => void continuar("responder", valor)}
+        />
+      ) : null}
+      {etapa?.fase === "captura" && etapa.opcoes.length === 0 && !campoDigitadoAdministrativo(etapa.tipoDado) ? (
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-zinc-950">{etapa.prompt || etapa.erro || "Aguardando o pinpad."}</p>
+          <button type="button" className="rounded bg-zinc-900 px-3 py-2 text-sm font-semibold text-white" onClick={() => void continuar("responder", "")}>
             Continuar
           </button>
-        </form>
+        </div>
       ) : null}
       {etapa?.comprovanteInstalacao ? (
         <pre className="whitespace-pre-wrap rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-800">{etapa.comprovanteInstalacao}</pre>

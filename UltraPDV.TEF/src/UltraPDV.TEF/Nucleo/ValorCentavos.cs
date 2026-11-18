@@ -4,14 +4,26 @@ using UltraPDV.TEF.Interop;
 namespace UltraPDV.TEF.Nucleo;
 
 /// <summary>
-/// Converte um valor digitado em reais para o inteiro em centavos exigido por PWINFO_TOTAMNT e PWINFO_TRNORIGAMNT.
-/// A multiplicação usa decimal e só aceita frações de no máximo dois dígitos.
+/// Converte um valor em reais para o inteiro do expoente 2 exigido pelos montantes da PGWebLib.
+/// Um texto só com dígitos já está em centavos e não é multiplicado de novo.
+/// "2,00" e "R$ 2,00" viram 200. "200" permanece 200.
 /// </summary>
 public static class ValorCentavos
 {
-    public static bool EhMontante(ushort identificador) => identificador is
-        InformacaoPgWeb.ValorTotal or
-        InformacaoPgWeb.ValorTransacaoOriginal;
+    private static readonly HashSet<ushort> Montantes =
+    [
+        InformacaoPgWeb.ValorTotal,
+        InformacaoPgWeb.Desconto,
+        InformacaoPgWeb.Saque,
+        InformacaoPgWeb.TaxaEmbarque,
+        InformacaoPgWeb.Gorjeta,
+        InformacaoPgWeb.ValorPrimeiraParcela,
+        InformacaoPgWeb.ValorDemaisParcelas,
+        InformacaoPgWeb.ValorTransacaoOriginal,
+        InformacaoPgWeb.ValorDevido,
+    ];
+
+    public static bool EhMontante(ushort identificador) => Montantes.Contains(identificador);
 
     public static bool Tentar(string? entrada, out string centavos)
     {
